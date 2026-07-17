@@ -354,6 +354,31 @@ def _fetch_brent_history() -> Dict:
         return {}
 
 
+def _fetch_hang_seng_history() -> Dict:
+    """Fetch Hang Seng weekly/monthly change."""
+    import yfinance as yf
+    try:
+        hist = yf.Ticker("^HSI").history(period="3mo")
+        if hist.empty:
+            return {}
+        closes = hist["Close"].dropna()
+        current = float(closes.iloc[-1])
+
+        def _pct(n: int) -> Optional[float]:
+            if len(closes) > n:
+                prev = float(closes.iloc[-n - 1])
+                return round((current - prev) / prev * 100, 2) if prev else None
+            return None
+
+        return {
+            "hang_seng_chg_week":  _pct(5),
+            "hang_seng_chg_month": _pct(21),
+        }
+    except Exception as e:
+        logger.debug(f"Hang Seng history fetch failed: {e}")
+        return {}
+
+
 def _fetch_nasdaq_history() -> Dict:
     """Fetch Nasdaq weekly/monthly change."""
     import yfinance as yf
@@ -641,9 +666,10 @@ def _fetch_yf_prices() -> Dict[str, float]:
         "^INDIAVIX":  "vix",
         "^NSEI":      "nifty",
         "^IXIC":      "nasdaq",
+        "^HSI":       "hang_seng",
     }
     results: Dict[str, float] = {}
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         futures = {ex.submit(_fetch_single_ticker, sym, key): key
                    for sym, key in tickers_map.items()}
         for fut in as_completed(futures):
@@ -680,10 +706,12 @@ async def _build_intel() -> Dict:
     vix   = yf_data.get("vix",   15.0)
     nifty = yf_data.get("nifty", 24000.0)
     nasdaq = yf_data.get("nasdaq", 0.0)
-    brent_chg  = yf_data.get("brent_chg_pct",  0.0)
-    vix_chg    = yf_data.get("vix_chg_pct",    0.0)
-    nifty_chg  = yf_data.get("nifty_chg_pct",  0.0)
-    nasdaq_chg = yf_data.get("nasdaq_chg_pct", 0.0)
+    hang_seng = yf_data.get("hang_seng", 0.0)
+    brent_chg     = yf_data.get("brent_chg_pct",     0.0)
+    vix_chg       = yf_data.get("vix_chg_pct",       0.0)
+    nifty_chg     = yf_data.get("nifty_chg_pct",     0.0)
+    nasdaq_chg    = yf_data.get("nasdaq_chg_pct",    0.0)
+    hang_seng_chg = yf_data.get("hang_seng_chg_pct", 0.0)
     nasdaq_prev = yf_data.get("nasdaq_prev", nasdaq)
 
     # Nasdaq absolute point change (for Nifty correlation)
@@ -704,11 +732,28 @@ async def _build_intel() -> Dict:
         nasdaq_nifty_color = "#ef4444"
         nasdaq_nifty_signal = "Bearish for Nifty"
     else:
-        nifty_impact_low  = 0
-        nifty_impact_high = 0
         nasdaq_nifty_label = "Neutral"
         nasdaq_nifty_color = "#94a3b8"
         nasdaq_nifty_signal = "Neutral"
+
+    # Hang Seng → Nifty projected impact (% based)
+    # +1% HS → Nifty +50 to +100 pts | -1% HS → Nifty -70 to -150 pts
+    if hang_seng_chg > 0:
+        hs_nifty_low  = round(hang_seng_chg * 50)
+        hs_nifty_high = round(hang_seng_chg * 100)
+        hs_nifty_label  = f"+{hs_nifty_low} to +{hs_nifty_high} pts"
+        hs_nifty_color  = "#22c55e"
+        hs_nifty_signal = "Bullish for Nifty"
+    elif hang_seng_chg < 0:
+        hs_nifty_low  = round(hang_seng_chg * 70)
+        hs_nifty_high = round(hang_seng_chg * 150)
+        hs_nifty_label  = f"{hs_nifty_low} to {hs_nifty_high} pts"
+        hs_nifty_color  = "#ef4444"
+        hs_nifty_signal = "Bearish for Nifty"
+    else:
+        hs_nifty_label  = "Neutral"
+        hs_nifty_color  = "#94a3b8"
+        hs_nifty_signal = "Neutral"
 
     # Phase 2: parallel GIFT + history fetches
     gift_task          = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
@@ -717,8 +762,9 @@ async def _build_intel() -> Dict:
     nasdaq_hist_task   = loop.run_in_executor(None, _fetch_nasdaq_history)
     nifty_hist_task    = loop.run_in_executor(None, _fetch_nifty_history)
     gift_hist_task     = loop.run_in_executor(None, _fetch_gift_nifty_history)
-    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist = await asyncio.gather(
-        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task)
+    hs_hist_task       = loop.run_in_executor(None, _fetch_hang_seng_history)
+    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist = await asyncio.gather(
+        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task)
 
     expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
@@ -756,6 +802,12 @@ async def _build_intel() -> Dict:
         "nasdaq_nifty_label": nasdaq_nifty_label,
         "nasdaq_nifty_color": nasdaq_nifty_color,
         "nasdaq_nifty_signal": nasdaq_nifty_signal,
+        "hang_seng": round(hang_seng, 2), "hang_seng_chg_pct": hang_seng_chg,
+        "hang_seng_chg_week":  hs_hist.get("hang_seng_chg_week"),
+        "hang_seng_chg_month": hs_hist.get("hang_seng_chg_month"),
+        "hs_nifty_label": hs_nifty_label,
+        "hs_nifty_color": hs_nifty_color,
+        "hs_nifty_signal": hs_nifty_signal,
         "gift_nifty": round(gift_nifty, 2), "gift_premium": gift_premium,
         "gift_chg_week":  gift_hist.get("gift_chg_week"),
         "gift_chg_month": gift_hist.get("gift_chg_month"),

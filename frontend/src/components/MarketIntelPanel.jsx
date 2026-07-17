@@ -47,11 +47,11 @@ const MarketIntelPanel = ({ onClose }) => {
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
   const [ts,      setTs]      = useState(null);
-  const [brentTf,  setBrentTf]  = useState('D');
-  const [vixTf,    setVixTf]    = useState('D');
-  const [nasdaqTf, setNasdaqTf] = useState('D');
-  const [niftyTf,  setNiftyTf]  = useState('D');
-  const [giftTf,   setGiftTf]   = useState('D');
+  const [brentTf,    setBrentTf]    = useState('D');
+  const [vixTf,      setVixTf]      = useState('D');
+  const [nasdaqTf,   setNasdaqTf]   = useState('D');
+  const [hangSengTf, setHangSengTf] = useState('D');
+  const [giftTf,     setGiftTf]     = useState('D');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,15 +77,15 @@ const MarketIntelPanel = ({ onClose }) => {
   const vixChg   = vixTf === 'W' ? data?.vix_chg_week
                  : vixTf === 'M' ? data?.vix_chg_month
                  : data?.vix_chg_pct;
-  const nasdaqChg = nasdaqTf === 'W' ? data?.nasdaq_chg_week
-                  : nasdaqTf === 'M' ? data?.nasdaq_chg_month
-                  : data?.nasdaq_chg_pct;
-  const niftyChg  = niftyTf === 'W' ? data?.nifty_chg_week
-                  : niftyTf === 'M' ? data?.nifty_chg_month
-                  : data?.nifty_chg_pct;
-  const giftChg   = giftTf === 'W' ? data?.gift_chg_week
-                  : giftTf === 'M' ? data?.gift_chg_month
-                  : null; // Day = just show premium
+  const nasdaqChg   = nasdaqTf === 'W' ? data?.nasdaq_chg_week
+                    : nasdaqTf === 'M' ? data?.nasdaq_chg_month
+                    : data?.nasdaq_chg_pct;
+  const hangSengChg = hangSengTf === 'W' ? data?.hang_seng_chg_week
+                    : hangSengTf === 'M' ? data?.hang_seng_chg_month
+                    : data?.hang_seng_chg_pct;
+  const giftChg     = giftTf === 'W' ? data?.gift_chg_week
+                    : giftTf === 'M' ? data?.gift_chg_month
+                    : null; // Day = just show premium
 
   const chgColor = (v) =>
     v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : C.textMuted;
@@ -246,19 +246,19 @@ const MarketIntelPanel = ({ onClose }) => {
                 </div>
               </div>
 
-              {/* Other cards — Nifty 50, Nasdaq, GIFT, Regulatory, Bias */}
+              {/* Other cards — Hang Seng, GIFT Nifty, Regulatory, Bias */}
               {[
                 {
-                  label: 'Nifty 50',
-                  value: fmt(data.nifty, 0),
-                  sub: fmtPct(data.nifty_chg_pct),
-                  subColor: chgColor(data.nifty_chg_pct),
-                  icon: <TrendUp size={14} />,
-                  tf: niftyTf, setTf: setNiftyTf,
-                  tfSub: niftyTf === 'D' ? fmtPct(niftyChg) + ' (Day)'
-                       : niftyTf === 'W' ? fmtPct(niftyChg) + ' (Week)'
-                       : fmtPct(niftyChg) + ' (Month)',
-                  tfSubColor: chgColor(niftyChg),
+                  label: 'Hang Seng',
+                  value: data.hang_seng > 0 ? data.hang_seng.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—',
+                  sub: fmtPct(hangSengChg),
+                  subColor: chgColor(hangSengChg),
+                  icon: <Globe size={14} />,
+                  tf: hangSengTf, setTf: setHangSengTf,
+                  tfSub: hangSengTf === 'D' ? fmtPct(hangSengChg) + ' (Day)'
+                       : hangSengTf === 'W' ? fmtPct(hangSengChg) + ' (Week)'
+                       : fmtPct(hangSengChg) + ' (Month)',
+                  tfSubColor: chgColor(hangSengChg),
                 },
                 {
                   label: 'GIFT Nifty',
@@ -339,6 +339,15 @@ const MarketIntelPanel = ({ onClose }) => {
                       <div className="text-[9px] mt-0.5" style={{ color: data.nasdaq_nifty_color }}>{data.nasdaq_nifty_signal}</div>
                     </div>
                   )}
+                  {data.hang_seng > 0 && data.hang_seng_chg_pct !== 0 && (
+                    <div className="text-center">
+                      <div className="text-[9px] uppercase tracking-widest" style={{ color: C.textMuted }}>Hang Seng → Nifty</div>
+                      <div className="text-base font-bold font-mono mt-0.5" style={{ color: data.hs_nifty_color }}>
+                        {data.hs_nifty_label}
+                      </div>
+                      <div className="text-[9px] mt-0.5" style={{ color: data.hs_nifty_color }}>{data.hs_nifty_signal}</div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -374,6 +383,47 @@ const MarketIntelPanel = ({ onClose }) => {
                         </span>
                         <span style={{ color: C.textMuted }}>→</span>
                         <span className="font-bold font-mono" style={{ color: data.nasdaq_nifty_color }}>{data.nasdaq_nifty_label}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+              </div>
+            )}
+
+            {/* Hang Seng ↔ Nifty Correlation Strip */}
+            {data.hang_seng > 0 && (
+              <div className="rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2"
+                style={{ background: C.cardBg, border: `1px solid ${C.border}` }}
+                data-testid="hangseng-nifty-correlation">
+                <div className="flex items-center gap-2 shrink-0">
+                  <Globe size={13} className="text-orange-400" />
+                  <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>Hang Seng ↔ Nifty Correlation</span>
+                </div>
+                <div className="flex gap-4 flex-wrap text-[9px]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold" style={{ color: '#22c55e' }}>HS +1%</span>
+                    <span style={{ color: C.textMuted }}>→</span>
+                    <span style={{ color: C.textSecond }}>Nifty avg <span className="font-bold text-emerald-400">+50 to +100 pts</span></span>
+                  </div>
+                  <div className="h-3 w-px self-center" style={{ background: C.border }} />
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold" style={{ color: '#ef4444' }}>HS -1%</span>
+                    <span style={{ color: C.textMuted }}>→</span>
+                    <span style={{ color: C.textSecond }}>Nifty avg <span className="font-bold text-red-400">-70 to -150 pts</span></span>
+                  </div>
+                  {data.hang_seng_chg_pct !== 0 && (
+                    <>
+                      <div className="h-3 w-px self-center" style={{ background: C.border }} />
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold" style={{ color: C.textSecond }}>Today HS</span>
+                        <span className="font-bold font-mono" style={{ color: data.hs_nifty_color }}>
+                          {data.hang_seng_chg_pct > 0 ? '+' : ''}{data.hang_seng_chg_pct?.toFixed(2)}%
+                        </span>
+                        <span style={{ color: C.textMuted }}>→</span>
+                        <span className="font-bold font-mono" style={{ color: data.hs_nifty_color }}>{data.hs_nifty_label}</span>
                       </div>
                     </>
                   )}
