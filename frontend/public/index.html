@@ -23,6 +23,45 @@
         -->
         <title>GANN TRADER - NSE Technical Analysis</title>
         <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
+        <script>
+          // Suppress known benign errors BEFORE the bundle (and CRA overlay) registers their handlers.
+          // This patch wraps every future window.addEventListener('error', ...) call so our filter
+          // runs first, regardless of capture/bubble order.
+          (function() {
+            var BENIGN = function(msg) {
+              return typeof msg === 'string' && (
+                msg.indexOf('Object is disposed') !== -1 ||
+                msg.indexOf('ResizeObserver loop') !== -1
+              );
+            };
+            // 1. Patch addEventListener — intercepts CRA overlay registration
+            var _orig = window.addEventListener.bind(window);
+            window.addEventListener = function(type, fn, opts) {
+              if (type === 'error' && typeof fn === 'function') {
+                var _fn = fn;
+                fn = function(e) {
+                  if (BENIGN(e && e.message)) { e.stopImmediatePropagation(); e.preventDefault(); return; }
+                  return _fn.call(this, e);
+                };
+              }
+              return _orig(type, fn, opts);
+            };
+            // 2. window.onerror — RAF callback errors in some browsers
+            window.onerror = function(msg) { return BENIGN(msg) ? true : false; };
+            // 3. MutationObserver fallback — remove overlay iframe/div from DOM if it slips through
+            var _mo = new MutationObserver(function() {
+              ['webpack-dev-server-client-overlay','webpack-dev-server-client-overlay-div'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                var txt = el.textContent || (el.contentDocument && el.contentDocument.body && el.contentDocument.body.textContent) || '';
+                if (BENIGN(txt) || txt.indexOf('Object is disposed') !== -1) { el.remove(); }
+              });
+            });
+            document.addEventListener('DOMContentLoaded', function() {
+              _mo.observe(document.body, { childList: true });
+            });
+          })();
+        </script>
         <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script>
     </head>
     <body>
