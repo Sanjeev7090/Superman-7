@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend-only verification of JSX compilation fix and Hang Seng feature in Market Intel panel. All 5 test objectives passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_32.json"],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "MarketIntelPanel.jsx (945 lines) compiles cleanly. Hang Seng card is in the 7-card grid at position 4 (after Brent, VIX, Nasdaq). Hang Seng correlation strip has data-testid='hangseng-nifty-correlation'. Market Intel modal opened via data-testid='news-btn' (Newspaper icon in top bar). The INTEL tab in left sidebar opens a different sidebar panel (Regulatory Watchdog, Sectors, Top Movers), NOT the MarketIntelPanel modal.",
+  "test_results": {
+    "app_compiles_no_jsx_errors": "PASS - No error overlay, no iframe error, dashboard loads cleanly",
+    "market_intel_panel_opens": "PASS - Panel opens via news-btn without crashing",
+    "hang_seng_card_visible": "PASS - HANG SENG card visible in 7-card grid, showing 24,562 / -1.78% (Day), positioned after Nasdaq",
+    "hang_seng_dwm_toggle": "PASS - D/W/M toggle functional: Day shows -1.78%, Week shows +1.60%",
+    "hang_seng_nifty_correlation_strip": "PASS - data-testid=hangseng-nifty-correlation visible, shows HS +1% → +50 to +100 pts, HS -1% → -70 to -150 pts, Today HS -1.78% → -125 to -267 pts"
+  }
+}

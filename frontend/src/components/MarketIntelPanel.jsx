@@ -390,9 +390,6 @@ const MarketIntelPanel = ({ onClose }) => {
               </div>
             )}
 
-              </div>
-            )}
-
             {/* Hang Seng ↔ Nifty Correlation Strip */}
             {data.hang_seng > 0 && (
               <div className="rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2"
