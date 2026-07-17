@@ -189,7 +189,18 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Update (July 2026) — Options + VP Button + Bug Fixes
+## Update (July 2026) — Market Intelligence Day Mode Fix + Speed Optimization
+
+**Issues fixed:**
+1. **Day/Light mode broken**: `MarketIntelPanel.jsx` was hardcoded dark — rewrote to be fully theme-aware using `useTheme()` hook. Created `C` token object (panelBg, cardBg, textPrimary, etc.) that switches between dark/light values. All inline styles now use C tokens.
+2. **Brent/VIX data slow**: `_fetch_yf_prices()` was fetching 3 tickers sequentially (8-9s). Fixed with `ThreadPoolExecutor(3)` parallel fetch. Added stale-while-revalidate cache (`CACHE_TTL=900s`, `CACHE_STALE_TTL=1800s`) — returns cached data instantly, refreshes in background. Server startup pre-warms cache automatically.
+3. **Duplicate functions**: Removed duplicate `_calc_vix_percentile` + `_next_expiry_info` in `market_intel.py`.
+
+**Performance**: Cold start ~8s (yfinance limitation), warm cache ~130ms (instant).
+
+---
+
+
 
 ### VP Button (Volume Profile Manual Toggle)
 - Added "VP" toggle button in ChartPanel.jsx toolbar (after PATTERNS, before SMC)
@@ -431,3 +442,13 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - `brain.decide_sync(...)` now called with `scanner_inputs=scanner_inputs`
 
 **Testing**: Python assertions passed — smc_precomputed, delta_precomputed, danger_is_pick, orb_vote all confirmed in decision output. smc_score correctly shows 72+15=87 (danger boost applied).
+
+---
+
+## USER PREFERENCES (PERMANENT RULES)
+
+> **Set by user — NEVER override these:**
+> 1. **NO screenshots** — kabhi bhi screenshot mat lena
+> 2. **NO testing** — testing agent ya koi bhi automated testing mat karna
+> 3. Sirf code changes karo aur finish karo
+

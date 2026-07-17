@@ -79,8 +79,8 @@ const SMC_TF_FEATURE_MAP = {
 // ── Candlestick Pattern Detection ─────────────────────────────────
 // Detects classical Japanese candlestick patterns and tags each bar so the
 // chart can color-code candles:
-//   YELLOW → Bullish reversal (Hammer / Inv Hammer / Bull Engulfing / Morning Star / Piercing Line)
-//   ORANGE → Bearish reversal (Shooting Star / Bear Engulfing / Evening Star / Dark Cloud Cover)
+//   YELLOW → Bullish reversal (Hammer / Inverted Hammer / Bull Engulfing / Morning Star / Piercing Line)
+//   ORANGE → Bearish reversal (Bearish Engulfing / Evening Star / Dark Cloud Cover)
 //   BLUE   → Continuation    (Marubozu / Three White Soldiers / Three Black Crows)
 const PATTERN_COLORS = {
   'bullish-reversal': '#FBBF24', // yellow-400
@@ -115,22 +115,16 @@ function detectCandlePatterns(bars) {
 
     // Small-body candles with directional wicks
     if (bod > 0 && bod <= r * 0.4) {
-      // Hammer — long lower wick, tiny upper wick → bullish reversal (after downtrend)
+      // Hammer — long lower wick, tiny upper wick → bullish reversal
       if (lw >= 2 * bod && uw <= bod) {
-        // Context: prior downtrend (last 3 bars trending down)
-        if (i >= 3 && bars[i - 1].close < bars[i - 3].close) {
-          tags[i] = { name: 'Hammer', category: 'bullish-reversal' };
-        } else if (!tags[i]) {
-          tags[i] = { name: 'Hammer (weak)', category: 'bullish-reversal' };
-        }
+        tags[i] = { name: 'Hammer', category: 'bullish-reversal' };
       }
-      // Inverted Hammer / Shooting Star — long upper wick, tiny lower wick
+      // Inverted Hammer — long upper wick, tiny lower wick (downtrend context only)
       if (uw >= 2 * bod && lw <= bod) {
-        // Context: uptrend → Shooting Star (bearish); downtrend → Inverted Hammer (bullish)
         const uptrend = i >= 3 && bars[i - 1].close > bars[i - 3].close;
-        tags[i] = uptrend
-          ? { name: 'Shooting Star', category: 'bearish-reversal' }
-          : { name: 'Inverted Hammer', category: 'bullish-reversal' };
+        if (!uptrend) {
+          tags[i] = { name: 'Inverted Hammer', category: 'bullish-reversal' };
+        }
       }
     }
 
@@ -762,16 +756,14 @@ function computeSMCData(bars) {
 
 // ═══════════════════════════════════════════════════════════════════
 // BLACK BOX INDICATOR
-// Always draws:
-//  • Last pivot LOW  → Demand / Bull Black Box (extends to right edge)
-//  • Last pivot HIGH → Supply / Bear Black Box (extends to right edge)
-//  • HH / HL / LH / LL labels on all recent swings
-//  • BOS dashed line + label
-//  • Entry, SL, Target lines
+// Strategy (image-accurate):
+//  BULL Black Box = HL (Higher Low) → HH/BOS level (full consolidation zone)
+//  BEAR Black Box = LH (Lower High) → LL/BOS level (full consolidation zone)
+//  Extends to right edge of chart — represents "Previous Structure Zone"
 // ═══════════════════════════════════════════════════════════════════
 function computeBlackBox(bars) {
   if (!bars || bars.length < 15) return null;
-  const n = bars.length;
+  const n  = bars.length;
   const lb = Math.max(2, Math.min(3, Math.floor(n / 30)));
 
   // ── Detect pivots ──────────────────────────────────────────────
@@ -811,30 +803,56 @@ function computeBlackBox(bars) {
   if (hhC >= 1 && hlC >= 1) trend = 'UPTREND';
   else if (lhC >= 1 && llC >= 1) trend = 'DOWNTREND';
 
-  // ── ALWAYS build boxes from most recent pivot H & L ────────────
   const boxes = [];
 
-  // ── Bull / Demand Box — last significant pivot LOW ─────────────
-  const lastPL = pivotLows[pivotLows.length - 1];
-  if (lastPL) {
-    const bHigh = Math.max(lastPL.open, lastPL.close); // body top
-    const bLow  = lastPL.low;                          // wick bottom
-    // BOS: price later closed above the nearest pivot high after this low
-    const nextPH = pivotHighs.find(h => h.idx > lastPL.idx);
+  // ──────────────────────────────────────────────────────────────
+  // BULL Black Box — Demand Zone
+  // Formula: boxLow = last HL price | boxHigh = highest high in
+  //          range from HL to next pivot high (BOS candidate)
+  // ──────────────────────────────────────────────────────────────
+  const recentHLs = pivotLows.filter(l => l.label === 'HL');
+  const lastHL    = recentHLs.length > 0 ? recentHLs[recentHLs.length - 1] : null;
+
+  if (lastHL) {
+    // BOS candidate = first pivot high after this HL
+    const bosCandidate = pivotHighs.find(h => h.idx > lastHL.idx);
+
+    // Box boundaries
+    let boxHigh, boxLow;
+    boxLow = lastHL.price;  // HL level = bottom of Black Box
+
+    if (bosCandidate) {
+      // Top of box = highest high in the consolidation range (HL → BOS candidate)
+      let rangeHigh = bosCandidate.price;
+      for (let i = lastHL.idx; i <= bosCandidate.idx; i++)
+        rangeHigh = Math.max(rangeHigh, bars[i].high);
+      boxHigh = rangeHigh;
+    } else {
+      // No pivot high after HL — scan to the end for highest high
+      let rangeHigh = lastHL.high;
+      for (let i = lastHL.idx; i < n; i++)
+        rangeHigh = Math.max(rangeHigh, bars[i].high);
+      boxHigh = rangeHigh;
+    }
+
+    // BOS: did price close above bosCandidate?
     let bos = false, bosLevel = null;
-    if (nextPH) {
-      bosLevel = nextPH.price;
-      for (let j = nextPH.idx + 1; j < n; j++) {
-        if (bars[j].close > nextPH.price) { bos = true; break; }
+    if (bosCandidate) {
+      bosLevel = bosCandidate.price;
+      for (let j = bosCandidate.idx + 1; j < n; j++) {
+        if (bars[j].close > bosCandidate.price) { bos = true; break; }
       }
     }
-    const curr = bars[n - 1];
-    const inBox = curr.low <= bHigh * 1.003 && curr.close >= bLow * 0.997;
+
+    const curr   = bars[n - 1];
+    const inBox  = curr.low <= boxHigh * 1.003 && curr.close >= boxLow * 0.997;
+
+    // Price action confirmation in box area (last 5 bars)
     let confirm = null;
     for (let j = Math.max(0, n - 5); j < n; j++) {
       const b = bars[j];
-      if (b.low > bHigh * 1.02) continue;
-      const body = Math.abs(b.close - b.open);
+      if (b.low > boxHigh * 1.02) continue;
+      const body  = Math.abs(b.close - b.open);
       const lWick = Math.min(b.open, b.close) - b.low;
       if (b.close > b.open && lWick > body * 1.5) { confirm = 'Pin Bar'; break; }
       if (j > 0) {
@@ -843,36 +861,64 @@ function computeBlackBox(bars) {
           { confirm = 'Engulfing'; break; }
       }
     }
+
+    // Target = next significant pivot high above the box
+    const targetPH = pivotHighs.filter(h => h.idx > (bosCandidate?.idx || lastHL.idx) && h.price > boxHigh);
+    const target   = targetPH.length > 0 ? targetPH[0].price
+                   : bosCandidate ? bosCandidate.price * 1.015 : null;
+
     boxes.push({
-      type: 'bull', label: 'Demand Zone',
-      boxHigh: bHigh, boxLow: bLow, boxMid: (bHigh + bLow) / 2,
+      type: 'bull', label: 'Black Box (Demand)',
+      boxHigh, boxLow, boxMid: (boxHigh + boxLow) / 2,
       bos, bosLevel, confirm, inBox,
-      target: nextPH ? nextPH.price : null,
-      sl: bLow * 0.999,
-      startTs: bars[Math.max(0, lastPL.idx - 1)].timestamp / 1000,
+      target,
+      sl: boxLow * 0.998,
+      startTs: bars[Math.max(0, lastHL.idx - 3)].timestamp / 1000,
     });
   }
 
-  // ── Bear / Supply Box — last significant pivot HIGH ────────────
-  const lastPH = pivotHighs[pivotHighs.length - 1];
-  if (lastPH) {
-    const bHigh = lastPH.high;                          // wick top
-    const bLow  = Math.min(lastPH.open, lastPH.close);  // body bottom
-    const nextPL = pivotLows.find(l => l.idx > lastPH.idx);
+  // ──────────────────────────────────────────────────────────────
+  // BEAR Black Box — Supply Zone
+  // Formula: boxHigh = last LH price | boxLow = lowest low in
+  //          range from LH to next pivot low (BOS candidate)
+  // ──────────────────────────────────────────────────────────────
+  const recentLHs = pivotHighs.filter(h => h.label === 'LH');
+  const lastLH    = recentLHs.length > 0 ? recentLHs[recentLHs.length - 1] : null;
+
+  if (lastLH) {
+    const bosCandidate = pivotLows.find(l => l.idx > lastLH.idx);
+
+    let boxHigh, boxLow;
+    boxHigh = lastLH.price;  // LH level = top of Black Box
+
+    if (bosCandidate) {
+      let rangeLow = bosCandidate.price;
+      for (let i = lastLH.idx; i <= bosCandidate.idx; i++)
+        rangeLow = Math.min(rangeLow, bars[i].low);
+      boxLow = rangeLow;
+    } else {
+      let rangeLow = lastLH.low;
+      for (let i = lastLH.idx; i < n; i++)
+        rangeLow = Math.min(rangeLow, bars[i].low);
+      boxLow = rangeLow;
+    }
+
     let bos = false, bosLevel = null;
-    if (nextPL) {
-      bosLevel = nextPL.price;
-      for (let j = nextPL.idx + 1; j < n; j++) {
-        if (bars[j].close < nextPL.price) { bos = true; break; }
+    if (bosCandidate) {
+      bosLevel = bosCandidate.price;
+      for (let j = bosCandidate.idx + 1; j < n; j++) {
+        if (bars[j].close < bosCandidate.price) { bos = true; break; }
       }
     }
-    const curr = bars[n - 1];
-    const inBox = curr.high >= bLow * 0.997 && curr.close <= bHigh * 1.003;
+
+    const curr  = bars[n - 1];
+    const inBox = curr.high >= boxLow * 0.997 && curr.close <= boxHigh * 1.003;
+
     let confirm = null;
     for (let j = Math.max(0, n - 5); j < n; j++) {
       const b = bars[j];
-      if (b.high < bLow * 0.98) continue;
-      const body = Math.abs(b.close - b.open);
+      if (b.high < boxLow * 0.98) continue;
+      const body  = Math.abs(b.close - b.open);
       const uWick = b.high - Math.max(b.open, b.close);
       if (b.close < b.open && uWick > body * 1.5) { confirm = 'Pin Bar'; break; }
       if (j > 0) {
@@ -881,13 +927,18 @@ function computeBlackBox(bars) {
           { confirm = 'Engulfing'; break; }
       }
     }
+
+    const targetPL = pivotLows.filter(l => l.idx > (bosCandidate?.idx || lastLH.idx) && l.price < boxLow);
+    const target   = targetPL.length > 0 ? targetPL[0].price
+                   : bosCandidate ? bosCandidate.price * 0.985 : null;
+
     boxes.push({
-      type: 'bear', label: 'Supply Zone',
-      boxHigh: bHigh, boxLow: bLow, boxMid: (bHigh + bLow) / 2,
+      type: 'bear', label: 'Black Box (Supply)',
+      boxHigh, boxLow, boxMid: (boxHigh + boxLow) / 2,
       bos, bosLevel, confirm, inBox,
-      target: nextPL ? nextPL.price : null,
-      sl: bHigh * 1.001,
-      startTs: bars[Math.max(0, lastPH.idx - 1)].timestamp / 1000,
+      target,
+      sl: boxHigh * 1.002,
+      startTs: bars[Math.max(0, lastLH.idx - 3)].timestamp / 1000,
     });
   }
 
@@ -2239,6 +2290,19 @@ const ChartPanel = ({
     });
 
     // ── Draw each Black Box ────────────────────────────────────
+    // Collect all right-side labels first to avoid overlap
+    const rightLabels = [];  // {y, text, color, bg}
+    const LABEL_H = 13;
+
+    const claimY = (yRaw) => {
+      if (yRaw == null) return null;
+      let y = yRaw;
+      for (const lbl of rightLabels) {
+        if (Math.abs(y - lbl.y) < LABEL_H + 2) y = lbl.y + LABEL_H + 3;
+      }
+      return y;
+    };
+
     boxes.forEach(box => {
       const isBull = box.type === 'bull';
       const xStart = toX(box.startTs);
@@ -2248,133 +2312,97 @@ const ChartPanel = ({
 
       if (yHigh == null || yLow == null) return;
 
-      // Start from xStart (or 0 if pivot is before visible range)
+      const PRICE_SCALE_W = 82; // right price axis width — keep box from overlapping it
       const left  = (xStart != null && xStart > 0) ? xStart : 0;
-      const right = W - 6;                              // extend to right edge
+      const right = W - PRICE_SCALE_W;
       const boxW  = Math.max(4, right - left);
       const top   = Math.min(yHigh, yLow);
       const boxH  = Math.max(4, Math.abs(yHigh - yLow));
 
       ctx.save();
-
-      // ── Pure black transparent fill ──────────────────────────
-      ctx.fillStyle   = 'rgba(0, 0, 0, 0.60)';
-      ctx.strokeStyle = isBull
-        ? 'rgba(34, 197, 94, 0.90)'
-        : 'rgba(248,113,113, 0.90)';
-      ctx.lineWidth = 1.8;
+      // Tinted fill — low opacity so candles stay visible
+      ctx.fillStyle   = isBull ? 'rgba(34,197,94,0.10)' : 'rgba(248,113,113,0.10)';
+      ctx.strokeStyle = isBull ? 'rgba(34,197,94,0.90)' : 'rgba(248,113,113,0.90)';
+      ctx.lineWidth   = 1.8;
       ctx.fillRect(left, top, boxW, boxH);
       ctx.strokeRect(left, top, boxW, boxH);
 
-      // ── Label inside box ──────────────────────────────────────
       ctx.fillStyle = 'rgba(255,255,255,0.90)';
       ctx.font = 'bold 8px monospace';
       ctx.fillText('BLACK BOX', left + 5, top + 13);
       ctx.fillStyle = isBull ? 'rgba(34,197,94,0.85)' : 'rgba(248,113,113,0.85)';
       ctx.font = '7px monospace';
       ctx.fillText(box.label, left + 5, top + 23);
-
-      // Confirmation badge
       if (box.confirm) {
         ctx.fillStyle = 'rgba(250,204,21,0.95)';
         ctx.font = 'bold 7px monospace';
         ctx.fillText(`✓ ${box.confirm}`, left + 5, top + 33);
       }
-
-      // ── Midpoint dashed line ──────────────────────────────────
       if (yMid != null) {
         ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.30)';
         ctx.lineWidth   = 0.8;
-        ctx.beginPath();
-        ctx.moveTo(left, yMid);
-        ctx.lineTo(right, yMid);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(left, yMid); ctx.lineTo(right, yMid); ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(200,200,200,0.55)';
-        ctx.font = '6px monospace';
-        ctx.fillText('50%', right + 2, yMid + 2);
       }
       ctx.restore();
 
-      // ── BOS level line ────────────────────────────────────────
-      if (box.bosLevel) {
-        const yBOS = toY(box.bosLevel);
-        if (yBOS != null) {
-          ctx.save();
-          ctx.setLineDash([6, 4]);
-          ctx.strokeStyle = 'rgba(251,191,36,0.80)';
-          ctx.lineWidth   = 1.2;
-          ctx.beginPath();
-          ctx.moveTo(left, yBOS);
-          ctx.lineTo(right, yBOS);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = 'rgba(251,191,36,0.95)';
-          ctx.font      = 'bold 8px monospace';
-          const bosLbl  = box.bos ? 'BOS ✓' : 'BOS';
-          const tw = ctx.measureText(bosLbl).width;
-          ctx.fillText(bosLbl, right - tw - 2, yBOS - 2);
-          ctx.restore();
-        }
-      }
+      // ── Helper: draw dashed line + right label pill ──────────
+      const drawLevel = (price, lineColor, lblText, lblBg, lblTxt) => {
+        const yRaw = toY(price);
+        if (yRaw == null || yRaw < 0 || yRaw > H) return;
+        // Line stops before price scale
+        ctx.save();
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(left, yRaw); ctx.lineTo(right, yRaw); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+        // Label queued for collision-safe draw later
+        const y = claimY(yRaw);
+        if (y != null) rightLabels.push({ y, text: lblText, bg: lblBg, txt: lblTxt, yLine: yRaw });
+      };
 
-      // ── Target line (green dashed) ────────────────────────────
-      if (box.target) {
-        const yT = toY(box.target);
-        if (yT != null) {
-          ctx.save();
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = 'rgba(34,197,94,0.65)';
-          ctx.lineWidth   = 1;
-          ctx.beginPath();
-          ctx.moveTo(left, yT);
-          ctx.lineTo(right, yT);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = 'rgba(34,197,94,0.95)';
-          ctx.font      = 'bold 8px monospace';
-          const tLbl = isBull ? `▲ Target ${box.target.toFixed(0)}` : `▼ Target ${box.target.toFixed(0)}`;
-          const tw = ctx.measureText(tLbl).width;
-          ctx.fillText(tLbl, right - tw - 2, yT - 2);
-          ctx.restore();
-        }
-      }
+      if (box.bosLevel) drawLevel(box.bosLevel, 'rgba(251,191,36,0.75)',
+        box.bos ? `BOS ✓` : `BOS`, 'rgba(251,191,36,0.85)', '#000');
+      if (box.target)   drawLevel(box.target,   'rgba(34,197,94,0.65)',
+        `${isBull ? '▲' : '▼'} Target ${box.target.toFixed(0)}`, 'rgba(34,197,94,0.85)', '#fff');
+      if (box.sl)       drawLevel(box.sl,        'rgba(239,68,68,0.65)',
+        `✕ SL ${box.sl.toFixed(0)}`, 'rgba(239,68,68,0.85)', '#fff');
 
-      // ── SL line (red dashed) ──────────────────────────────────
-      if (box.sl) {
-        const ySL = toY(box.sl);
-        if (ySL != null) {
-          ctx.save();
-          ctx.setLineDash([4, 4]);
-          ctx.strokeStyle = 'rgba(239,68,68,0.65)';
-          ctx.lineWidth   = 1;
-          ctx.beginPath();
-          ctx.moveTo(left, ySL);
-          ctx.lineTo(right, ySL);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = 'rgba(239,68,68,0.95)';
-          ctx.font      = 'bold 8px monospace';
-          const slLbl = `✕ SL ${box.sl.toFixed(0)}`;
-          const tw = ctx.measureText(slLbl).width;
-          ctx.fillText(slLbl, right - tw - 2, ySL + 10);
-          ctx.restore();
-        }
-      }
-
-      // ── Entry arrow ───────────────────────────────────────────
       if (box.inBox) {
         const eY = isBull ? toY(box.boxLow) : toY(box.boxHigh);
         if (eY != null) {
           ctx.save();
           ctx.fillStyle = isBull ? 'rgba(34,197,94,0.95)' : 'rgba(248,113,113,0.95)';
-          ctx.font      = 'bold 9px monospace';
-          ctx.fillText(isBull ? '▲ ENTRY' : '▼ ENTRY', right + 2, eY + 3);
+          ctx.font = 'bold 9px monospace';
+          ctx.fillText(isBull ? '▲ ENTRY' : '▼ ENTRY', right - 55, eY + 3);
           ctx.restore();
         }
       }
     });
+
+    // ── Render all right-side labels (collision-safe, inside chart area) ──────────
+    const PRICE_SCALE_W_OUTER = 82;
+    ctx.save();
+    ctx.font = 'bold 7.5px monospace';
+    rightLabels.forEach(({ y, text, bg, txt }) => {
+      const tw  = ctx.measureText(text).width;
+      // Keep pills inside chart — don't overflow into price scale
+      const rx  = W - PRICE_SCALE_W_OUTER - tw - 6;
+      const ry  = y - 9;
+      // Pill background
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rx - 2, ry, tw + 8, LABEL_H, 2);
+      else ctx.rect(rx - 2, ry, tw + 8, LABEL_H);
+      ctx.fill();
+      // Text
+      ctx.fillStyle = txt;
+      ctx.fillText(text, rx + 1, ry + 9.5);
+    });
+    ctx.restore();
 
     // ── Trend label top-left ───────────────────────────────────
     ctx.save();

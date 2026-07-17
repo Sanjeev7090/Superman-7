@@ -1,0 +1,32 @@
+{
+  "summary": "Frontend-only verification of ResizeObserver error suppression fix and sidebar CRYPTO/INTEL tab additions. All 4 test objectives passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "multiple (4 calls)", "issue": "HTTP 500 errors logged in browser console for background resource loads (pre-existing, unrelated to current fix)"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_31.json"],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "ResizeObserver error suppression confirmed working via window.addEventListener('error', ...) with useCapture=true in index.js. All 6 sidebar nav tabs (SCAN, STRAT, TRADERS, PAPER, CRYPTO, INTEL) verified visible and functional. CRYPTO tab shows crypto list, INTEL tab shows Regulatory Watchdog + Sectors + Top Movers panels.",
+  "test_results": {
+    "resize_observer_error_overlay": "PASS - No uncaught ResizeObserver errors, no React error overlay, no error iframes detected",
+    "dashboard_loads_without_errors": "PASS - Dashboard loads cleanly with no runtime error overlay blocking UI",
+    "crypto_tab_visible": "PASS - CRYPTO tab visible in left sidebar nav with CurrencyBtc icon",
+    "intel_tab_visible": "PASS - INTEL tab visible in left sidebar nav with Globe icon",
+    "all_6_tabs_present": "PASS - SCAN, STRAT, TRADERS, PAPER, CRYPTO, INTEL all visible",
+    "intel_tab_content": "PASS - INTEL tab shows Regulatory Watchdog (NEUTRAL gauge), Sectors Today (IT/BANK/PHARMA/MIDCAP), Top Movers widgets",
+    "crypto_tab_content": "PASS - CRYPTO tab loads crypto list component successfully"
+  }
+}

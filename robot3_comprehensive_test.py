@@ -9,7 +9,7 @@ import time
 import sys
 import subprocess
 
-BASE_URL = "https://trading-volume-fix.preview.emergentagent.com"
+BASE_URL = "https://nifty-fii-tracker.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 
 def log_result(test_name, passed, details=""):

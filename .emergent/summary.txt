@@ -1,108 +1,109 @@
-<analysis>**original_problem_statement**: Clone the GitHub repository  100% same to same. Subsequently, the user requested bug fixes for the Volume Profile/Footprint not working on Nifty 50/options/crypto, UI cleanup on the Chart panel (removing legend texts), and fixing a bug where candles disappear when changing timeframes for Nifty 50.
+<analysis>**original_problem_statement**: Clone the GitHub repository  100% same to same and extend it. Add a comprehensive Market Intelligence panel (Brent, VIX, Nasdaq, Nifty, FII/DII), strict image-based validation for Smart Money Concepts (SMC) order blocks, historical candle limit expansion (2 years), and a custom Canvas-drawn Black Box indicator showing swing trends, BOS lines, and target zones. PRODUCT REQUIREMENT: STRICTLY NO SCREENSHOTS AND NO TESTING AGENTS.
 
-**User's preferred language**: The user is communicating in Hinglish (Hindi + English). **INSTRUCT NEXT AGENT: You MUST respond to the user in Hinglish/Hindi.**
+**User's preferred language**: You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only (User is speaking in **Hinglish/Hindi**. YOU MUST RESPOND IN HINGLISH/HINDI ONLY).
 
-**what currently exists?**: A fully functional, cloned full-stack trading application (React + FastAPI + MongoDB) running successfully. The application has synthetic volume logic integrated for zero-volume option/index bars to display footprint/volume profiles, corrected timeframe interval mapping, and cleaned-up chart legends.
+**what currently exists?**: A robust React + FastAPI + MongoDB trading dashboard. It features a main Chart Panel with SMC order block detection and a custom Black Box indicator. It also has a highly advanced Market Intelligence side panel displaying live D/W/M toggles for Brent, VIX, Nasdaq, Nifty 50, GIFT Nifty, and an automated FII/DII tracking section pulling data from NSE F&O Archive CSVs.
 
 **Last working item**: 
-    - Last item agent was working: Fixing the bug where Nifty 50 candles were not showing when the timeframe was changed. The agent mapped missing timeframe intervals (2m, 3m, 5m, 15m, etc.) in the backend () and added a fallback mechanism in the frontend (, ) to use  when the default  API returns empty bars for indices.
+    - Last item agent was working: Fixing the Black Box Canvas UI rendering in . The user reported that the black box opacity was too high (hiding candles/text) and it was overlapping with the price scale on the right side of the chart. The agent reduced the opacity to  (with green/red tints for bull/bear) and capped the right bounds to  to prevent price axis overlap.
     - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y
-    - Which testing method agent to use? NA (Backend testing agent successfully passed 16/16 tests for timeframe fix)
+    - Agent Testing Done: N (Bash syntax validation done. Visual testing skipped per strict user rules).
+    - Which testing method agent to use? NA (The user strictly forbade taking screenshots and using the testing agent. Wait for the user to confirm the fix manually).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**: 
-  None. (Waiting for user to verify the Nifty 50 timeframe fix).
+  - Issue 1: Verify Black Box UI Fixes (Opacity and Price Scale overlap) (Priority: P0)
+     - Attempted fixes: Modified  () to change  to  / . Set a  constraint so boxes, dashed lines, and entry labels stop before the right-side price axis. 
+     - Next debug checklist:  - Wait for user's next message. If the user confirms it looks good, close this task.
+     - Why fix this issue and what will be achieved with the fix? Ensure chart readability by keeping background zones transparent and preventing UI collision with the price scale.
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue? Y (Multiple iterations fine-tuning the canvas drawing).
+     - Should Test frontend/backend/both after fix? NA (Manual user validation only).
+     - Blocked on other issue: None
 
 **In progress Task List**: 
-  None. 
+  None
 
-**Upcoming and Future Tasks**:
-  None specified in the history. 
+**Upcoming and Future Tasks**
+  - Task 1: PCR Alert popup (NIFTY/SENSEX threshold cross) (Priority: P1)
+  - Task 2: Refactor and modularize  (Currently > 13,000 lines, urgently needs routers) (Priority: P2)
 
-**Completed work in this session**:
-- Cloned GitHub repo to  (DONE)
-- Reinstalled missing frontend node_modules (yarn install v1.22.22
-info No lockfile found.
-[1/4] Resolving packages...
-[2/4] Fetching packages...
-[3/4] Linking dependencies...
-[4/4] Building fresh packages...
-success Saved lockfile.
-Done in 0.07s.) and successfully booted up services (DONE)
-- Chart Legend UI cleanup in  (DONE)
-- Volume Profile & Footprint fix for Nifty 50/Options/Crypto via synthetic notional volume () in  (DONE)
-- Nifty 50 timeframe change bug fixed by updating  in  and adding a data-source fallback in  &  (DONE)
+**Completed work in this session**
+- Fixed Black Box background opacity issues in  (changed  solid to  tinted). (DONE)
+- Fixed Canvas elements (box, lines, text labels) overlapping with the right-side Price Scale in  by capping rendering width. (DONE)
 
-**Earlier issues found/mentioned but not fixed**:
-   None.
+**Earlier issues found/mentioned but not fixed**
+   None
 
-**Known issue recurrence from previous fork**:
-  - Issue recurrence in previous fork: N/A (First fork)
-  - Recurrence count: 0
-  - Status: NA
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: Yes, Black Box drawing/marking issues.
+  - Recurrence count: 3
+  - Status: USER VERIFICATION PENDING
 
-**Code Architecture**:
+**Code Architecture**
 
 
-**Key Technical Concepts**:
-React, FastAPI, MongoDB, Webpack, WebSockets, yfinance, Trading Charting (Gann Angles, Volume Profiles, Footprints, Timeframe interval mapping).
+**Key Technical Concepts**
+React Canvas API for chart overlays, FastAPI, MongoDB,  data aggregation, Algorithmic Trading Indicators (Smart Money Concepts, Swings, Break of Structure), Web Scraping via  for NSE CSV data.
 
-**key DB schema**:
+**key DB schema**
   - standard MongoDB structure from the cloned template.
 
-**changes in tech stack**:
-  - None.
+**changes in tech stack**
+  - None
 
-**All files of reference**: 
-1.  (Added missing timeframe mappings in  and synthetic volume logic for zero-volume bars).
-2.  (Removed legend badge for uptrend/downtrend UI).
-3.  &  (Added logic to fall back to  API if  returns empty data for indices).
-4.  (Created to persist the user's rule against screenshots and unauthorized testing).
+**All files of reference** 
+1.  (Updated with Canvas drawing coordinate fixes, opacity, and right-bounds constraints for the Black Box).
+2.  (Checked for architecture and user instructions).
 
 **Areas that need refactoring**: 
-  - None currently identified. 
+  -  is critically bloated (>13,000 lines) and urgently needs to be broken down into modular routers.
 
-**key api endpoints**:
-- 
-- 
+**key api endpoints**
+-  (Fetches Brent, VIX, Nasdaq, Nifty, Gift Nifty)
+-  (Fetches live and historical FII/DII data)
+-  (Fetches live index prices)
 
-**Critical Info for New Agent**:
-- **USER RULE OVERRIDE**: The user has explicitly stated: *Screenshot nai lena kabhi bhi koi bhi task dunga tab also testing bhi nahi karna*. This is saved in . **NEVER** take screenshots or run testing agents on your own accord unless the user explicitly tells you to do so (e.g., they said test karo at the very end of this session, which is why testing was run).
-- Always use the  fallback logic for indices if integrating new components, as the Groww API often returns empty bars for . 
-- No specific external API keys (like Groww) have been added to  yet; they weren't in the base repo.  is integrated.
+**Critical Info for New Agent**
+- **User Constraints on Testing/Screenshots:** The user explicitly commanded: *Abhi ke baad koi bhi task dunga to screenshot nahi show karna and Testing bhi nahi karna save kar lo isko*. **YOU MUST RESPECT THIS PREFERENCE.** Do not take screenshots, do not invoke the testing subagent. Execute code changes and immediately ask the user to verify manually.
+- **NSE FII/DII Data Source:** The standard NSE API endpoints return 404s. The backend currently uses the NSE F&O Archive CSV to calculate FII/DII Long/Short contract lots. Do not attempt to revert to old JSON endpoints.
+- **Frontend Build Bypass:** The frontend uses  with custom aliases (like ).  will fail in bash, but  runs perfectly via supervisor. Trust the live dev server.
 
-**documents and test reports created in this job**:
-  - 
-  -  (updated)
+**documents and test reports created in this job**
+  - None (User explicitly forbade testing agent).
 
-**Last 10 User Messages and any pending HUMAN messages**:
+**Last 10 User Messages and any pending HUMAN messages** 
 1.  (DONE)
 2.  (DONE)
-3.  (DONE)
+3.  (DONE - Switched to NSE F&O Archive CSV)
 4.  (DONE)
-5.  (DONE - reverted trend lines later based on user context)
-6.  (DONE - kept trend lines, removed legend text)
-7.  (DONE)
-8.  (DONE - Fixed fallback and tested using backend testing agent)
+5.  (DONE)
+6.  (DONE)
+7.  (USER VERIFICATION PENDING - The agent fixed the opacity and scale overlap and requested the user to verify on their screen).
 
-**Project Health Check**:
-- Broken: None
-- Mocked: Synthetic volume generation added for Option/Index bars that return 0 volume from external APIs.
+**Project Health Check:**
+Broken: None
+Mocked: None
 
-**3rd Party Integrations**:
-- yfinance (Data source fallback) — No key required.
-- Groww API (Primary data source) — Requires User API Key (currently missing from , but endpoints are running).
-- OpenAI / AI features — uses Emergent LLM Key.
+**3rd Party Integrations**
+- yfinance (Market stats, SR levels) — No key required.
+- Groww API (Primary bar data source) — Requires User API Key.
+- NSE CSVs via  (For FII/DII data).
 
-**Testing status**:
-  - Testing agent used after significant changes: YES (Backend testing agent passed 16/16 tests for timeframe changes)
+**Testing status**
+  - Testing agent used after significant changes: NO (Explicitly forbidden by the user).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
   - Known regressions: None
 
-**Credentials to test flow**:
-  - None required for current functionality.
+**Credentials to test flow:**
+- None needed.
 
-**What agent forgot to execute**:
-  - Nothing. All user requests have been executed and verified.</analysis>
+**What agent forgot to execute**
+- The agent properly submitted the canvas fix and asked the user to verify. Awaiting user response.
+
+**Debugging checklist for current issue**
+    Issue: Verify Black Box Canvas UI readability and alignment.
+    Frontend files to check: 
+    -  (Look around line ~2323 for  and  modifications inside ).
+    Next Action: Read the pending user message to see if they confirmed the UI is fixed. If yes, move on to the PCR Alert Task (Task 1). If not, adjust canvas math based on their feedback.</analysis>

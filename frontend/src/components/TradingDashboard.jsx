@@ -18,6 +18,11 @@ import AMDSAnalysis from './AMDSAnalysis';
 import MiroFishAnalysis from './MiroFishAnalysis';
 import PACSOAnalysis from './PACSOAnalysis';
 import MarketIntelPanel from './MarketIntelPanel';
+import RegulatoryWatchdogPanel from './RegulatoryWatchdogPanel';
+import SectorTrending from './SectorTrending';
+import TopMoversWidget from './TopMoversWidget';
+import SectorRotationPicker from './SectorRotationPicker';
+import MoneycontrolMovers from './MoneycontrolMovers';
 import HybridDashboard from './hybrid/HybridDashboard';
 import GannQSCPanel from './GannQSCPanel';
 import AdvanceDeclineTicker from './AdvanceDeclineTicker';
@@ -39,9 +44,10 @@ import SectorStocksSheet from './SectorStocksSheet';
 import TopTraderUniverseScan from './TopTraderUniverseScan';
 import SettingsDrawer from './SettingsDrawer';
 import { Toaster, toast } from 'sonner';
+import CryptoList from './CryptoList';
 import {
   Bell, ChartLineUp, List, Newspaper, Sun, Moon, X,
-  MagnifyingGlass, UsersThree, Notebook, GearSix,
+  MagnifyingGlass, UsersThree, Notebook, GearSix, CurrencyBtc, Globe,
 } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -548,6 +554,8 @@ const TradingDashboard = () => {
     { id: 'strategies', label: 'STRAT',   icon: ChartLineUp     },
     { id: 'traders',    label: 'TRADERS', icon: UsersThree      },
     { id: 'paper',      label: 'PAPER',   icon: Notebook        },
+    { id: 'crypto',     label: 'CRYPTO',  icon: CurrencyBtc     },
+    { id: 'market',     label: 'INTEL',   icon: Globe           },
   ];
 
   const mobilePanels = [
@@ -768,6 +776,33 @@ const TradingDashboard = () => {
                 autoExecute={paperAutoExecute}
                 onAutoExecuteChange={setPaperAutoExecute}
               />
+            )}
+
+            {activeTab === 'crypto' && (
+              <CryptoList
+                onCryptoSelect={handleCryptoSelect}
+                selectedCrypto={isCrypto ? selectedStock : null}
+              />
+            )}
+
+            {activeTab === 'market' && (
+              <div className="divide-y divide-white/10">
+                <RegulatoryWatchdogPanel />
+                <SectorTrending onSectorSelect={(sector) => setSectorSheet(sector)} />
+                <TopMoversWidget onStockSelect={(stock) => {
+                  setSelectedStock({ ticker: stock.ticker, name: stock.name, type: 'stock' });
+                  const tf = { multiplier: 1, timespan: 'day', label: '1D' };
+                  setTimeframe(tf);
+                  fetchStockData(stock.ticker, tf);
+                  setMobilePanel('chart');
+                }} />
+                <SectorRotationPicker onStockSelect={handleStockSelect} />
+                <MoneycontrolMovers onPaperTrade={(sig) => {
+                  setPendingPaperTrade({ ...sig, symbol: sig.symbol });
+                  setActiveTab('paper');
+                  setMobilePanel('left');
+                }} />
+              </div>
             )}
           </div>
         </aside>

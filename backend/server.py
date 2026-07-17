@@ -1250,6 +1250,8 @@ async def get_indices_live():
         {"key": "NIFTY",     "name": "NIFTY 50",   "ticker": "^NSEI",    "symbol": "NIFTY",     "groww_sym": "NIFTY",     "groww_exch": "NSE"},
         {"key": "SENSEX",    "name": "SENSEX",     "ticker": "^BSESN",   "symbol": "SENSEX",    "groww_sym": "SENSEX",    "groww_exch": "BSE"},
         {"key": "BANKNIFTY", "name": "BANK NIFTY", "ticker": "^NSEBANK", "symbol": "BANKNIFTY", "groww_sym": "BANKNIFTY", "groww_exch": "NSE"},
+        {"key": "SP500",     "name": "S&P 500",    "ticker": "^GSPC",    "symbol": "SP500",     "groww_sym": None,        "groww_exch": None, "us": True},
+        {"key": "NASDAQ",    "name": "NASDAQ",     "ticker": "^IXIC",    "symbol": "NASDAQ",    "groww_sym": None,        "groww_exch": None, "us": True},
     ]
     cache_key = "indices_live"
     if cache_key in cache_storage:
@@ -1280,13 +1282,13 @@ async def get_indices_live():
     results = []
     for idx in indices:
         try:
-            gp = groww_prices.get(idx["key"])
+            gp = groww_prices.get(idx["key"]) if not idx.get("us") else None
             if gp and gp["price"] > 0:
                 price = gp["price"]
                 prev  = gp["prev"] or price
                 data_src = "groww"
             else:
-                # Fallback: yfinance
+                # yfinance fallback (also primary for US indices)
                 t = yf.Ticker(idx["ticker"])
                 try:
                     info = t.fast_info
@@ -11760,6 +11762,21 @@ async def get_market_intel():
         }
 
 
+@api_router.get("/market-intel/fii")
+async def get_fii_intel():
+    """
+    FII/DII live data from NSE website.
+    Returns today's FII net buy/sell + classification + 5-day trend.
+    Cache: 1 hour (NSE updates once ~6 PM IST).
+    """
+    try:
+        from agents.market_intel import fetch_fii_intel
+        return await fetch_fii_intel()
+    except Exception as e:
+        logging.error(f"FII intel fetch error: {e}")
+        return {"source": "error", "message": str(e)}
+
+
 # ======================= MIROFISH SWARM INTELLIGENCE =======================
 
 @api_router.post("/mirofish/analyze")
@@ -13217,6 +13234,15 @@ async def startup_binance_ws():
         logging.info("NSE Tick Streamer started")
     except Exception as _te:
         logging.warning(f"NSE Tick Streamer startup failed: {_te}")
+    # Pre-warm Market Intelligence cache so first user request is instant
+    async def _warm_market_intel():
+        try:
+            from agents.market_intel import fetch_market_intel
+            await fetch_market_intel()
+            logging.info("Market Intelligence cache warmed on startup")
+        except Exception as _me:
+            logging.warning(f"Market Intel warm-up failed: {_me}")
+    asyncio.create_task(_warm_market_intel())
 
 
 # ── NSE Tick WebSocket ────────────────────────────────────────────────────────

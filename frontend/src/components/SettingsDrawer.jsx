@@ -1,14 +1,8 @@
 import React, { useState } from 'react';
 import Watchlist from './Watchlist';
-import CryptoList from './CryptoList';
 import GrowwPortfolio from './GrowwPortfolio';
 import PortfolioTracker from './PortfolioTracker';
 import AlertSystem from './AlertSystem';
-import SectorTrending from './SectorTrending';
-import TopMoversWidget from './TopMoversWidget';
-import RegulatoryWatchdogPanel from './RegulatoryWatchdogPanel';
-import SectorRotationPicker from './SectorRotationPicker';
-import MoneycontrolMovers from './MoneycontrolMovers';
 import RLAgentPanel from './RLAgentPanel';
 import RoboDashboard from './robo/RoboAdvisorDashboard';
 import EnsembleCockpitPanel from './EnsembleCockpitPanel';
@@ -56,11 +50,9 @@ function QuantPanel({ selectedStock }) {
 
 const SECTIONS = [
   { id: 'watchlist', label: 'Watchlist' },
-  { id: 'crypto', label: 'Crypto' },
   { id: 'groww', label: 'Groww' },
   { id: 'portfolio', label: 'Portfolio' },
   { id: 'alerts', label: 'Alerts' },
-  { id: 'market', label: 'Market Intel' },
   { id: 'rlagent', label: 'RL Agent' },
   { id: 'ensemble', label: 'AI Assemble' },
   { id: 'pece', label: 'PE-CE OI' },
@@ -162,20 +154,9 @@ const SettingsDrawer = ({
           </div>
 
           {section === 'watchlist' && <Watchlist onStockSelect={onStockSelect} selectedStock={selectedStock} />}
-          {section === 'crypto' && <CryptoList onCryptoSelect={onCryptoSelect} selectedCrypto={isCrypto ? selectedStock : null} />}
           {section === 'groww' && <GrowwPortfolio />}
           {section === 'portfolio' && <PortfolioTracker selectedStock={selectedStock} />}
           {section === 'alerts' && <AlertSystem selectedStock={selectedStock} />}
-
-          {section === 'market' && (
-            <div>
-              <RegulatoryWatchdogPanel />
-              <SectorTrending onSectorSelect={onSectorSelect} />
-              <TopMoversWidget onStockSelect={onTopMoverSelect} />
-              <SectorRotationPicker onStockSelect={onStockSelect} />
-              <MoneycontrolMovers onPaperTrade={onMoneycontrolPaperTrade} />
-            </div>
-          )}
 
           {section === 'ensemble' && (
             <div className="space-y-3 p-2">
