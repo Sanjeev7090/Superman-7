@@ -408,13 +408,45 @@ const MarketIntelPanel = ({ onClose }) => {
                   <div className="text-xs mt-1" style={{ color: C.textSecond }}>{data.action}</div>
                 </div>
                 <div className="flex gap-4 flex-wrap">
-                  <div className="text-center">
-                    <div className="text-[9px] uppercase tracking-widest" style={{ color: C.textMuted }}>Expected Move (1-3 Days)</div>
-                    <div className="text-base font-bold font-mono mt-0.5" style={{ color: C.textPrimary }}>{data.move_label}</div>
+                  {/* Today's Possibility */}
+                  <div className="text-center min-w-[110px]">
+                    <div className="text-[9px] uppercase tracking-widest mb-0.5" style={{ color: C.textMuted }}>Today's Possibility</div>
+                    <div
+                      className="text-[11px] font-black font-mono px-2 py-0.5 rounded"
+                      style={{
+                        color: data.today_move?.color || C.textPrimary,
+                        background: `${data.today_move?.color || '#94a3b8'}18`,
+                        border: `1px solid ${data.today_move?.color || '#94a3b8'}40`,
+                      }}
+                    >
+                      {data.today_move?.icon === 'UP' ? '▲ ' : data.today_move?.icon === 'DOWN' ? '▼ ' : '→ '}
+                      {data.today_move?.label || '—'}
+                    </div>
+                    <div className="text-[8px] mt-0.5 font-medium" style={{ color: data.today_move?.color || C.textMuted }}>
+                      {data.today_move?.probability || '—'}
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-[9px] uppercase tracking-widest" style={{ color: C.textMuted }}>Probability</div>
-                    <div className="text-base font-bold mt-0.5 text-amber-500">{data.probability}</div>
+
+                  {/* Vertical divider */}
+                  <div className="w-px self-stretch" style={{ background: C.border }} />
+
+                  {/* Tomorrow's Possibility */}
+                  <div className="text-center min-w-[110px]">
+                    <div className="text-[9px] uppercase tracking-widest mb-0.5" style={{ color: C.textMuted }}>Tomorrow's Possibility</div>
+                    <div
+                      className="text-[11px] font-black font-mono px-2 py-0.5 rounded"
+                      style={{
+                        color: data.tomorrow_move?.color || C.textPrimary,
+                        background: `${data.tomorrow_move?.color || '#94a3b8'}18`,
+                        border: `1px solid ${data.tomorrow_move?.color || '#94a3b8'}40`,
+                      }}
+                    >
+                      {data.tomorrow_move?.icon === 'UP' ? '▲ ' : data.tomorrow_move?.icon === 'DOWN' ? '▼ ' : '→ '}
+                      {data.tomorrow_move?.label || '—'}
+                    </div>
+                    <div className="text-[8px] mt-0.5 font-medium" style={{ color: data.tomorrow_move?.color || C.textMuted }}>
+                      {data.tomorrow_move?.probability || '—'}
+                    </div>
                   </div>
                   {data.nasdaq_pts !== 0 && (
                     <div className="text-center">
@@ -632,7 +664,7 @@ const MarketIntelPanel = ({ onClose }) => {
                 <table className="w-full text-[10px]">
                   <thead>
                     <tr style={{ background: C.tableBg, borderBottom: `1px solid ${C.border}` }}>
-                      {['Bias', 'Brent Level', 'VIX', 'Regulatory', 'GIFT Nifty', 'Expected Move (1-3D)', 'Probability', 'Example Action'].map(h => (
+                      {['Bias', 'Brent Level', 'VIX', 'Regulatory', 'GIFT Nifty', 'Today Move', 'Probability', 'Example Action'].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-semibold uppercase tracking-widest whitespace-nowrap"
                           style={{ color: C.textMuted }}>{h}</th>
                       ))}

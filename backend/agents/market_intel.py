@@ -175,6 +175,117 @@ def _determine_bias(score: float) -> Dict:
     return BIAS_LEVELS[2]  # default neutral
 
 
+# ── Today / Tomorrow Move Calculator ──────────────────────────────────────────
+
+import math as _math
+
+def _compute_today_tomorrow_moves(
+    nifty: float,
+    vix: float,
+    gift_premium: float,
+    total_score: float,
+    nasdaq_chg: float,
+    hang_seng_chg: float,
+) -> Dict:
+    """
+    Returns today_move and tomorrow_move dicts:
+      {direction, label, range_label, color, probability, icon}
+
+    Today:  driven mainly by GIFT Nifty premium + VIX 1-day σ
+    Tomorrow: driven by overall bias score + Nasdaq/HangSeng momentum
+    """
+    # 1-day 1σ move in Nifty points (VIX = annualised volatility in %)
+    sigma_1d = round(nifty * (vix / 100.0) / _math.sqrt(252))
+
+    # ── TODAY ──────────────────────────────────────────────────────────────────
+    # Primary signal: GIFT Nifty premium
+    if gift_premium > 40 or (gift_premium > 15 and total_score > 0.5):
+        today_dir   = "BULLISH"
+        today_low   = max(30, round(abs(gift_premium) * 1.5))
+        today_high  = max(today_low + 50, today_low + round(sigma_1d * 0.6))
+        today_low   = round(today_low / 10) * 10
+        today_high  = round(today_high / 10) * 10
+        today_label = f"+{today_low} to +{today_high} pts"
+        today_color = "#22c55e"
+        today_icon  = "UP"
+        if total_score > 2.0:
+            today_prob = "High (80%+)"
+        elif total_score > 1.0:
+            today_prob = "Medium-High (65-80%)"
+        else:
+            today_prob = "Medium (55-65%)"
+
+    elif gift_premium < -40 or (gift_premium < -15 and total_score < -0.5):
+        today_dir   = "BEARISH"
+        today_low   = max(30, round(abs(gift_premium) * 1.5))
+        today_high  = max(today_low + 50, today_low + round(sigma_1d * 0.6))
+        today_low   = round(today_low / 10) * 10
+        today_high  = round(today_high / 10) * 10
+        today_label = f"-{today_low} to -{today_high} pts"
+        today_color = "#ef4444"
+        today_icon  = "DOWN"
+        if total_score < -2.0:
+            today_prob = "High (80%+)"
+        elif total_score < -1.0:
+            today_prob = "Medium-High (65-80%)"
+        else:
+            today_prob = "Medium (55-65%)"
+
+    else:
+        # Sideways / unclear
+        today_dir   = "SIDEWAYS"
+        half        = max(30, round(sigma_1d * 0.4 / 10) * 10)
+        today_label = f"±{half} to ±{half + 50} pts"
+        today_color = "#94a3b8"
+        today_icon  = "SIDE"
+        today_prob  = "High (range-bound)"
+
+    # ── TOMORROW ────────────────────────────────────────────────────────────────
+    # Primary: overall bias (total_score) + global momentum
+    nasdaq_boost   = 0.5 if nasdaq_chg > 0.3 else (-0.5 if nasdaq_chg < -0.3 else 0)
+    hs_boost       = 0.3 if hang_seng_chg > 0.3 else (-0.3 if hang_seng_chg < -0.3 else 0)
+    tmw_score      = total_score + nasdaq_boost + hs_boost
+
+    if tmw_score > 1.2:
+        tmw_dir    = "BULLISH"
+        tmw_sigma  = round(sigma_1d * 0.8)
+        tmw_low    = round(max(50, tmw_sigma * 0.5) / 10) * 10
+        tmw_high   = round(max(100, tmw_sigma * 1.1) / 10) * 10
+        tmw_label  = f"+{tmw_low} to +{tmw_high} pts"
+        tmw_color  = "#22c55e"
+        tmw_icon   = "UP"
+        if tmw_score > 2.5:
+            tmw_prob = "Medium-High (60-75%)"
+        else:
+            tmw_prob = "Medium (50-60%)"
+
+    elif tmw_score < -1.2:
+        tmw_dir    = "BEARISH"
+        tmw_sigma  = round(sigma_1d * 0.8)
+        tmw_low    = round(max(50, tmw_sigma * 0.5) / 10) * 10
+        tmw_high   = round(max(100, tmw_sigma * 1.1) / 10) * 10
+        tmw_label  = f"-{tmw_low} to -{tmw_high} pts"
+        tmw_color  = "#ef4444"
+        tmw_icon   = "DOWN"
+        if tmw_score < -2.5:
+            tmw_prob = "Medium-High (60-75%)"
+        else:
+            tmw_prob = "Medium (50-60%)"
+
+    else:
+        tmw_dir    = "SIDEWAYS"
+        half_tmw   = max(50, round(sigma_1d * 0.5 / 10) * 10)
+        tmw_label  = f"±{half_tmw} to ±{half_tmw + 80} pts"
+        tmw_color  = "#94a3b8"
+        tmw_icon   = "SIDE"
+        tmw_prob   = "Medium (range / wait-and-watch)"
+
+    return {
+        "today_move":    {"direction": today_dir, "label": today_label, "color": today_color, "probability": today_prob, "icon": today_icon},
+        "tomorrow_move": {"direction": tmw_dir,   "label": tmw_label,   "color": tmw_color,   "probability": tmw_prob,   "icon": tmw_icon},
+    }
+
+
 # ── Regulatory Sentiment ───────────────────────────────────────────────────────
 
 REGULATORY_RSS = [
@@ -785,6 +896,11 @@ async def _build_intel() -> Dict:
     total_score = round(brent_score + vix_score + reg_score + gift_score, 2)
     bias        = _determine_bias(total_score)
 
+    # Today / Tomorrow move predictions
+    moves = _compute_today_tomorrow_moves(
+        nifty, vix, gift_premium, total_score, nasdaq_chg, hang_seng_chg
+    )
+
     data = {
         "brent": round(brent, 2), "brent_chg_pct": brent_chg,
         "brent_chg_week": brent_hist.get("brent_chg_week"),
@@ -819,6 +935,8 @@ async def _build_intel() -> Dict:
         "move_label": bias["move_label"], "move_min": bias["move_min"],
         "move_max": bias["move_max"], "probability": bias["probability"],
         "action": bias["action"], "gift_color_label": bias["gift_color"],
+        "today_move":    moves["today_move"],
+        "tomorrow_move": moves["tomorrow_move"],
         "scores": {
             "brent": brent_score, "vix": vix_score,
             "regulatory": reg_score, "gift": gift_score, "total": total_score,

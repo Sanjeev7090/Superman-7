@@ -454,7 +454,22 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Update (Feb 2026) — Crypto Chart Timeframe Fix
+## Update (Feb 2026) — Market Intel: Today/Tomorrow Possibility
+
+**Change**: "Expected Move (1-3 Days)" + "Probability" fields replace kiye gaye
+- **Today's Possibility**: GIFT Nifty premium + 1-day VIX σ se compute hota hai
+  - gift > +40: BULLISH (▲ +X to +Y pts) with probability
+  - gift < -40: BEARISH (▼ -X to -Y pts) with probability
+  - else: SIDEWAYS (→ ±X pts)
+- **Tomorrow's Possibility**: Total bias score + Nasdaq/HangSeng momentum se
+  - tmw_score > 1.2: BULLISH | < -1.2: BEARISH | else: SIDEWAYS
+  - Tomorrow always shows lower confidence (more uncertain)
+- Color-coded chips with color-matched borders
+- Matrix table header: "Expected Move (1-3D)" → "Today Move"
+
+**Files**: `market_intel.py` (added `_compute_today_tomorrow_moves()`), `MarketIntelPanel.jsx`
+
+
 
 **Bug Fixed**: Crypto charts (BTC, ETH, etc.) mein timeframe change karne pe candles change nahi hoti thi.
 
