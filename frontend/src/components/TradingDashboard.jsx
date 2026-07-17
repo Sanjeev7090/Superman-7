@@ -240,11 +240,37 @@ const TradingDashboard = () => {
     }
   };
 
+  // TF label → Kraken interval (minutes) + days mapping for crypto
+  // Kraken valid intervals: 1, 5, 15, 30, 60, 240, 1440, 10080
+  const CRYPTO_TF_MAP = {
+    '1MIN': { interval: 1,    days: 1   },
+    '2M':   { interval: 1,    days: 1   },
+    '3M':   { interval: 5,    days: 2   },
+    '5M':   { interval: 5,    days: 3   },
+    '10M':  { interval: 15,   days: 5   },
+    '15M':  { interval: 15,   days: 7   },
+    '30M':  { interval: 30,   days: 14  },
+    '45M':  { interval: 60,   days: 14  },
+    '1H':   { interval: 60,   days: 30  },
+    '2H':   { interval: 240,  days: 60  },
+    '4H':   { interval: 240,  days: 90  },
+    '1D':   { interval: 1440, days: 90  },
+    '1W':   { interval: 10080,days: 365 },
+    '1MO':  { interval: 1440, days: 30  },
+    '3MO':  { interval: 1440, days: 90  },
+    '6MO':  { interval: 1440, days: 180 },
+    '1Y':   { interval: 1440, days: 365 },
+    '1M':   { interval: 1440, days: 30  },
+    '6M':   { interval: 1440, days: 180 },
+  };
+
   // Fetch crypto chart data and convert to stockData format
-  const fetchCryptoData = async (coinId, days) => {
+  const fetchCryptoData = async (coinId, days, interval) => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API}/crypto/chart/${coinId}?days=${days}`);
+      const params = new URLSearchParams({ days: String(days) });
+      if (interval) params.append('interval', String(interval));
+      const response = await axios.get(`${API}/crypto/chart/${coinId}?${params.toString()}`);
       const bars = (response.data.bars || []).map(b => ({
         timestamp: b.timestamp,
         open: b.open,
@@ -474,7 +500,7 @@ const TradingDashboard = () => {
     setSignal(null);
     setSelectedStock(crypto);
     setCryptoChartDays(7);
-    fetchCryptoData(crypto.coin_id, 7);
+    fetchCryptoData(crypto.coin_id, 7, 1440);
     setMobilePanel('chart');
   };
 
@@ -485,19 +511,10 @@ const TradingDashboard = () => {
       setGannFan(null);
       setSignal(null);
       if (selectedStock.type === 'CRYPTO') {
-        // Map timeframe to crypto days
-        const daysMap = {
-          '1MIN': 1, '2M': 1, '3M': 1, '5M': 1, '10M': 1, '15M': 1, '30M': 1, '45M': 1,
-          '1H': 1, '2H': 1, '4H': 1,
-          '1D': 7, '1W': 30,
-          '1MO': 30, '3MO': 90, '6MO': 180,
-          '1Y': 365,
-          // legacy
-          '1M': 30, '6M': 180,
-        };
-        const days = daysMap[tf.label] || 7;
-        setCryptoChartDays(days);
-        fetchCryptoData(selectedStock.coin_id, days);
+        // Use CRYPTO_TF_MAP for precise interval + days
+        const mapping = CRYPTO_TF_MAP[tf.label] || { interval: 1440, days: 7 };
+        setCryptoChartDays(mapping.days);
+        fetchCryptoData(selectedStock.coin_id, mapping.days, mapping.interval);
       } else if (selectedStock.type === 'OPTION' && selectedStock.selectedOption) {
         // Options support 1m / 5m / 15m intraday only (NSE chart-databyindex tick data)
         const optIntervalMap = { '1MIN': 1, '2M': 2, '3M': 3, '5M': 5, '10M': 10, '15M': 15, '30M': 30, '45M': 45 };

@@ -10856,17 +10856,21 @@ async def _coinpaprika_get(path: str, params: dict = None, cache_ttl: int = 120)
     return data
 
 
-async def _kraken_ohlc(coin_id: str, days: int) -> list:
+async def _kraken_ohlc(coin_id: str, days: int, interval_override: int = None) -> list:
     """
     Fetch OHLCV candles from Kraken REST API.
     Returns list of dicts: {timestamp, open, high, low, close}
+    Kraken valid intervals (minutes): 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
     """
     pair = KRAKEN_OHLC_PAIR_MAP.get(coin_id.lower())
     if not pair:
         return []
 
-    # Choose interval based on days
-    if days <= 1:
+    # Use explicit interval if provided, else auto-derive from days
+    VALID_INTERVALS = {1, 5, 15, 30, 60, 240, 1440, 10080, 21600}
+    if interval_override and interval_override in VALID_INTERVALS:
+        interval = interval_override
+    elif days <= 1:
         interval = 60      # 1h  → ~24 bars for 1d
     elif days <= 7:
         interval = 60      # 1h  → ~168 bars for 7d
@@ -10903,7 +10907,9 @@ async def _kraken_ohlc(coin_id: str, days: int) -> list:
         raw_bars = data["result"][result_key[0]]
         # Kraken: [time, open, high, low, close, vwap, volume, count]
         # Keep only `days` worth of bars from the end
-        bars_needed = min(len(raw_bars), days * (60 // (interval // 60)) * 24 if interval < 1440 else days + 5)
+        # bars_per_day = 1440 / interval (works for all Kraken intervals: 1,5,15,30,60,240,1440)
+        bars_per_day = max(1, int(1440 / interval)) if interval <= 1440 else 1
+        bars_needed = min(len(raw_bars), max(50, days * bars_per_day + 10))
         raw_bars = raw_bars[-bars_needed:] if bars_needed < len(raw_bars) else raw_bars
 
         bars = [{
@@ -11459,13 +11465,17 @@ async def get_crypto_prices():
 
 
 @api_router.get("/crypto/chart/{coin_id}")
-async def get_crypto_chart(coin_id: str, days: int = Query(default=1, ge=1, le=365)):
+async def get_crypto_chart(
+    coin_id: str,
+    days: int = Query(default=1, ge=1, le=365),
+    interval: int = Query(default=None, description="Kraken interval in minutes: 1,5,15,30,60,240,1440,10080"),
+):
     """Get OHLCV chart data for a crypto coin via Kraken REST (free, no key)"""
     try:
-        bars = await _kraken_ohlc(coin_id, days)
+        bars = await _kraken_ohlc(coin_id, days, interval_override=interval)
         if not bars:
             raise HTTPException(status_code=404, detail=f"No chart data for {coin_id}")
-        return {"coin_id": coin_id, "days": days, "bars": bars, "source": "kraken"}
+        return {"coin_id": coin_id, "days": days, "interval": interval, "bars": bars, "source": "kraken"}
     except HTTPException:
         raise
     except Exception as e:

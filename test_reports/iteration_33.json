@@ -1,0 +1,56 @@
+{
+  "summary": "Backend-only testing of crypto chart timeframe fix. All 13 tests passed (100%). Verified that /api/crypto/chart/{coin_id}?interval=N correctly passes Kraken interval param, producing candles with correct spacing for 5M, 15M, 30M, 1H, 4H, 1D timeframes. ZeroDivisionError fix also confirmed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/crypto/chart/{coin_id}",
+        "issue": "Cache key `kr_ohlc_{coin_id}_{interval}` does NOT include `days`. A default call (days=1, no interval) auto-derives interval=60 and caches only 50 bars as `kr_ohlc_bitcoin_60`. A subsequent call with days=30&interval=60 within 120s hits the same stale cache and returns only 50 bars instead of the expected ~720. Net effect: within 2-minute sessions, changing from default chart view to 1H explicit view may return fewer candles than expected.",
+        "priority": "MINOR",
+        "fix_suggestion": "Add `days` to the cache key: `kr_ohlc_{coin_id}_{interval}_{days}`, OR store raw_bars in cache and trim per request. Example: change line 10884 from `cache_key = f'kr_ohlc_{coin_id}_{interval}'` to `cache_key = f'kr_ohlc_{coin_id}_{interval}_{days}'`"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_crypto_chart_timeframe.py",
+    "/app/test_reports/pytest/test_crypto_chart_timeframe.xml"
+  ],
+  "action_items": [
+    "OPTIONAL FIX (minor): Add `days` to cache key in _kraken_ohlc to prevent stale-cache bar count issue. Change line 10884 in server.py: `cache_key = f'kr_ohlc_{coin_id}_{interval}_{days}'`"
+  ],
+  "critical_code_review_comments": [
+    "Cache key for _kraken_ohlc omits the `days` param — a default chart load (days=1, interval auto=60) populates `kr_ohlc_bitcoin_60` with 50 bars; explicit 1H calls (days=30, interval=60) within 120s TTL hit this cache and get only 50 bars. Not critical since spacing/interval correctness is fine, but bar count can be unexpectedly low.",
+    "_kraken_ohlc: bars_per_day uses `max(1, int(1440/interval)) if interval <= 1440 else 1`. For intervals > 1440 (e.g., 10080=weekly), bars_per_day=1 which is correct."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_crypto_chart_timeframe.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13)",
+    "frontend": "N/A (backend-only test)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Crypto chart timeframe fix fully tested. Core fix verified: _kraken_ohlc() now accepts interval_override param, /api/crypto/chart/{coin_id} accepts interval query param, and all Kraken valid intervals (1,5,15,30,60,240,1440) produce correct candle spacing. Test file: /app/backend/tests/test_crypto_chart_timeframe.py. Minor cache bug: cache key doesn't include `days` — may cause stale bar counts but not spacing issues.",
+  "test_results": {
+    "test_crypto_chart_default_no_interval": "PASS — 200, bars present, correct structure",
+    "test_crypto_chart_bitcoin_5min": "PASS — 300s spacing verified (5-min candles), bars > 0",
+    "test_crypto_chart_bitcoin_1hour": "PASS — 3600s spacing verified (1H candles)",
+    "test_crypto_chart_bitcoin_1day": "PASS — 86400s spacing verified (daily candles), ≥50 bars",
+    "test_different_intervals_produce_different_bar_counts": "PASS — ETH 5min(721) > 1D(confirmed), all intervals return data",
+    "test_crypto_chart_bitcoin_5min_bar_count": "PASS — 5min/3days returned 721 bars (well above pre-bug ~24 bars)",
+    "test_crypto_chart_bitcoin_15min": "PASS — 900s spacing verified",
+    "test_crypto_chart_bitcoin_30min": "PASS — 1800s spacing verified",
+    "test_crypto_chart_bitcoin_4hour": "PASS — 14400s spacing verified",
+    "test_crypto_chart_ethereum_1hour": "PASS — ETH 3600s spacing verified",
+    "test_crypto_chart_invalid_coin_returns_404": "PASS — 404 for unknown coin",
+    "test_crypto_chart_1min_no_zerodivision": "PASS — 1-min interval returns 200/404 (no server crash, ZeroDivisionError fix confirmed)",
+    "test_crypto_chart_response_contains_interval_field": "PASS — response echoes interval=60 and source=kraken"
+  }
+}
