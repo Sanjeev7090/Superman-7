@@ -10881,7 +10881,7 @@ async def _kraken_ohlc(coin_id: str, days: int, interval_override: int = None) -
     else:
         interval = 1440    # 1d  → max 720 bars
 
-    cache_key = f"kr_ohlc_{coin_id}_{interval}"
+    cache_key = f"kr_ohlc_{coin_id}_{interval}_{days}"
     if cache_key in cache_storage:
         cached_data, cached_time = cache_storage[cache_key]
         if (datetime.now() - cached_time).seconds < 120:

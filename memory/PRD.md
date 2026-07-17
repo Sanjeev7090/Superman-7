@@ -452,3 +452,21 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 > 2. **NO testing** — testing agent ya koi bhi automated testing mat karna
 > 3. Sirf code changes karo aur finish karo
 
+---
+
+## Update (Feb 2026) — Crypto Chart Timeframe Fix
+
+**Bug Fixed**: Crypto charts (BTC, ETH, etc.) mein timeframe change karne pe candles change nahi hoti thi.
+
+**Root Cause**: `_kraken_ohlc()` backend function sirf `days` se interval derive karta tha. Saare intraday TFs (1MIN, 5M, 15M, 30M, 1H) sab `days=1` map karte the → hamesha same 1H candles (interval=60) return hoti thi.
+
+**Fix**:
+- Backend `server.py`: `_kraken_ohlc(coin_id, days, interval_override=None)` — explicit interval support added
+- Backend `/api/crypto/chart/{coin_id}`: `interval` query param added (Kraken valid intervals: 1,5,15,30,60,240,1440,10080)  
+- Backend cache key: `kr_ohlc_{coin_id}_{interval}_{days}` (was missing `days`)
+- Backend `bars_needed` calculation: Fixed ZeroDivisionError for sub-60m intervals
+- Frontend `TradingDashboard.jsx`: `CRYPTO_TF_MAP` added (TF label → Kraken interval + days), `fetchCryptoData(coinId, days, interval)` updated
+- Frontend `MultiChartLayout.jsx`: `CRYPTO_TF_MAP` replaces old `CRYPTO_DAYS_MAP`, interval passed to API
+
+**Testing**: 13/13 tests PASS (iteration_33.json)
+
