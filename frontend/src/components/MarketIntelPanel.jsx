@@ -52,6 +52,45 @@ const MarketIntelPanel = ({ onClose }) => {
   const [nasdaqTf,   setNasdaqTf]   = useState('D');
   const [hangSengTf, setHangSengTf] = useState('D');
   const [giftTf,     setGiftTf]     = useState('D');
+  const [nowIST,     setNowIST]     = useState(() => new Date());
+
+  // Update clock every minute
+  useEffect(() => {
+    const t = setInterval(() => setNowIST(new Date()), 60000);
+    return () => clearInterval(t);
+  }, []);
+
+  // IST formatted: "06 Jun, 09:45 PM"
+  const istStr = nowIST.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  });
+
+  // NASDAQ market status (America/New_York)
+  const getNasdaqStatus = () => {
+    const etStr = nowIST.toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false });
+    const et = new Date(etStr);
+    const day  = et.getDay();
+    const mins = et.getHours() * 60 + et.getMinutes();
+    if (day === 0 || day === 6)           return { label: 'Closed (Weekend)', color: '#64748b' };
+    if (mins >= 570  && mins < 960)       return { label: 'Open',             color: '#22c55e' };
+    if (mins >= 240  && mins < 570)       return { label: 'Pre-Market',       color: '#f59e0b' };
+    if (mins >= 960  && mins < 1200)      return { label: 'After-Hours',      color: '#f59e0b' };
+    return                                       { label: 'Closed',           color: '#64748b' };
+  };
+
+  // Hang Seng market status (Asia/Hong_Kong)
+  const getHangSengStatus = () => {
+    const hkStr = nowIST.toLocaleString('en-US', { timeZone: 'Asia/Hong_Kong', hour12: false });
+    const hk   = new Date(hkStr);
+    const day  = hk.getDay();
+    const mins = hk.getHours() * 60 + hk.getMinutes();
+    if (day === 0 || day === 6)                          return { label: 'Closed (Weekend)', color: '#64748b' };
+    if ((mins >= 570 && mins < 720) || (mins >= 780 && mins < 960))
+                                                         return { label: 'Open',             color: '#22c55e' };
+    if (mins >= 720 && mins < 780)                       return { label: 'Lunch Break',      color: '#f59e0b' };
+    return                                                      { label: 'Closed',           color: '#64748b' };
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -244,6 +283,12 @@ const MarketIntelPanel = ({ onClose }) => {
                 <div className="text-[10px] mt-0.5 font-mono" style={{ color: chgColor(nasdaqChg) }}>
                   {fmtPct(nasdaqChg)} {nasdaqTf === 'D' ? '(Day)' : nasdaqTf === 'W' ? '(Week)' : '(Month)'}
                 </div>
+                <div className="flex items-center justify-between mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                  <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>{istStr} IST</span>
+                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full" style={{ color: getNasdaqStatus().color, background: `${getNasdaqStatus().color}18` }}>
+                    {getNasdaqStatus().label}
+                  </span>
+                </div>
               </div>
 
               {/* Other cards — Hang Seng, GIFT Nifty, Regulatory, Bias */}
@@ -259,6 +304,8 @@ const MarketIntelPanel = ({ onClose }) => {
                        : hangSengTf === 'W' ? fmtPct(hangSengChg) + ' (Week)'
                        : fmtPct(hangSengChg) + ' (Month)',
                   tfSubColor: chgColor(hangSengChg),
+                  marketStatus: getHangSengStatus(),
+                  showClock: true,
                 },
                 {
                   label: 'GIFT Nifty',
@@ -288,7 +335,7 @@ const MarketIntelPanel = ({ onClose }) => {
                   icon: <Gauge size={14} />,
                   valueColor: data.bias_color,
                 },
-              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf }) => (
+              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf, marketStatus, showClock }) => (
                 <div key={label} className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-1.5 text-[9px]" style={{ color: C.textMuted }}>
@@ -305,6 +352,14 @@ const MarketIntelPanel = ({ onClose }) => {
                   </div>
                   <div className="text-sm font-bold font-mono" style={{ color: valueColor || C.textPrimary }}>{value}</div>
                   <div className="text-[10px] mt-0.5 font-mono" style={{ color: subColor }}>{sub}</div>
+                  {showClock && marketStatus && (
+                    <div className="flex items-center justify-between mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                      <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>{istStr} IST</span>
+                      <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full" style={{ color: marketStatus.color, background: `${marketStatus.color}18` }}>
+                        {marketStatus.label}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
