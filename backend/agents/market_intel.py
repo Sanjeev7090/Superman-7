@@ -29,8 +29,8 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 _cache: Dict[str, Any] = {}
-CACHE_TTL       = 900   # 15 min — fresh threshold
-CACHE_STALE_TTL = 1800  # 30 min — serve stale while refreshing
+CACHE_TTL       = 120   # 2 min — fresh threshold
+CACHE_STALE_TTL = 300   # 5 min — serve stale while refreshing
 _refreshing     = False  # prevent concurrent background refreshes
 
 
