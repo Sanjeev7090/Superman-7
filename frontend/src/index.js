@@ -3,25 +3,41 @@ import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
 
-// Suppress lightweight-charts "Object is disposed" errors from internal RAF paint callbacks.
-// When chart.remove() is called, lightweight-charts may have a pending requestAnimationFrame
-// that fires after disposal and throws internally. This is a known lw-charts v4 limitation —
-// the error is cosmetic (chart is already removed) and should not show the dev error overlay.
-// Also suppress "ResizeObserver loop completed with undelivered notifications" — a benign
-// browser timing issue that occurs when ResizeObserver callbacks trigger layout changes
-// faster than the browser can deliver them. Does not affect functionality.
-window.addEventListener('error', (event) => {
-  if (
-    (event.message && event.message.includes('Object is disposed')) ||
-    (event.message && (
-      event.message.includes('ResizeObserver loop completed') ||
-      event.message.includes('ResizeObserver loop limit exceeded')
-    ))
-  ) {
-    event.stopImmediatePropagation();
-    event.preventDefault();
+// ── Suppress benign runtime noise ──────────────────────────────────────────
+// 1. lightweight-charts "Object is disposed": thrown from a pending RAF after
+//    chart.remove() is called — cosmetic only, chart is already gone.
+// 2. ResizeObserver loop: benign browser timing notice, not a real error.
+// All three handlers below guard different entry points the overlay uses.
+
+const SUPPRESS = (msg) =>
+  typeof msg === 'string' && (
+    msg.includes('Object is disposed') ||
+    msg.includes('ResizeObserver loop completed') ||
+    msg.includes('ResizeObserver loop limit exceeded')
+  );
+
+// (a) Capture-phase listener — fires before CRA overlay's bubble-phase listener
+window.addEventListener('error', (e) => {
+  if (SUPPRESS(e.message)) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
   }
-}, true); // useCapture=true so this fires before React overlay's handler
+}, true);
+
+// (b) window.onerror — catches errors from RAF callbacks in some browsers
+window.onerror = (message) => {
+  if (SUPPRESS(message)) return true; // returning true = suppressed
+  return false;
+};
+
+// (c) unhandledrejection — in case the chart error leaks as a rejected promise
+window.addEventListener('unhandledrejection', (e) => {
+  if (SUPPRESS(e.reason?.message)) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+  }
+}, true);
+// ────────────────────────────────────────────────────────────────────────────
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
