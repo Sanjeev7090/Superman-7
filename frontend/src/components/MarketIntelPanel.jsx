@@ -66,31 +66,43 @@ const MarketIntelPanel = ({ onClose }) => {
     hour: '2-digit', minute: '2-digit', hour12: true,
   });
 
-  // NASDAQ market status (America/New_York)
-  const getNasdaqStatus = () => {
+  // NASDAQ open time in IST (accounts for EDT/EST)
+  // EDT (Mar-Oct, UTC-4): 9:30 AM ET = 7:00 PM IST
+  // EST (Nov-Feb, UTC-5): 9:30 AM ET = 8:00 PM IST
+  const nasdaqOpenIST = (() => {
+    const m = nowIST.getMonth(); // 0=Jan
+    return (m >= 2 && m <= 9) ? '7:00 PM' : '8:00 PM';
+  })();
+
+  // Hang Seng open time in IST: HKT = IST + 2:30h → 9:30 AM HKT = 7:00 AM IST
+  const hangSengOpenIST = '7:00 AM';
+  const hangSengReopenIST = '10:30 AM'; // after lunch break
+
+  // NASDAQ market status (America/New_York) — computed once
+  const nasdaqStatus = (() => {
     const etStr = nowIST.toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false });
     const et = new Date(etStr);
     const day  = et.getDay();
     const mins = et.getHours() * 60 + et.getMinutes();
-    if (day === 0 || day === 6)           return { label: 'Closed (Weekend)', color: '#64748b' };
-    if (mins >= 570  && mins < 960)       return { label: 'Open',             color: '#22c55e' };
-    if (mins >= 240  && mins < 570)       return { label: 'Pre-Market',       color: '#f59e0b' };
-    if (mins >= 960  && mins < 1200)      return { label: 'After-Hours',      color: '#f59e0b' };
-    return                                       { label: 'Closed',           color: '#64748b' };
-  };
+    if (day === 0 || day === 6)      return { label: 'Closed (Weekend)', color: '#64748b', live: false };
+    if (mins >= 570  && mins < 960)  return { label: 'Open',             color: '#22c55e', live: true  };
+    if (mins >= 240  && mins < 570)  return { label: 'Pre-Market',       color: '#f59e0b', live: false };
+    if (mins >= 960  && mins < 1200) return { label: 'After-Hours',      color: '#f59e0b', live: false };
+    return                                  { label: 'Closed',           color: '#64748b', live: false };
+  })();
 
-  // Hang Seng market status (Asia/Hong_Kong)
-  const getHangSengStatus = () => {
+  // Hang Seng market status (Asia/Hong_Kong) — computed once
+  const hangSengStatus = (() => {
     const hkStr = nowIST.toLocaleString('en-US', { timeZone: 'Asia/Hong_Kong', hour12: false });
     const hk   = new Date(hkStr);
     const day  = hk.getDay();
     const mins = hk.getHours() * 60 + hk.getMinutes();
-    if (day === 0 || day === 6)                          return { label: 'Closed (Weekend)', color: '#64748b' };
+    if (day === 0 || day === 6)                               return { label: 'Closed (Weekend)', color: '#64748b', live: false };
     if ((mins >= 570 && mins < 720) || (mins >= 780 && mins < 960))
-                                                         return { label: 'Open',             color: '#22c55e' };
-    if (mins >= 720 && mins < 780)                       return { label: 'Lunch Break',      color: '#f59e0b' };
-    return                                                      { label: 'Closed',           color: '#64748b' };
-  };
+                                                              return { label: 'Open',             color: '#22c55e', live: true  };
+    if (mins >= 720 && mins < 780)                            return { label: 'Lunch Break',      color: '#f59e0b', live: false };
+    return                                                           { label: 'Closed',           color: '#64748b', live: false };
+  })();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -284,9 +296,18 @@ const MarketIntelPanel = ({ onClose }) => {
                   {fmtPct(nasdaqChg)} {nasdaqTf === 'D' ? '(Day)' : nasdaqTf === 'W' ? '(Week)' : '(Month)'}
                 </div>
                 <div className="flex items-center justify-between mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
-                  <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>{istStr} IST</span>
-                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full" style={{ color: getNasdaqStatus().color, background: `${getNasdaqStatus().color}18` }}>
-                    {getNasdaqStatus().label}
+                  {nasdaqStatus.live ? (
+                    <span className="flex items-center gap-1 text-[8px] font-bold" style={{ color: '#22c55e' }}>
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" style={{ animation: 'pulse 1.5s infinite' }} />
+                      LIVE
+                    </span>
+                  ) : (
+                    <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>
+                      Opens {nasdaqOpenIST} IST
+                    </span>
+                  )}
+                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full" style={{ color: nasdaqStatus.color, background: `${nasdaqStatus.color}18` }}>
+                    {nasdaqStatus.label}
                   </span>
                 </div>
               </div>
@@ -304,8 +325,9 @@ const MarketIntelPanel = ({ onClose }) => {
                        : hangSengTf === 'W' ? fmtPct(hangSengChg) + ' (Week)'
                        : fmtPct(hangSengChg) + ' (Month)',
                   tfSubColor: chgColor(hangSengChg),
-                  marketStatus: getHangSengStatus(),
+                  marketStatus: hangSengStatus,
                   showClock: true,
+                  openTimeIST: hangSengStatus.label === 'Lunch Break' ? hangSengReopenIST : hangSengOpenIST,
                 },
                 {
                   label: 'GIFT Nifty',
@@ -335,7 +357,7 @@ const MarketIntelPanel = ({ onClose }) => {
                   icon: <Gauge size={14} />,
                   valueColor: data.bias_color,
                 },
-              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf, marketStatus, showClock }) => (
+              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf, marketStatus, showClock, openTimeIST }) => (
                 <div key={label} className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-1.5 text-[9px]" style={{ color: C.textMuted }}>
@@ -354,7 +376,16 @@ const MarketIntelPanel = ({ onClose }) => {
                   <div className="text-[10px] mt-0.5 font-mono" style={{ color: subColor }}>{sub}</div>
                   {showClock && marketStatus && (
                     <div className="flex items-center justify-between mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
-                      <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>{istStr} IST</span>
+                      {marketStatus.live ? (
+                        <span className="flex items-center gap-1 text-[8px] font-bold" style={{ color: '#22c55e' }}>
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" style={{ animation: 'pulse 1.5s infinite' }} />
+                          LIVE
+                        </span>
+                      ) : (
+                        <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>
+                          {marketStatus.label === 'Lunch Break' ? 'Reopens' : 'Opens'} {openTimeIST} IST
+                        </span>
+                      )}
                       <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full" style={{ color: marketStatus.color, background: `${marketStatus.color}18` }}>
                         {marketStatus.label}
                       </span>
