@@ -45,7 +45,19 @@ const Icon4 = () => (
   </svg>
 );
 
-// --- Per-slot stock search autocomplete ---
+// Fullscreen icon
+const IconFullscreen = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+    <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+  </svg>
+);
+const IconExitFullscreen = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+    <line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/>
+  </svg>
+);
 function StockSearchBar({ slot, onSelect }) {
   const [query, setQuery]       = useState('');
   const [results, setResults]   = useState([]);
@@ -385,6 +397,14 @@ export default function MultiChartLayout({
   const [layout, setLayout] = useState(() => {
     try { return parseInt(localStorage.getItem(LAYOUT_KEY) || '1', 10) || 1; } catch { return 1; }
   });
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // ESC key exits fullscreen
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') setIsFullscreen(false); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   const handleLayoutChange = useCallback((n) => {
     setLayout(n);
@@ -469,7 +489,7 @@ export default function MultiChartLayout({
     : '100%';
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className={`flex flex-col ${isFullscreen ? 'fixed inset-0 z-[200] bg-[#090909]' : 'h-full min-h-0'}`}>
       {/* Layout switcher toolbar */}
       <div className="shrink-0 flex items-center px-2 py-1 bg-white dark:bg-zinc-950 border-b border-slate-200 dark:border-zinc-800/60">
         {[
@@ -495,6 +515,24 @@ export default function MultiChartLayout({
             </button>
           </React.Fragment>
         ))}
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Fullscreen toggle */}
+        <button
+          onClick={() => setIsFullscreen(f => !f)}
+          title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Fullscreen Charts'}
+          data-testid="chart-fullscreen-btn"
+          className={`flex items-center gap-1 px-2 py-1 rounded text-[9px] font-semibold transition-all border ${
+            isFullscreen
+              ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20'
+              : 'border-slate-200 dark:border-zinc-700/60 text-slate-500 dark:text-zinc-400 hover:text-violet-500 dark:hover:text-violet-400 hover:border-violet-400/50'
+          }`}
+        >
+          {isFullscreen ? <IconExitFullscreen /> : <IconFullscreen />}
+          <span>{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
+        </button>
       </div>
 
       {/* Charts grid */}

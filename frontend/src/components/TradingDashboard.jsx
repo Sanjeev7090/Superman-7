@@ -809,8 +809,8 @@ const TradingDashboard = () => {
 
         {/* Center — Live Chart + Key Indicators */}
         <main className={`flex-1 lg:col-span-9 xl:col-span-10 flex flex-col relative min-h-0 overflow-y-auto ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
-          {/* Multi-chart panel — fixed height block */}
-          <div className="shrink-0" style={{ height: 'min(56vh, 540px)', minHeight: '320px' }}>
+          {/* Multi-chart panel — height grows with viewport */}
+          <div className="shrink-0" style={{ height: 'min(68vh, 680px)', minHeight: '420px' }}>
             <MultiChartLayout
               initialStock={selectedStock}
               initialStockData={stockData}
