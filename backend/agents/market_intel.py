@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,10 @@ CACHE_TTL       = 120   # 2 min — fresh threshold
 CACHE_STALE_TTL = 300   # 5 min — serve stale while refreshing
 _refreshing     = False  # prevent concurrent background refreshes
 
-# ── PCR Cache (separate from main intel cache) ─────────────────────────────────
-_pcr_cache: Dict[str, Any] = {}
+# ── PCR Cache + History ────────────────────────────────────────────────────────
+_pcr_cache:   Dict[str, Any] = {}
+_PCR_HISTORY: List[Dict]     = []   # [{"ts": ISO, "pcr": float}, ...]
+_MAX_PCR_HIS  = 750                 # ~25 hrs @ 2-min refresh = 750 readings
 
 
 # ── Nifty PCR Signal Guide (image-accurate thresholds) ────────────────────────
@@ -170,6 +172,12 @@ def _fetch_nifty_pcr_sync() -> Dict:
             "source":        "nse_live",
         }
         _pcr_cache["nifty_pcr"] = {"data": result, "ts": datetime.now(timezone.utc)}
+
+        # Append to rolling history (cap at _MAX_PCR_HIS)
+        _PCR_HISTORY.append({"ts": datetime.now(timezone.utc).isoformat(), "pcr": pcr_val})
+        if len(_PCR_HISTORY) > _MAX_PCR_HIS:
+            del _PCR_HISTORY[0]
+
         return result
 
     except Exception as e:
@@ -1108,6 +1116,7 @@ async def _build_intel() -> Dict:
         "tomorrow_move": moves["tomorrow_move"],
         "pcr":           pcr_data,
         "pcr_price_action": pcr_price_action,
+        "pcr_history":   _PCR_HISTORY[-300:],  # last 300 pts (10 hrs) for chart
         "scores": {
             "brent": brent_score, "vix": vix_score,
             "regulatory": reg_score, "gift": gift_score, "total": total_score,

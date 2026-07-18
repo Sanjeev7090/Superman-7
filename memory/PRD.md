@@ -454,7 +454,23 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Update (Feb 2026) — Market Intel: PCR Signal Card
+## Update (Feb 2026) — PCR Historical Trend Chart
+
+**Feature**: PCR Trend Sparkline added inside the PCR Signal card
+
+- SVG-based sparkline (no external library) with color-coded zone bands
+- Zone bands: Red (< 0.70), Yellow (0.70-0.90), Green (0.90-1.20), Amber (> 1.20)
+- Reference dashed lines at 0.50, 0.70, 0.90, 1.20, 1.50
+- Hover tooltip showing time + PCR value
+- X-axis time ticks (start, middle, end)
+- Current PCR dot highlighted with glow
+- "Accumulating live data..." shown until ≥ 2 readings
+- Backend stores up to 750 readings (~25 hours @ 2-min refresh) in `_PCR_HISTORY`
+- `pcr_history` (last 300 readings) included in market-intel response
+
+**Files**: `market_intel.py` (`_PCR_HISTORY`, `_MAX_PCR_HIS`), `MarketIntelPanel.jsx` (`PcrSparkline` component)
+
+
 
 **Feature**: Nifty PCR Signal Card added to Market Intelligence panel
 
