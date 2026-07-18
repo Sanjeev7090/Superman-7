@@ -33,6 +33,149 @@ CACHE_TTL       = 120   # 2 min — fresh threshold
 CACHE_STALE_TTL = 300   # 5 min — serve stale while refreshing
 _refreshing     = False  # prevent concurrent background refreshes
 
+# ── PCR Cache (separate from main intel cache) ─────────────────────────────────
+_pcr_cache: Dict[str, Any] = {}
+
+
+# ── Nifty PCR Signal Guide (image-accurate thresholds) ────────────────────────
+
+def _pcr_signal(pcr: float) -> Dict:
+    """
+    Returns signal, label, color, description based on PCR value.
+    Thresholds match the Nifty PCR Signal Guide image exactly.
+    """
+    if pcr <= 0:
+        return {"signal": "UNAVAILABLE", "label": "No Data", "color": "#64748b",
+                "description": "PCR data unavailable", "caution": False}
+    if pcr < 0.50:
+        return {"signal": "OVER_BEARISH", "label": "OVER-BEARISH",
+                "color": "#ef4444", "bg": "#ef444418",
+                "description": "Market oversold — short covering se sharp bounce aa sakta hai",
+                "caution": True, "caution_label": "CAUTION (Bounce Possible)"}
+    if pcr < 0.70:
+        return {"signal": "BEARISH", "label": "BEARISH",
+                "color": "#f97316", "bg": "#f9731618",
+                "description": "Call writing zyada — downside pressure ka signal",
+                "caution": False}
+    if pcr < 0.90:
+        return {"signal": "NEUTRAL_BEARISH", "label": "NEUTRAL / SLIGHTLY BEARISH",
+                "color": "#eab308", "bg": "#eab30818",
+                "description": "Balanced market with slight bearish tilt",
+                "caution": False}
+    if pcr < 1.20:
+        return {"signal": "BULLISH", "label": "HEALTHY BULLISH",
+                "color": "#22c55e", "bg": "#22c55e18",
+                "description": "Balanced market — bullish sentiment",
+                "caution": False}
+    if pcr < 1.50:
+        return {"signal": "STRONG_BULLISH", "label": "STRONG BULLISH",
+                "color": "#16a34a", "bg": "#16a34a18",
+                "description": "Put writing dominant — upside momentum ka signal",
+                "caution": False}
+    # pcr >= 1.50
+    return {"signal": "OVER_BULLISH", "label": "OVER-BULLISH",
+            "color": "#f59e0b", "bg": "#f59e0b18",
+            "description": "Market overbought ho sakta hai — reversal ka signal ban sakta hai",
+            "caution": True, "caution_label": "CAUTION (Reversal Risk)"}
+
+
+def _pcr_price_action_signal(pcr: float, nifty_chg_pct: float) -> Dict:
+    """
+    PCR + Price Action combined signal (bottom section of the image).
+    PCR direction derived: pcr >= 1.0 → 'UP' (bullish), < 1.0 → 'DOWN' (bearish)
+    Price direction: nifty_chg_pct > 0 → UP, < 0 → DOWN
+    """
+    price_up = nifty_chg_pct > 0.05
+    price_dn = nifty_chg_pct < -0.05
+    pcr_up   = pcr >= 1.0    # >= 1.0 = puts dominant = bullish
+    pcr_dn   = pcr < 1.0     # < 1.0  = calls dominant = bearish
+
+    if price_up and pcr_up:
+        return {"signal": "BULLISH_CONFIRMATION", "label": "BULLISH CONFIRMATION",
+                "color": "#22c55e", "icon": "CHECK",
+                "detail": "Price UP + PCR UP — strong upside signal"}
+    if price_dn and pcr_dn:
+        return {"signal": "BEARISH_CONFIRMATION", "label": "BEARISH CONFIRMATION",
+                "color": "#ef4444", "icon": "CHECK",
+                "detail": "Price DOWN + PCR DOWN — strong downside signal"}
+    if price_up and pcr_dn:
+        return {"signal": "WEAK_RALLY", "label": "WEAK RALLY (CAUTION)",
+                "color": "#f59e0b", "icon": "WARN",
+                "detail": "Price UP but PCR DOWN — rally may not sustain"}
+    if price_dn and pcr_up:
+        return {"signal": "BOUNCE_POSSIBLE", "label": "BOUNCE POSSIBLE",
+                "color": "#06b6d4", "icon": "INFO",
+                "detail": "Price DOWN but PCR UP — selling may be exhausting, watch for reversal"}
+    # price near flat
+    return {"signal": "WATCH", "label": "RANGE / WATCH",
+            "color": "#94a3b8", "icon": "NEUTRAL",
+            "detail": "Price flat — wait for directional confirmation"}
+
+
+def _fetch_nifty_pcr_sync() -> Dict:
+    """
+    Fetch live Nifty PCR directly from NSE option chain.
+    Short 4s timeout — if NSE unreachable, returns UNAVAILABLE immediately.
+    """
+    _UNAVAILABLE = {
+        "pcr": 0.0, "total_call_oi": 0, "total_put_oi": 0,
+        "signal": "UNAVAILABLE", "signal_label": "PCR Unavailable",
+        "signal_color": "#64748b", "signal_bg": "#64748b18",
+        "description": "NSE data temporarily unavailable",
+        "caution": False, "caution_label": "", "source": "unavailable",
+    }
+
+    cached = _pcr_cache.get("nifty_pcr")
+    if cached:
+        age = (datetime.now(timezone.utc) - cached["ts"]).total_seconds()
+        if age < 120:
+            return cached["data"]
+
+    try:
+        from curl_cffi import requests as cffi_req
+        s = cffi_req.Session(impersonate="chrome120")
+        s.headers.update({
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.nseindia.com/option-chain",
+        })
+        # Skip heavy warmup — try direct API call only
+        r = s.get(
+            "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY",
+            timeout=4,
+        )
+        r.raise_for_status()
+        raw = r.json()
+        records = raw.get("records", {}).get("data", [])
+        if not records:
+            return _UNAVAILABLE
+
+        total_call_oi = sum(r.get("CE", {}).get("openInterest", 0) for r in records if r.get("CE"))
+        total_put_oi  = sum(r.get("PE", {}).get("openInterest", 0) for r in records if r.get("PE"))
+
+        pcr_val = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.0
+        sig     = _pcr_signal(pcr_val)
+
+        result = {
+            "pcr":           pcr_val,
+            "total_call_oi": int(total_call_oi),
+            "total_put_oi":  int(total_put_oi),
+            "signal":        sig["signal"],
+            "signal_label":  sig["label"],
+            "signal_color":  sig["color"],
+            "signal_bg":     sig.get("bg", sig["color"] + "18"),
+            "description":   sig["description"],
+            "caution":       sig.get("caution", False),
+            "caution_label": sig.get("caution_label", ""),
+            "source":        "nse_live",
+        }
+        _pcr_cache["nifty_pcr"] = {"data": result, "ts": datetime.now(timezone.utc)}
+        return result
+
+    except Exception as e:
+        logger.debug(f"[MarketIntel PCR] NSE unavailable: {e}")
+        return _UNAVAILABLE
+
 
 # ── Bias Levels ────────────────────────────────────────────────────────────────
 
@@ -866,7 +1009,7 @@ async def _build_intel() -> Dict:
         hs_nifty_color  = "#94a3b8"
         hs_nifty_signal = "Neutral"
 
-    # Phase 2: parallel GIFT + history fetches
+    # Phase 2: parallel GIFT + history fetches + PCR (with 6s timeout to avoid blocking)
     gift_task          = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
     vix_hist_task      = loop.run_in_executor(None, _fetch_vix_history)
     brent_hist_task    = loop.run_in_executor(None, _fetch_brent_history)
@@ -874,8 +1017,28 @@ async def _build_intel() -> Dict:
     nifty_hist_task    = loop.run_in_executor(None, _fetch_nifty_history)
     gift_hist_task     = loop.run_in_executor(None, _fetch_gift_nifty_history)
     hs_hist_task       = loop.run_in_executor(None, _fetch_hang_seng_history)
-    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist = await asyncio.gather(
-        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task)
+
+    # PCR runs independently with a strict timeout so it never blocks market-intel
+    async def _pcr_with_timeout():
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, _fetch_nifty_pcr_sync),
+                timeout=6.0,
+            )
+        except asyncio.TimeoutError:
+            logger.debug("[MarketIntel PCR] timeout — skipping")
+            return {
+                "pcr": 0.0, "total_call_oi": 0, "total_put_oi": 0,
+                "signal": "UNAVAILABLE", "signal_label": "PCR Unavailable",
+                "signal_color": "#64748b", "signal_bg": "#64748b18",
+                "description": "NSE data temporarily unavailable",
+                "caution": False, "caution_label": "", "source": "timeout",
+            }
+
+    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist, pcr_data = await asyncio.gather(
+        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task,
+        _pcr_with_timeout()
+    )
 
     expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
@@ -900,6 +1063,12 @@ async def _build_intel() -> Dict:
     moves = _compute_today_tomorrow_moves(
         nifty, vix, gift_premium, total_score, nasdaq_chg, hang_seng_chg
     )
+
+    # PCR signal + Price Action combined signal
+    pcr_value          = pcr_data.get("pcr", 0.0)
+    pcr_price_action   = _pcr_price_action_signal(pcr_value, nifty_chg) if pcr_value > 0 else {
+        "signal": "UNAVAILABLE", "label": "PCR Unavailable", "color": "#64748b", "icon": "NEUTRAL", "detail": ""
+    }
 
     data = {
         "brent": round(brent, 2), "brent_chg_pct": brent_chg,
@@ -937,6 +1106,8 @@ async def _build_intel() -> Dict:
         "action": bias["action"], "gift_color_label": bias["gift_color"],
         "today_move":    moves["today_move"],
         "tomorrow_move": moves["tomorrow_move"],
+        "pcr":           pcr_data,
+        "pcr_price_action": pcr_price_action,
         "scores": {
             "brent": brent_score, "vix": vix_score,
             "regulatory": reg_score, "gift": gift_score, "total": total_score,

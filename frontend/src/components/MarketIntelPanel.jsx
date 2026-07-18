@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { X, TrendUp, TrendDown, Minus, ArrowClockwise, Gauge, Globe, ChartLine, Timer, Warning } from '@phosphor-icons/react';
+import { X, TrendUp, TrendDown, Minus, ArrowClockwise, Gauge, Globe, ChartLine, Timer, Warning, ChartBar } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -543,6 +543,119 @@ const MarketIntelPanel = ({ onClose }) => {
                     </>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* ── Nifty PCR Signal Card ────────────────────────────────────── */}
+            {data.pcr && data.pcr.signal !== 'UNAVAILABLE' && (
+              <div className="rounded-xl p-4" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}
+                data-testid="pcr-signal-card">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <ChartBar size={13} className="text-purple-400" />
+                    <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>
+                      Nifty PCR Signal
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-mono" style={{ color: C.textMuted }}>
+                    OI PCR: <span className="font-bold" style={{ color: data.pcr.signal_color }}>{data.pcr.pcr}</span>
+                  </span>
+                </div>
+
+                {/* Main PCR signal chip */}
+                <div className="flex items-center gap-3 mb-3">
+                  <div
+                    className="flex-1 px-3 py-2 rounded-lg text-center"
+                    style={{
+                      background: data.pcr.signal_bg || `${data.pcr.signal_color}18`,
+                      border: `1px solid ${data.pcr.signal_color}50`,
+                    }}
+                  >
+                    <div className="text-[11px] font-black tracking-wide" style={{ color: data.pcr.signal_color }}>
+                      {data.pcr.signal_label}
+                    </div>
+                    {data.pcr.caution && (
+                      <div className="text-[8px] font-bold mt-0.5" style={{ color: '#f59e0b' }}>
+                        ⚠ {data.pcr.caution_label}
+                      </div>
+                    )}
+                    <div className="text-[8px] mt-1" style={{ color: C.textMuted }}>{data.pcr.description}</div>
+                  </div>
+                </div>
+
+                {/* PCR level reference guide */}
+                <div className="grid grid-cols-3 gap-1 mb-3">
+                  {[
+                    { range: '< 0.50', label: 'OVER-BEARISH', color: '#ef4444' },
+                    { range: '0.50–0.70', label: 'BEARISH', color: '#f97316' },
+                    { range: '0.70–0.90', label: 'NEUTRAL-BEAR', color: '#eab308' },
+                    { range: '0.90–1.20', label: 'HEALTHY BULL', color: '#22c55e' },
+                    { range: '1.20–1.50', label: 'STRONG BULL', color: '#16a34a' },
+                    { range: '> 1.50',   label: 'OVER-BULLISH', color: '#f59e0b' },
+                  ].map((item) => {
+                    const isActive = (
+                      (item.range === '< 0.50'    && data.pcr.pcr < 0.50) ||
+                      (item.range === '0.50–0.70' && data.pcr.pcr >= 0.50 && data.pcr.pcr < 0.70) ||
+                      (item.range === '0.70–0.90' && data.pcr.pcr >= 0.70 && data.pcr.pcr < 0.90) ||
+                      (item.range === '0.90–1.20' && data.pcr.pcr >= 0.90 && data.pcr.pcr < 1.20) ||
+                      (item.range === '1.20–1.50' && data.pcr.pcr >= 1.20 && data.pcr.pcr < 1.50) ||
+                      (item.range === '> 1.50'    && data.pcr.pcr >= 1.50)
+                    );
+                    return (
+                      <div key={item.range}
+                        className="rounded px-1 py-0.5 text-center"
+                        style={{
+                          background: isActive ? `${item.color}28` : 'transparent',
+                          border: `1px solid ${isActive ? item.color : C.borderSubtle}`,
+                        }}
+                      >
+                        <div className="text-[7px] font-mono" style={{ color: isActive ? item.color : C.textMuted }}>{item.range}</div>
+                        <div className="text-[7px] font-bold leading-tight" style={{ color: isActive ? item.color : C.textMuted }}>{item.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* PCR + Price Action combined signal */}
+                {data.pcr_price_action && data.pcr_price_action.signal !== 'UNAVAILABLE' && (
+                  <div>
+                    <div className="text-[8px] uppercase tracking-wider mb-1.5" style={{ color: C.textMuted }}>PCR + Price Action</div>
+                    <div
+                      className="rounded-lg px-3 py-2 flex items-center gap-2"
+                      style={{
+                        background: `${data.pcr_price_action.color}15`,
+                        border: `1px solid ${data.pcr_price_action.color}40`,
+                      }}
+                    >
+                      <div
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ background: data.pcr_price_action.color }}
+                      />
+                      <div>
+                        <div className="text-[10px] font-black" style={{ color: data.pcr_price_action.color }}>
+                          {data.pcr_price_action.label}
+                        </div>
+                        <div className="text-[8px]" style={{ color: C.textMuted }}>{data.pcr_price_action.detail}</div>
+                      </div>
+                    </div>
+                    {/* 4 rule reference */}
+                    <div className="mt-2 grid grid-cols-2 gap-1">
+                      {[
+                        { cond: 'Price UP + PCR UP', result: 'BULLISH CONFIRMATION', color: '#22c55e' },
+                        { cond: 'Price DOWN + PCR DOWN', result: 'BEARISH CONFIRMATION', color: '#ef4444' },
+                        { cond: 'Price UP + PCR DOWN', result: 'WEAK RALLY (CAUTION)', color: '#f59e0b' },
+                        { cond: 'Price DOWN + PCR UP', result: 'BOUNCE POSSIBLE', color: '#06b6d4' },
+                      ].map((rule) => (
+                        <div key={rule.cond} className="rounded px-1.5 py-1"
+                          style={{ background: C.panelBg, border: `1px solid ${C.borderSubtle}` }}>
+                          <div className="text-[7px]" style={{ color: C.textMuted }}>{rule.cond}</div>
+                          <div className="text-[7px] font-bold" style={{ color: rule.color }}>{rule.result}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

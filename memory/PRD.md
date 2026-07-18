@@ -454,7 +454,34 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Update (Feb 2026) — Market Intel: Today/Tomorrow Possibility
+## Update (Feb 2026) — Market Intel: PCR Signal Card
+
+**Feature**: Nifty PCR Signal Card added to Market Intelligence panel
+
+**PCR Levels (as per image)**:
+- PCR < 0.50: OVER-BEARISH (bounce possible caution)
+- PCR 0.50-0.70: BEARISH
+- PCR 0.70-0.90: NEUTRAL/SLIGHTLY BEARISH
+- PCR 0.90-1.20: HEALTHY BULLISH
+- PCR 1.20-1.50: STRONG BULLISH
+- PCR > 1.50: OVER-BULLISH (reversal caution)
+
+**PCR + Price Action Rules** (4 combinations shown):
+- Price UP + PCR UP → BULLISH CONFIRMATION
+- Price DOWN + PCR DOWN → BEARISH CONFIRMATION
+- Price UP + PCR DOWN → WEAK RALLY (CAUTION)
+- Price DOWN + PCR UP → BOUNCE POSSIBLE
+
+**Implementation notes**:
+- Backend: `_fetch_nifty_pcr_sync()` tries NSE option chain with 4s timeout
+- Backend: `asyncio.wait_for(timeout=6.0)` prevents market-intel blocking
+- NSE unreachable in cloud env → PCR card hidden gracefully (UNAVAILABLE)
+- PCR card shows live when NSE accessible (market hours)
+- Fixed deadlock: removed internal localhost HTTP call → direct NSE curl_cffi call
+
+**Files**: `market_intel.py` (added PCR functions), `MarketIntelPanel.jsx` (PCR card UI)
+
+
 
 **Change**: "Expected Move (1-3 Days)" + "Probability" fields replace kiye gaye
 - **Today's Possibility**: GIFT Nifty premium + 1-day VIX σ se compute hota hai
