@@ -137,14 +137,31 @@ def _fetch_nifty_pcr_sync() -> Dict:
         from curl_cffi import requests as cffi_req
         s = cffi_req.Session(impersonate="chrome120")
         s.headers.update({
-            "Accept": "application/json, text/plain, */*",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://www.nseindia.com/option-chain",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
         })
-        # Skip heavy warmup — try direct API call only
+        # Minimal warmup to get NSE cookies (same flow as server.py but shorter timeouts)
+        try:
+            s.get("https://www.nseindia.com/", timeout=5)
+        except Exception:
+            pass  # cookies may still be set even on partial response
+        try:
+            s.get("https://www.nseindia.com/option-chain", timeout=4)
+        except Exception:
+            pass
+
+        # Now make the actual API call with proper Accept header
+        s.headers.update({
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.nseindia.com/option-chain",
+            "X-Requested-With": "XMLHttpRequest",
+        })
         r = s.get(
             "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY",
-            timeout=4,
+            timeout=6,
         )
         r.raise_for_status()
         raw = r.json()
@@ -152,8 +169,8 @@ def _fetch_nifty_pcr_sync() -> Dict:
         if not records:
             return _UNAVAILABLE
 
-        total_call_oi = sum(r.get("CE", {}).get("openInterest", 0) for r in records if r.get("CE"))
-        total_put_oi  = sum(r.get("PE", {}).get("openInterest", 0) for r in records if r.get("PE"))
+        total_call_oi = sum(row.get("CE", {}).get("openInterest", 0) for row in records if row.get("CE"))
+        total_put_oi  = sum(row.get("PE", {}).get("openInterest", 0) for row in records if row.get("PE"))
 
         pcr_val = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.0
         sig     = _pcr_signal(pcr_val)
@@ -1031,7 +1048,7 @@ async def _build_intel() -> Dict:
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch_nifty_pcr_sync),
-                timeout=6.0,
+                timeout=18.0,
             )
         except asyncio.TimeoutError:
             logger.debug("[MarketIntel PCR] timeout — skipping")
