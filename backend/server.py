@@ -13247,9 +13247,11 @@ async def startup_binance_ws():
     # Pre-warm Market Intelligence cache so first user request is instant
     async def _warm_market_intel():
         try:
-            from agents.market_intel import fetch_market_intel
+            from agents.market_intel import fetch_market_intel, pcr_background_loop
             await fetch_market_intel()
             logging.info("Market Intelligence cache warmed on startup")
+            # Start PCR background loop — independent of market-intel requests
+            asyncio.create_task(pcr_background_loop())
         except Exception as _me:
             logging.warning(f"Market Intel warm-up failed: {_me}")
     asyncio.create_task(_warm_market_intel())

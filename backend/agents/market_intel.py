@@ -36,7 +36,11 @@ _refreshing     = False  # prevent concurrent background refreshes
 # ── PCR Cache + History ────────────────────────────────────────────────────────
 _pcr_cache:   Dict[str, Any] = {}
 _PCR_HISTORY: List[Dict]     = []   # [{"ts": ISO, "pcr": float}, ...]
-_MAX_PCR_HIS  = 750                 # ~25 hrs @ 2-min refresh = 750 readings
+_MAX_PCR_HIS  = 750                 # ~25 hrs @ 2-min refresh
+
+# NSE failure tracking — backoff when NSE is repeatedly unreachable
+_nse_fail_count    = 0
+_nse_next_retry_ts = 0.0   # epoch seconds, 0 = retry immediately = 750 readings
 
 
 # ── Nifty PCR Signal Guide (image-accurate thresholds) ────────────────────────
@@ -116,9 +120,12 @@ def _pcr_price_action_signal(pcr: float, nifty_chg_pct: float) -> Dict:
 
 def _fetch_nifty_pcr_sync() -> Dict:
     """
-    Fetch live Nifty PCR directly from NSE option chain.
-    Short 4s timeout — if NSE unreachable, returns UNAVAILABLE immediately.
+    Fetch live Nifty PCR from NSE option chain.
+    - Short 2s+2s warmup timeouts to avoid thread-pool starvation
+    - Exponential backoff when NSE is repeatedly unreachable
     """
+    global _nse_fail_count, _nse_next_retry_ts
+
     _UNAVAILABLE = {
         "pcr": 0.0, "total_call_oi": 0, "total_put_oi": 0,
         "signal": "UNAVAILABLE", "signal_label": "PCR Unavailable",
@@ -127,9 +134,17 @@ def _fetch_nifty_pcr_sync() -> Dict:
         "caution": False, "caution_label": "", "source": "unavailable",
     }
 
+    import time as _time
+
+    # Exponential backoff — skip NSE fetch if we're in a backoff window
+    if _time.time() < _nse_next_retry_ts:
+        cached = _pcr_cache.get("nifty_pcr")
+        return cached["data"] if cached else _UNAVAILABLE
+
+    # Serve from cache if fresh (< 2 min old)
     cached = _pcr_cache.get("nifty_pcr")
     if cached:
-        age = (datetime.now(timezone.utc) - cached["ts"]).total_seconds()
+        age = (_time.time() - cached["ts_epoch"])
         if age < 120:
             return cached["data"]
 
@@ -137,23 +152,20 @@ def _fetch_nifty_pcr_sync() -> Dict:
         from curl_cffi import requests as cffi_req
         s = cffi_req.Session(impersonate="chrome120")
         s.headers.update({
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
         })
-        # Minimal warmup to get NSE cookies (same flow as server.py but shorter timeouts)
+        # Minimal warmup — short 2s timeouts so thread pool is never blocked long
         try:
-            s.get("https://www.nseindia.com/", timeout=5)
+            s.get("https://www.nseindia.com/", timeout=2)
         except Exception:
-            pass  # cookies may still be set even on partial response
+            pass
         try:
-            s.get("https://www.nseindia.com/option-chain", timeout=4)
+            s.get("https://www.nseindia.com/option-chain", timeout=2)
         except Exception:
             pass
 
-        # Now make the actual API call with proper Accept header
         s.headers.update({
             "Accept": "application/json, text/plain, */*",
             "Referer": "https://www.nseindia.com/option-chain",
@@ -161,17 +173,16 @@ def _fetch_nifty_pcr_sync() -> Dict:
         })
         r = s.get(
             "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY",
-            timeout=6,
+            timeout=4,
         )
         r.raise_for_status()
         raw = r.json()
         records = raw.get("records", {}).get("data", [])
         if not records:
-            return _UNAVAILABLE
+            raise ValueError("Empty option chain")
 
         total_call_oi = sum(row.get("CE", {}).get("openInterest", 0) for row in records if row.get("CE"))
         total_put_oi  = sum(row.get("PE", {}).get("openInterest", 0) for row in records if row.get("PE"))
-
         pcr_val = round(total_put_oi / total_call_oi, 2) if total_call_oi else 0.0
         sig     = _pcr_signal(pcr_val)
 
@@ -188,18 +199,23 @@ def _fetch_nifty_pcr_sync() -> Dict:
             "caution_label": sig.get("caution_label", ""),
             "source":        "nse_live",
         }
-        _pcr_cache["nifty_pcr"] = {"data": result, "ts": datetime.now(timezone.utc)}
-
-        # Append to rolling history (cap at _MAX_PCR_HIS)
+        _pcr_cache["nifty_pcr"] = {"data": result, "ts_epoch": _time.time()}
         _PCR_HISTORY.append({"ts": datetime.now(timezone.utc).isoformat(), "pcr": pcr_val})
         if len(_PCR_HISTORY) > _MAX_PCR_HIS:
             del _PCR_HISTORY[0]
 
+        # Reset failure count on success
+        _nse_fail_count    = 0
+        _nse_next_retry_ts = 0.0
         return result
 
     except Exception as e:
-        logger.debug(f"[MarketIntel PCR] NSE unavailable: {e}")
-        return _UNAVAILABLE
+        # Exponential backoff: 2min, 4min, 8min, max 30min
+        _nse_fail_count += 1
+        backoff = min(30 * 60, 120 * (2 ** (_nse_fail_count - 1)))
+        _nse_next_retry_ts = _time.time() + backoff
+        logger.debug(f"[PCR] NSE unavailable (fail #{_nse_fail_count}), backoff {backoff}s: {e}")
+        return cached["data"] if cached else _UNAVAILABLE
 
 
 # ── Bias Levels ────────────────────────────────────────────────────────────────
@@ -1034,7 +1050,7 @@ async def _build_intel() -> Dict:
         hs_nifty_color  = "#94a3b8"
         hs_nifty_signal = "Neutral"
 
-    # Phase 2: parallel GIFT + history fetches + PCR (with 6s timeout to avoid blocking)
+    # Phase 2: parallel GIFT + history fetches (PCR runs in background separately)
     gift_task          = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
     vix_hist_task      = loop.run_in_executor(None, _fetch_vix_history)
     brent_hist_task    = loop.run_in_executor(None, _fetch_brent_history)
@@ -1042,28 +1058,8 @@ async def _build_intel() -> Dict:
     nifty_hist_task    = loop.run_in_executor(None, _fetch_nifty_history)
     gift_hist_task     = loop.run_in_executor(None, _fetch_gift_nifty_history)
     hs_hist_task       = loop.run_in_executor(None, _fetch_hang_seng_history)
-
-    # PCR runs independently with a strict timeout so it never blocks market-intel
-    async def _pcr_with_timeout():
-        try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _fetch_nifty_pcr_sync),
-                timeout=18.0,
-            )
-        except asyncio.TimeoutError:
-            logger.debug("[MarketIntel PCR] timeout — skipping")
-            return {
-                "pcr": 0.0, "total_call_oi": 0, "total_put_oi": 0,
-                "signal": "UNAVAILABLE", "signal_label": "PCR Unavailable",
-                "signal_color": "#64748b", "signal_bg": "#64748b18",
-                "description": "NSE data temporarily unavailable",
-                "caution": False, "caution_label": "", "source": "timeout",
-            }
-
-    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist, pcr_data = await asyncio.gather(
-        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task,
-        _pcr_with_timeout()
-    )
+    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist = await asyncio.gather(
+        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task)
 
     expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
@@ -1089,7 +1085,15 @@ async def _build_intel() -> Dict:
         nifty, vix, gift_premium, total_score, nasdaq_chg, hang_seng_chg
     )
 
-    # PCR signal + Price Action combined signal
+    # PCR data — read from background cache (never blocks market-intel)
+    _PCR_UNAVAILABLE = {
+        "pcr": 0.0, "total_call_oi": 0, "total_put_oi": 0,
+        "signal": "UNAVAILABLE", "signal_label": "PCR Unavailable",
+        "signal_color": "#64748b", "signal_bg": "#64748b18",
+        "description": "NSE data temporarily unavailable",
+        "caution": False, "caution_label": "", "source": "unavailable",
+    }
+    pcr_data = _pcr_cache.get("nifty_pcr", {}).get("data", _PCR_UNAVAILABLE)
     pcr_value          = pcr_data.get("pcr", 0.0)
     pcr_price_action   = _pcr_price_action_signal(pcr_value, nifty_chg) if pcr_value > 0 else {
         "signal": "UNAVAILABLE", "label": "PCR Unavailable", "color": "#64748b", "icon": "NEUTRAL", "detail": ""
@@ -1169,3 +1173,23 @@ async def fetch_market_intel() -> Dict:
     return await _build_intel()
 
  
+
+
+async def pcr_background_loop():
+    """
+    Run PCR fetch in a background asyncio loop — completely independent of
+    market-intel requests so it never blocks the thread pool.
+    First attempt after 10s (give server time to start), then every 2 minutes.
+    """
+    import time as _time
+    await asyncio.sleep(10)   # startup grace period
+    while True:
+        try:
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _fetch_nifty_pcr_sync),
+                timeout=10.0,
+            )
+        except Exception:
+            pass
+        await asyncio.sleep(120)  # 2-minute refresh cycle
