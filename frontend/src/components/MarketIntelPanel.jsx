@@ -707,6 +707,31 @@ const MarketIntelPanel = ({ onClose }) => {
                     <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>
                       Nifty PCR Signal
                     </span>
+                    {/* PCR Trend badge from last 5 readings */}
+                    {(() => {
+                      const hist = data.pcr_history || [];
+                      if (hist.length < 5) return null;
+                      const last5 = hist.slice(-5).map(p => p.pcr);
+                      const diff = last5[4] - last5[0];
+                      if (diff > 0.02) return (
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
+                          style={{ background: '#22c55e20', color: '#22c55e', border: '1px solid #22c55e40' }}>
+                          PCR Rising ▲
+                        </span>
+                      );
+                      if (diff < -0.02) return (
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
+                          style={{ background: '#ef444420', color: '#ef4444', border: '1px solid #ef444440' }}>
+                          PCR Falling ▼
+                        </span>
+                      );
+                      return (
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
+                          style={{ background: '#94a3b820', color: '#94a3b8', border: '1px solid #94a3b840' }}>
+                          PCR Stable →
+                        </span>
+                      );
+                    })()}
                   </div>
                   <span className="text-[9px] font-mono" style={{ color: C.textMuted }}>
                     OI PCR: <span className="font-bold" style={{ color: data.pcr.signal_color }}>{data.pcr.pcr}</span>
