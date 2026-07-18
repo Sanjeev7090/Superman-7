@@ -462,7 +462,7 @@ const MarketIntelPanel = ({ onClose }) => {
                 </div>
               </div>
 
-              {/* Other cards — Hang Seng, GIFT Nifty, Regulatory, Bias */}
+              {/* Other cards — Hang Seng, PCR, GIFT Nifty, Regulatory, Bias */}
               {[
                 {
                   label: 'Hang Seng',
@@ -478,6 +478,16 @@ const MarketIntelPanel = ({ onClose }) => {
                   marketStatus: hangSengStatus,
                   showClock: true,
                   openTimeIST: hangSengStatus.label === 'Lunch Break' ? hangSengReopenIST : hangSengOpenIST,
+                },
+                // ── PCR Card ──────────────────────────────────────────────────
+                {
+                  label: 'Nifty PCR',
+                  isPcr: true,
+                  value: data.pcr?.pcr > 0 ? data.pcr.pcr.toFixed(2) : '—',
+                  valueColor: data.pcr?.signal_color || C.textPrimary,
+                  sub: data.pcr?.signal_label || 'Unavailable',
+                  subColor: data.pcr?.signal_color || C.textMuted,
+                  icon: <ChartBar size={14} />,
                 },
                 {
                   label: 'GIFT Nifty',
@@ -507,7 +517,7 @@ const MarketIntelPanel = ({ onClose }) => {
                   icon: <Gauge size={14} />,
                   valueColor: data.bias_color,
                 },
-              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf, marketStatus, showClock, openTimeIST }) => (
+              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf, marketStatus, showClock, openTimeIST, isPcr }) => (
                 <div key={label} className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-1.5 text-[9px]" style={{ color: C.textMuted }}>
@@ -524,6 +534,22 @@ const MarketIntelPanel = ({ onClose }) => {
                   </div>
                   <div className="text-sm font-bold font-mono" style={{ color: valueColor || C.textPrimary }}>{value}</div>
                   <div className="text-[10px] mt-0.5 font-mono" style={{ color: subColor }}>{sub}</div>
+                  {/* PCR trend badge */}
+                  {isPcr && (() => {
+                    const hist = data.pcr_history || [];
+                    if (hist.length < 5) return null;
+                    const last5 = hist.slice(-5).map(p => p.pcr);
+                    const diff = last5[4] - last5[0];
+                    if (diff > 0.02) return (
+                      <div className="mt-1 text-[8px] font-black" style={{ color: '#22c55e' }}>PCR Rising ▲</div>
+                    );
+                    if (diff < -0.02) return (
+                      <div className="mt-1 text-[8px] font-black" style={{ color: '#ef4444' }}>PCR Falling ▼</div>
+                    );
+                    return (
+                      <div className="mt-1 text-[8px] font-bold" style={{ color: '#94a3b8' }}>PCR Stable →</div>
+                    );
+                  })()}
                   {showClock && marketStatus && (
                     <div className="flex items-center justify-between mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
                       {marketStatus.live ? (
