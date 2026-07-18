@@ -68,12 +68,12 @@ export default function AdvanceDeclineTicker() {
   }, [data]);
 
   useEffect(() => {
-    if (!data) return;
-    // First run 6s after data loads so the user sees it soon
-    const t1 = setTimeout(() => triggerRun(), 6000);
-    // Repeat every 2 minutes
-    const t2 = setInterval(() => triggerRun(), 120_000);
-    return () => { clearTimeout(t1); clearInterval(t2); };
+    // Full-screen bull/bear run animation disabled by user preference
+    // To re-enable: uncomment the lines below
+    // if (!data) return;
+    // const t1 = setTimeout(() => triggerRun(), 6000);
+    // const t2 = setInterval(() => triggerRun(), 120_000);
+    // return () => { clearTimeout(t1); clearInterval(t2); };
   }, [data, triggerRun]);
 
   // Drive the WAAPI animation whenever a new `run` config appears
