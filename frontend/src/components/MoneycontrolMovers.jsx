@@ -483,6 +483,14 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
     } catch {}
   }, []);
 
+  // Auto-backfill historical picks + P&L on first load
+  const triggerBackfill = useCallback(async () => {
+    try {
+      await fetch(`${API}/backfill?days=7`, { method: 'POST' });
+      await loadHistory();   // Reload history after backfill
+    } catch {}
+  }, [loadHistory]);
+
   const triggerRun = async () => {
     setRunning(true);
     setError(null);
@@ -502,6 +510,8 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
   useEffect(() => {
     loadData();
     loadHistory();
+    // Auto-backfill on mount so history has real P&L data
+    triggerBackfill();
     pollRef.current = setInterval(loadData, 5 * 60_000);
     return () => clearInterval(pollRef.current);
   }, []); // eslint-disable-line
@@ -658,12 +668,33 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
             <div className="mt-2">
               <button
                 onClick={() => setShowHistory(v => !v)}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-white/10 hover:bg-white/5 transition-colors"
                 data-testid="mc-history-toggle"
               >
                 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                   <Trophy size={10} className="text-amber-400" weight="fill" />
                   Historical Picks ({history.length} days)
+                  {/* Inline win rate pill */}
+                  {winStats?.total_tracked > 0 && (
+                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${
+                      winStats.win_rate_pct >= 60
+                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                        : winStats.win_rate_pct >= 40
+                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                        : 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                    }`}>
+                      {winStats.win_rate_pct}% win
+                    </span>
+                  )}
+                  {winStats?.avg_return != null && (
+                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${
+                      winStats.avg_return >= 0
+                        ? 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+                        : 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                    }`}>
+                      avg {winStats.avg_return >= 0 ? '+' : ''}{winStats.avg_return}%
+                    </span>
+                  )}
                 </span>
                 {showHistory ? <CaretUp size={11} className="text-zinc-500" /> : <CaretDown size={11} className="text-zinc-500" />}
               </button>

@@ -743,6 +743,171 @@ async def track_performance(date: str = None):
     return result
 
 
+# ─── Historical Backfill ──────────────────────────────────────────────
+def _backfill_gainers_for_date(date_str: str) -> List[dict]:
+    """
+    Compute top-5 weekly gainers as of `date_str` using yfinance historical data.
+    Downloads 15d of daily OHLCV for all FNO_STOCKS, then selects top gainers
+    based on the 5-trading-day return ending on date_str.
+    """
+    import yfinance as _yf
+    import pytz
+
+    sym_map = {s["symbol"]: s["name"] for s in FNO_STOCKS}
+    end_dt  = datetime.strptime(date_str, "%Y-%m-%d")
+    start_dt = end_dt - timedelta(days=20)   # ~15 trading days cushion
+
+    tickers = [f"{s['symbol']}.NS" for s in FNO_STOCKS]
+    try:
+        raw = _yf.download(
+            tickers,
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=(end_dt + timedelta(days=1)).strftime("%Y-%m-%d"),
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+        if raw.empty:
+            return []
+    except Exception as e:
+        logger.warning(f"Backfill yf download failed for {date_str}: {e}")
+        return []
+
+    # Handle single-ticker vs multi-ticker column structure
+    if isinstance(raw.columns, pd.MultiIndex):
+        close_df  = raw["Close"]
+        volume_df = raw.get("Volume", pd.DataFrame())
+    else:
+        close_df  = raw[["Close"]]
+        volume_df = raw.get("Volume", pd.DataFrame())
+
+    results = []
+    ist = pytz.timezone("Asia/Kolkata")
+
+    for s in FNO_STOCKS:
+        ns_sym = f"{s['symbol']}.NS"
+        try:
+            col = ns_sym if ns_sym in close_df.columns else s["symbol"]
+            if col not in close_df.columns:
+                continue
+            series = close_df[col].dropna()
+            # Keep only dates ≤ date_str
+            series = series[series.index.date <= end_dt.date()]
+            if len(series) < 5:
+                continue
+
+            cur_price  = float(series.iloc[-1])
+            week_price = float(series.iloc[-5])
+            weekly_pct = round((cur_price - week_price) / week_price * 100, 2)
+
+            # Volume
+            avg_vol = 0
+            if not volume_df.empty and col in volume_df.columns:
+                avg_vol = int(volume_df[col].dropna().iloc[-5:].mean())
+
+            results.append({
+                "symbol":           s["symbol"],
+                "company_name":     sym_map[s["symbol"]],
+                "current_price":    round(cur_price, 2),
+                "weekly_change_pct":weekly_pct,
+                "volume":           avg_vol,
+                "source":           "yfinance_fallback",
+            })
+        except Exception:
+            continue
+
+    results.sort(key=lambda x: x["weekly_change_pct"], reverse=True)
+    return [r for r in results if r["weekly_change_pct"] > 0][:5]
+
+
+async def _backfill_historical(days: int = 7) -> dict:
+    """
+    Backfill historical picks for the last `days` trading weekdays.
+    For each day:
+      1. Compute top-5 weekly gainers using historical yfinance data
+      2. Estimate ATM option price
+      3. Track next-day performance (P&L via delta approx)
+      4. Save to MongoDB
+    """
+    db = _get_db()
+    loop = asyncio.get_event_loop()
+
+    # Build last N trading weekdays (skip weekends)
+    trading_days = []
+    d = datetime.now(timezone.utc) - timedelta(days=1)   # Start from yesterday
+    while len(trading_days) < days:
+        if d.weekday() < 5:   # Mon=0 … Fri=4
+            trading_days.append(d.strftime("%Y-%m-%d"))
+        d -= timedelta(days=1)
+
+    created = []
+    skipped = []
+
+    for date_str in trading_days:
+        existing = await db[COLL].find_one({"date": date_str, "status": "completed"})
+        if existing and existing.get("performance_tracked"):
+            skipped.append(date_str)
+            continue   # Already fully tracked
+
+        if not existing:
+            # Generate picks for this date
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    picks = await loop.run_in_executor(
+                        pool, _backfill_gainers_for_date, date_str
+                    )
+            except Exception as e:
+                logger.warning(f"Backfill picks error for {date_str}: {e}")
+                continue
+
+            if not picks:
+                logger.info(f"Backfill: no gainers for {date_str}, skipping")
+                continue
+
+            # Enrich with ATM info (estimated prices)
+            enriched = []
+            for stock in picks:
+                atm = _estimate_atm(stock["symbol"], stock["current_price"])
+                # Mark entry_date on atm_info for display
+                atm["entry_date"] = date_str
+                enriched.append({**stock, "atm_info": atm})
+
+            doc = {
+                "date":             date_str,
+                "run_at":           datetime.now(timezone.utc).isoformat(),
+                "stocks":           enriched,
+                "source":           "yfinance_fallback",
+                "status":           "completed",
+                "signals_ready_at": "3:15 PM IST",
+                "backfilled":       True,
+            }
+            await db[COLL].replace_one({"date": date_str}, doc, upsert=True)
+
+        # Now track performance (next-day P&L)
+        try:
+            result = await _track_perf_async(date_str)
+            created.append({"date": date_str, "result": result.get("message", "ok")})
+        except Exception as e:
+            logger.warning(f"Backfill perf error for {date_str}: {e}")
+
+    return {
+        "message": f"Backfill complete: {len(created)} days processed, {len(skipped)} skipped",
+        "created": created,
+        "skipped": skipped,
+    }
+
+
+@router.post("/backfill")
+async def backfill_history(days: int = 7):
+    """
+    Backfill last N trading days with picks + performance tracking.
+    Safe to call multiple times — skips already-tracked days.
+    """
+    result = await _backfill_historical(days)
+    return result
+
+
 @router.get("/status")
 async def get_status():
     """Scheduler + data status."""
