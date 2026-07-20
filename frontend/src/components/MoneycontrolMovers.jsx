@@ -122,7 +122,7 @@ function SourceBadge({ source }) {
   if (!source) return null;
   const map = {
     moneycontrol:     { label: 'MC LIVE',    cls: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' },
-    yfinance_fallback:{ label: 'YF FALLBACK',cls: 'bg-sky-500/15 border-sky-500/30 text-sky-400' },
+    yfinance_fallback:{ label: 'NSE Data',   cls: 'bg-sky-500/15 border-sky-500/30 text-sky-400' },
     demo:             { label: 'DEMO',       cls: 'bg-amber-500/15 border-amber-500/30 text-amber-400' },
   };
   const badge = map[source] || map.demo;
@@ -132,6 +132,35 @@ function SourceBadge({ source }) {
       {badge.label}
     </span>
   );
+}
+
+/* ─── Pick Explanation ──────────────────────────────────────────── */
+function pickExplanation(s) {
+  const atm = s.atm_info || {};
+  const chg = s.weekly_change_pct || 0;
+  const vol = s.volume || 0;
+
+  // Momentum reason
+  let reason = '';
+  if (chg >= 10)       reason = `Strong breakout momentum — +${chg.toFixed(1)}% in 1 week`;
+  else if (chg >= 5)   reason = `Bullish momentum — +${chg.toFixed(1)}% weekly gain`;
+  else if (chg >= 2)   reason = `Steady uptrend — +${chg.toFixed(1)}% weekly move`;
+  else if (chg >= 0)   reason = `Positive bias — +${chg.toFixed(1)}% weekly`;
+  else                 reason = `Oversold bounce setup — ${chg.toFixed(1)}% weekly`;
+
+  // Volume context
+  let volNote = '';
+  if (vol >= 5_000_000)      volNote = ' · Very high volume';
+  else if (vol >= 2_000_000) volNote = ' · High volume';
+  else if (vol >= 500_000)   volNote = ' · Moderate volume';
+
+  // IV context
+  let ivNote = '';
+  if (atm.iv && atm.iv > 35)       ivNote = ' · High IV — options expensive';
+  else if (atm.iv && atm.iv > 20)  ivNote = ' · Normal IV';
+  else if (atm.iv && atm.iv > 0)   ivNote = ' · Low IV — options cheap';
+
+  return reason + volNote + ivNote;
 }
 
 /* ─── Signal Card ───────────────────────────────────────────────── */
@@ -248,23 +277,29 @@ function SignalCard({ stock, rank, onPaperTrade }) {
 }
 
 /* ─── History Row ───────────────────────────────────────────────── */
-function HistoryRow({ day }) {
-  const [expanded, setExpanded] = useState(false);
+function HistoryRow({ day, defaultExpanded = false }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   // Compute quick win/loss summary for header
   const tracked = (day.stocks || []).filter(s => s.performance?.status === 'win' || s.performance?.status === 'loss');
   const wins    = tracked.filter(s => s.performance?.status === 'win').length;
   const summaryLabel = tracked.length > 0 ? `${wins}/${tracked.length} wins` : null;
 
+  // Aggregate stats for this day
+  const allChg = (day.stocks || []).map(s => s.weekly_change_pct || 0);
+  const avgMomentum = allChg.length > 0 ? (allChg.reduce((a, b) => a + b, 0) / allChg.length) : 0;
+  const topPick = (day.stocks || []).reduce((best, s) =>
+    (s.weekly_change_pct || 0) > (best?.weekly_change_pct || -999) ? s : best, null);
+
   return (
     <div className="border-b border-white/5">
       <button
         onClick={() => setExpanded(e => !e)}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors text-left"
+        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/5 transition-colors text-left"
         data-testid={`mc-history-${day.date}`}
       >
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-mono text-zinc-400">{day.date}</span>
+          <span className="text-[10px] font-mono text-zinc-300 font-bold">{day.date}</span>
           <SourceBadge source={day.source} />
           {summaryLabel && (
             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${
@@ -277,26 +312,136 @@ function HistoryRow({ day }) {
               {summaryLabel}
             </span>
           )}
+          {/* Day summary */}
+          {topPick && (
+            <span className="text-[9px] text-zinc-500">
+              Best: <span className="text-amber-300 font-bold">{topPick.symbol}</span>
+              <span className="text-emerald-400 font-bold ml-1">+{(topPick.weekly_change_pct||0).toFixed(1)}%</span>
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-zinc-500">{(day.stocks || []).length} picks</span>
           {expanded ? <CaretUp size={10} className="text-zinc-500" /> : <CaretDown size={10} className="text-zinc-500" />}
         </div>
       </button>
+
       {expanded && (
-        <div className="px-3 pb-2 space-y-1.5">
-          {(day.stocks || []).map((s, i) => (
-            <div key={i} className="flex items-center justify-between text-[11px] py-1.5 border-b border-white/5 gap-2">
-              <span className="font-bold text-zinc-200 w-20 shrink-0">{s.symbol}</span>
-              <span className={`font-mono ${pctColor(s.weekly_change_pct)} shrink-0`}>
-                {s.weekly_change_pct >= 0 ? '+' : ''}{s.weekly_change_pct?.toFixed?.(2)}%
+        <div className="px-3 pb-3 space-y-2">
+
+          {/* Day summary bar */}
+          <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg bg-zinc-900/80 border border-white/8 text-[10px] flex-wrap">
+            <span className="text-zinc-500">
+              Avg Momentum: <span className={`font-bold ${avgMomentum >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {avgMomentum >= 0 ? '+' : ''}{avgMomentum.toFixed(1)}%
               </span>
-              <span className="text-amber-300 font-mono shrink-0">OTM {fmtPrice(s.atm_info?.atm_strike)}</span>
-              <div className="shrink-0">
-                <PerfBadge perf={s.performance} compact />
+            </span>
+            <span className="text-zinc-500">
+              Picks: <span className="text-zinc-300 font-bold">{(day.stocks||[]).length}</span>
+            </span>
+            {tracked.length > 0 && (
+              <span className="text-zinc-500">
+                Result: <span className={`font-bold ${wins === tracked.length ? 'text-emerald-400' : wins > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
+                  {wins}/{tracked.length} won
+                </span>
+              </span>
+            )}
+          </div>
+
+          {/* Individual stock picks with explanation */}
+          {(day.stocks || []).map((s, i) => {
+            const atm = s.atm_info || {};
+            const chg = s.weekly_change_pct || 0;
+            const perf = s.performance;
+            const expl = pickExplanation(s);
+            const hasResult = perf?.status === 'win' || perf?.status === 'loss';
+
+            return (
+              <div key={i} className="rounded-lg border border-white/8 bg-zinc-900/40 overflow-hidden">
+                {/* Stock header */}
+                <div className={`px-3 py-2 flex items-center justify-between ${chg >= 0 ? 'bg-emerald-500/8' : 'bg-rose-500/8'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-black px-1 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                      #{i + 1}
+                    </span>
+                    <div>
+                      <span className="text-xs font-black text-zinc-100">{s.symbol}</span>
+                      {s.company_name && (
+                        <span className="text-[9px] text-zinc-500 ml-1.5">{s.company_name}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[11px] font-mono font-bold ${chg >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
+                    </span>
+                    {hasResult
+                      ? <PerfBadge perf={perf} compact />
+                      : perf?.status === 'pending'
+                      ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-400 font-bold">PENDING</span>
+                      : null
+                    }
+                  </div>
+                </div>
+
+                {/* Explanation */}
+                <div className="px-3 py-2 space-y-1.5">
+                  <p className="text-[10px] text-zinc-400 leading-relaxed">
+                    📌 <span>{expl}</span>
+                  </p>
+
+                  {/* Option details row */}
+                  <div className="flex items-center gap-3 text-[10px] flex-wrap">
+                    {atm.atm_strike && (
+                      <span className="text-zinc-500">
+                        OTM Strike: <span className="text-amber-300 font-mono font-bold">₹{atm.atm_strike?.toLocaleString('en-IN')}</span>
+                      </span>
+                    )}
+                    {atm.option_ltp > 0 && (
+                      <span className="text-zinc-500">
+                        Option LTP: <span className="text-zinc-200 font-mono">₹{atm.option_ltp?.toFixed(2)}</span>
+                      </span>
+                    )}
+                    {atm.expiry && (
+                      <span className="text-zinc-500">
+                        Expiry: <span className="text-sky-400 font-mono">{atm.expiry}</span>
+                      </span>
+                    )}
+                    {atm.iv > 0 && (
+                      <span className="text-zinc-500">
+                        IV: <span className="text-purple-400 font-mono">{atm.iv}%</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* SL / Target */}
+                  {atm.sl_price && atm.target_price && (
+                    <div className="flex items-center gap-2 text-[10px]">
+                      <span className="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 font-mono">
+                        SL ₹{atm.sl_price?.toFixed(2)} (-{atm.sl_pct || 10}%)
+                      </span>
+                      <span className="text-zinc-600">→</span>
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono">
+                        Target ₹{atm.target_price?.toFixed(2)} (+{atm.target_pct || 20}%)
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Actual outcome if available */}
+                  {hasResult && perf?.entry_ltp && perf?.exit_ltp && (
+                    <div className={`flex items-center gap-3 px-2 py-1.5 rounded text-[10px] ${perf.status === 'win' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-rose-500/10 border border-rose-500/20'}`}>
+                      <span className="text-zinc-500">Entry: <span className="font-mono text-zinc-300">₹{perf.entry_ltp?.toFixed(2)}</span></span>
+                      <span className="text-zinc-600">→</span>
+                      <span className="text-zinc-500">Exit: <span className={`font-mono font-bold ${perf.status === 'win' ? 'text-emerald-300' : 'text-rose-300'}`}>₹{perf.exit_ltp?.toFixed(2)}</span></span>
+                      <span className={`ml-auto font-black ${perf.status === 'win' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {perf.pct_return >= 0 ? '+' : ''}{perf.pct_return?.toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -523,14 +668,14 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
                 {showHistory ? <CaretUp size={11} className="text-zinc-500" /> : <CaretDown size={11} className="text-zinc-500" />}
               </button>
 
-              {showHistory && (
+          {showHistory && (
                 <div className="mt-1 space-y-1.5">
                   {/* Win Rate Stats Bar */}
                   <WinStatsBar stats={winStats} />
 
-                  <div className="border border-white/10 rounded-lg overflow-hidden">
+                  <div className="rounded-lg overflow-hidden border border-white/10">
                     {history.map((day, i) => (
-                      <HistoryRow key={i} day={day} />
+                      <HistoryRow key={i} day={day} defaultExpanded={i === 0} />
                     ))}
                   </div>
                 </div>
