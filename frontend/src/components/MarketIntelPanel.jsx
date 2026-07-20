@@ -576,6 +576,20 @@ const MarketIntelPanel = ({ onClose }) => {
             </div>
 
             {/* Current Bias Card */}
+            {(() => {
+              // IST date helpers — computed once for the whole bias card
+              const nowIST  = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+              const DAY_SH  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+              const MON_SH  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+              const todayDay  = nowIST.getDay();                               // 0=Sun 6=Sat
+              const isWeekend = todayDay === 0 || todayDay === 6;
+              const todayStr  = `${DAY_SH[todayDay]}, ${nowIST.getDate()} ${MON_SH[nowIST.getMonth()]}`;
+              const tmrIST    = new Date(nowIST); tmrIST.setDate(tmrIST.getDate() + 1);
+              const tmrDay    = tmrIST.getDay();
+              const tmrStr    = `${DAY_SH[tmrDay]}, ${tmrIST.getDate()} ${MON_SH[tmrIST.getMonth()]}`;
+              const isTmrWeekend = tmrDay === 0 || tmrDay === 6;
+
+              return (
             <div
               className="rounded-xl p-4"
               style={{ background: `${data.bias_color}18`, border: `1px solid ${data.bias_color}40` }}
@@ -584,26 +598,39 @@ const MarketIntelPanel = ({ onClose }) => {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="text-[9px] uppercase tracking-widest mb-1" style={{ color: C.textSecond }}>Current Market Bias</div>
-                  <div className="text-2xl font-black" style={{ color: data.bias_color }}>{data.bias}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="text-2xl font-black" style={{ color: data.bias_color }}>{data.bias}</div>
+                    {isWeekend && (
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ background: '#64748b25', color: '#94a3b8', border: '1px solid #64748b40' }}>
+                        🏖 Weekend
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs mt-1" style={{ color: C.textSecond }}>{data.action}</div>
                 </div>
                 <div className="flex gap-4 flex-wrap">
                   {/* Today's Possibility */}
                   <div className="text-center min-w-[110px]">
-                    <div className="text-[9px] uppercase tracking-widest mb-0.5" style={{ color: C.textMuted }}>Today's Possibility</div>
+                    <div className="text-[9px] uppercase tracking-widest mb-0.5" style={{ color: C.textMuted }}>Today&#39;s Possibility</div>
+                    <div className="text-[8px] font-bold mb-1" style={{ color: '#60a5fa' }}>{todayStr}{isWeekend ? ' · Market Closed' : ''}</div>
                     <div
                       className="text-[11px] font-black font-mono px-2 py-0.5 rounded"
                       style={{
-                        color: data.today_move?.color || C.textPrimary,
-                        background: `${data.today_move?.color || '#94a3b8'}18`,
-                        border: `1px solid ${data.today_move?.color || '#94a3b8'}40`,
+                        color: isWeekend ? '#64748b' : (data.today_move?.color || C.textPrimary),
+                        background: isWeekend ? '#64748b18' : `${data.today_move?.color || '#94a3b8'}18`,
+                        border: `1px solid ${isWeekend ? '#64748b40' : (data.today_move?.color || '#94a3b8') + '40'}`,
                       }}
                     >
-                      {data.today_move?.icon === 'UP' ? '▲ ' : data.today_move?.icon === 'DOWN' ? '▼ ' : '→ '}
-                      {data.today_move?.label || '—'}
+                      {isWeekend ? '— Market Holiday' : (
+                        <>
+                          {data.today_move?.icon === 'UP' ? '▲ ' : data.today_move?.icon === 'DOWN' ? '▼ ' : '→ '}
+                          {data.today_move?.label || '—'}
+                        </>
+                      )}
                     </div>
-                    <div className="text-[8px] mt-0.5 font-medium" style={{ color: data.today_move?.color || C.textMuted }}>
-                      {data.today_move?.probability || '—'}
+                    <div className="text-[8px] mt-0.5 font-medium" style={{ color: isWeekend ? '#64748b' : (data.today_move?.color || C.textMuted) }}>
+                      {isWeekend ? 'No trading' : (data.today_move?.probability || '—')}
                     </div>
                   </div>
 
@@ -612,20 +639,25 @@ const MarketIntelPanel = ({ onClose }) => {
 
                   {/* Tomorrow's Possibility */}
                   <div className="text-center min-w-[110px]">
-                    <div className="text-[9px] uppercase tracking-widest mb-0.5" style={{ color: C.textMuted }}>Tomorrow's Possibility</div>
+                    <div className="text-[9px] uppercase tracking-widest mb-0.5" style={{ color: C.textMuted }}>Tomorrow&#39;s Possibility</div>
+                    <div className="text-[8px] font-bold mb-1" style={{ color: '#60a5fa' }}>{tmrStr}{isTmrWeekend ? ' · Market Closed' : ''}</div>
                     <div
                       className="text-[11px] font-black font-mono px-2 py-0.5 rounded"
                       style={{
-                        color: data.tomorrow_move?.color || C.textPrimary,
-                        background: `${data.tomorrow_move?.color || '#94a3b8'}18`,
-                        border: `1px solid ${data.tomorrow_move?.color || '#94a3b8'}40`,
+                        color: isTmrWeekend ? '#64748b' : (data.tomorrow_move?.color || C.textPrimary),
+                        background: isTmrWeekend ? '#64748b18' : `${data.tomorrow_move?.color || '#94a3b8'}18`,
+                        border: `1px solid ${isTmrWeekend ? '#64748b40' : (data.tomorrow_move?.color || '#94a3b8') + '40'}`,
                       }}
                     >
-                      {data.tomorrow_move?.icon === 'UP' ? '▲ ' : data.tomorrow_move?.icon === 'DOWN' ? '▼ ' : '→ '}
-                      {data.tomorrow_move?.label || '—'}
+                      {isTmrWeekend ? '— Market Holiday' : (
+                        <>
+                          {data.tomorrow_move?.icon === 'UP' ? '▲ ' : data.tomorrow_move?.icon === 'DOWN' ? '▼ ' : '→ '}
+                          {data.tomorrow_move?.label || '—'}
+                        </>
+                      )}
                     </div>
-                    <div className="text-[8px] mt-0.5 font-medium" style={{ color: data.tomorrow_move?.color || C.textMuted }}>
-                      {data.tomorrow_move?.probability || '—'}
+                    <div className="text-[8px] mt-0.5 font-medium" style={{ color: isTmrWeekend ? '#64748b' : (data.tomorrow_move?.color || C.textMuted) }}>
+                      {isTmrWeekend ? 'No trading' : (data.tomorrow_move?.probability || '—')}
                     </div>
                   </div>
                   {data.nasdaq_pts !== 0 && (
@@ -649,6 +681,8 @@ const MarketIntelPanel = ({ onClose }) => {
                 </div>
               </div>
             </div>
+              ); // end return
+            })()} {/* end IIFE */}
 
             {/* Nasdaq ↔ Nifty Correlation Info Strip */}
             {data.nasdaq > 0 && (
