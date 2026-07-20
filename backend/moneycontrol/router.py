@@ -744,20 +744,111 @@ async def track_performance(date: str = None):
 
 
 # ─── Historical Backfill ──────────────────────────────────────────────
-def _backfill_gainers_for_date(date_str: str) -> List[dict]:
+def _bulk_download_fno_history(days: int = 45) -> tuple:
+    """
+    Download FNO stock OHLCV once for the last `days` calendar days.
+    Returns (close_df, volume_df) with DatetimeIndex.
+    Called once per backfill run — avoids per-day network calls.
+    """
+    import yfinance as _yf
+
+    start_dt = datetime.now(timezone.utc) - timedelta(days=days)
+    end_dt   = datetime.now(timezone.utc) + timedelta(days=1)
+
+    # Remove known delisted / renamed symbols for this download
+    safe_stocks = [s for s in FNO_STOCKS if s["symbol"] not in ("TATAMOTORS",)]
+    tickers = [f"{s['symbol']}.NS" for s in safe_stocks]
+
+    try:
+        raw = _yf.download(
+            tickers,
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=end_dt.strftime("%Y-%m-%d"),
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+        if raw.empty:
+            return pd.DataFrame(), pd.DataFrame()
+    except Exception as e:
+        logger.warning(f"Bulk FNO download failed: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+
+    if isinstance(raw.columns, pd.MultiIndex):
+        close_df  = raw["Close"]
+        volume_df = raw.get("Volume", pd.DataFrame())
+    else:
+        close_df  = raw[["Close"]]
+        volume_df = raw.get("Volume", pd.DataFrame())
+
+    return close_df, volume_df
+
+
+def _gainers_from_cache(date_str: str, close_df: pd.DataFrame, volume_df: pd.DataFrame) -> list:
+    """
+    Compute top-5 weekly gainers for `date_str` from an already-downloaded DataFrame.
+    Much faster than per-date downloads.
+    """
+    sym_map  = {s["symbol"]: s["name"] for s in FNO_STOCKS}
+    end_dt   = datetime.strptime(date_str, "%Y-%m-%d")
+    results  = []
+
+    for col in close_df.columns:
+        # Column names are like "TECHM.NS"
+        raw_sym = col.replace(".NS", "")
+        sym     = raw_sym
+        name    = sym_map.get(sym, sym)
+
+        try:
+            series = close_df[col].dropna()
+            # Keep only dates ≤ date_str
+            series = series[series.index.date <= end_dt.date()]
+            if len(series) < 5:
+                continue
+
+            cur_price  = float(series.iloc[-1])
+            week_price = float(series.iloc[-5])
+            if week_price <= 0:
+                continue
+            weekly_pct = round((cur_price - week_price) / week_price * 100, 2)
+
+            avg_vol = 0
+            if not volume_df.empty and col in volume_df.columns:
+                vol_series = volume_df[col].dropna()
+                vol_series = vol_series[vol_series.index.date <= end_dt.date()]
+                if len(vol_series) >= 1:
+                    avg_vol = int(vol_series.iloc[-5:].mean())
+
+            results.append({
+                "symbol":           sym,
+                "company_name":     name,
+                "current_price":    round(cur_price, 2),
+                "weekly_change_pct":weekly_pct,
+                "volume":           avg_vol,
+                "source":           "yfinance_fallback",
+            })
+        except Exception:
+            continue
+
+    results.sort(key=lambda x: x["weekly_change_pct"], reverse=True)
+    return [r for r in results if r["weekly_change_pct"] > 0][:5]
+
+
+def _backfill_gainers_for_date(date_str: str) -> list:
     """
     Compute top-5 weekly gainers as of `date_str` using yfinance historical data.
     Downloads 15d of daily OHLCV for all FNO_STOCKS, then selects top gainers
     based on the 5-trading-day return ending on date_str.
     """
     import yfinance as _yf
-    import pytz
 
     sym_map = {s["symbol"]: s["name"] for s in FNO_STOCKS}
     end_dt  = datetime.strptime(date_str, "%Y-%m-%d")
     start_dt = end_dt - timedelta(days=20)   # ~15 trading days cushion
 
-    tickers = [f"{s['symbol']}.NS" for s in FNO_STOCKS]
+    safe_stocks = [s for s in FNO_STOCKS if s["symbol"] not in ("TATAMOTORS",)]
+    tickers = [f"{s['symbol']}.NS" for s in safe_stocks]
     try:
         raw = _yf.download(
             tickers,
@@ -782,94 +873,75 @@ def _backfill_gainers_for_date(date_str: str) -> List[dict]:
         close_df  = raw[["Close"]]
         volume_df = raw.get("Volume", pd.DataFrame())
 
-    results = []
-    ist = pytz.timezone("Asia/Kolkata")
-
-    for s in FNO_STOCKS:
-        ns_sym = f"{s['symbol']}.NS"
-        try:
-            col = ns_sym if ns_sym in close_df.columns else s["symbol"]
-            if col not in close_df.columns:
-                continue
-            series = close_df[col].dropna()
-            # Keep only dates ≤ date_str
-            series = series[series.index.date <= end_dt.date()]
-            if len(series) < 5:
-                continue
-
-            cur_price  = float(series.iloc[-1])
-            week_price = float(series.iloc[-5])
-            weekly_pct = round((cur_price - week_price) / week_price * 100, 2)
-
-            # Volume
-            avg_vol = 0
-            if not volume_df.empty and col in volume_df.columns:
-                avg_vol = int(volume_df[col].dropna().iloc[-5:].mean())
-
-            results.append({
-                "symbol":           s["symbol"],
-                "company_name":     sym_map[s["symbol"]],
-                "current_price":    round(cur_price, 2),
-                "weekly_change_pct":weekly_pct,
-                "volume":           avg_vol,
-                "source":           "yfinance_fallback",
-            })
-        except Exception:
-            continue
-
-    results.sort(key=lambda x: x["weekly_change_pct"], reverse=True)
-    return [r for r in results if r["weekly_change_pct"] > 0][:5]
+    return _gainers_from_cache(date_str, close_df, volume_df)
 
 
 async def _backfill_historical(days: int = 7) -> dict:
     """
     Backfill historical picks for the last `days` trading weekdays.
-    For each day:
-      1. Compute top-5 weekly gainers using historical yfinance data
-      2. Estimate ATM option price
-      3. Track next-day performance (P&L via delta approx)
-      4. Save to MongoDB
+    Downloads ALL FNO data in ONE yfinance call, then slices per day in memory.
+    30 days completes in ~15 seconds instead of timing out.
     """
-    db = _get_db()
+    db   = _get_db()
     loop = asyncio.get_event_loop()
 
     # Build last N trading weekdays (skip weekends)
     trading_days = []
-    d = datetime.now(timezone.utc) - timedelta(days=1)   # Start from yesterday
+    d = datetime.now(timezone.utc) - timedelta(days=1)
     while len(trading_days) < days:
-        if d.weekday() < 5:   # Mon=0 … Fri=4
+        if d.weekday() < 5:
             trading_days.append(d.strftime("%Y-%m-%d"))
         d -= timedelta(days=1)
 
-    created = []
-    skipped = []
+    # Check which days already have full performance data
+    already_tracked = set()
+    async for doc in db[COLL].find(
+        {"performance_tracked": True}, projection={"date": 1, "_id": 0}
+    ):
+        already_tracked.add(doc["date"])
 
-    for date_str in trading_days:
+    days_to_process = [x for x in trading_days if x not in already_tracked]
+    skipped = [x for x in trading_days if x in already_tracked]
+
+    if not days_to_process:
+        return {
+            "message": f"All {len(trading_days)} days already tracked",
+            "created": [],
+            "skipped": list(already_tracked & set(trading_days)),
+        }
+
+    # ── ONE bulk download for all dates ──────────────────────────────
+    logger.info(f"Backfill: bulk downloading FNO data for {len(days_to_process)} days…")
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            close_df, volume_df = await loop.run_in_executor(
+                pool, _bulk_download_fno_history, days + 12
+            )
+    except Exception as e:
+        return {"message": f"Bulk download failed: {e}", "created": [], "skipped": skipped}
+
+    if close_df.empty:
+        return {"message": "Bulk download returned empty data", "created": [], "skipped": skipped}
+
+    logger.info(f"Backfill: got {len(close_df)} rows × {len(close_df.columns)} symbols")
+
+    created = []
+    for date_str in days_to_process:
         existing = await db[COLL].find_one({"date": date_str, "status": "completed"})
-        if existing and existing.get("performance_tracked"):
-            skipped.append(date_str)
-            continue   # Already fully tracked
 
         if not existing:
-            # Generate picks for this date
             try:
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    picks = await loop.run_in_executor(
-                        pool, _backfill_gainers_for_date, date_str
-                    )
+                picks = _gainers_from_cache(date_str, close_df, volume_df)
             except Exception as e:
-                logger.warning(f"Backfill picks error for {date_str}: {e}")
+                logger.warning(f"Backfill gainers error for {date_str}: {e}")
                 continue
 
             if not picks:
-                logger.info(f"Backfill: no gainers for {date_str}, skipping")
                 continue
 
-            # Enrich with ATM info (estimated prices)
             enriched = []
             for stock in picks:
                 atm = _estimate_atm(stock["symbol"], stock["current_price"])
-                # Mark entry_date on atm_info for display
                 atm["entry_date"] = date_str
                 enriched.append({**stock, "atm_info": atm})
 
@@ -884,7 +956,7 @@ async def _backfill_historical(days: int = 7) -> dict:
             }
             await db[COLL].replace_one({"date": date_str}, doc, upsert=True)
 
-        # Now track performance (next-day P&L)
+        # Track next-day P&L
         try:
             result = await _track_perf_async(date_str)
             created.append({"date": date_str, "result": result.get("message", "ok")})
@@ -892,9 +964,9 @@ async def _backfill_historical(days: int = 7) -> dict:
             logger.warning(f"Backfill perf error for {date_str}: {e}")
 
     return {
-        "message": f"Backfill complete: {len(created)} days processed, {len(skipped)} skipped",
-        "created": created,
-        "skipped": skipped,
+        "message": f"Backfill complete: {len(created)} days processed, {len(skipped)} already done",
+        "created":  created,
+        "skipped":  skipped,
     }
 
 

@@ -475,7 +475,7 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
 
   const loadHistory = useCallback(async () => {
     try {
-      const r = await fetch(`${API}/history?limit=14`);
+      const r = await fetch(`${API}/history?limit=30`);
       if (!r.ok) return;
       const d = await r.json();
       setHistory(d.history || []);
@@ -673,7 +673,7 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
               >
                 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                   <Trophy size={10} className="text-amber-400" weight="fill" />
-                  Historical Picks ({history.length} days)
+                  Historical Picks ({history.length} days · last 30 trading days)
                   {/* Inline win rate pill */}
                   {winStats?.total_tracked > 0 && (
                     <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${
