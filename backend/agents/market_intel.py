@@ -118,9 +118,61 @@ def _pcr_price_action_signal(pcr: float, nifty_chg_pct: float) -> Dict:
             "detail": "Price flat — wait for directional confirmation"}
 
 
+def _fetch_vix_derived_pcr() -> Optional[Dict]:
+    """
+    Fallback PCR proxy computed from India VIX via NSE allIndices endpoint.
+    NSE option chain API is blocked from cloud IPs, but allIndices works.
+    VIX percentile is mapped linearly to PCR range [0.65 → 1.50]:
+      - Low VIX (complacency, call-buying)  → Low PCR  (~0.65–0.75, Bearish)
+      - High VIX (panic, put-buying)        → High PCR (~1.20–1.50, Bullish)
+    """
+    try:
+        import httpx as _httpx
+        r = _httpx.get(
+            "https://www.nseindia.com/api/allIndices",
+            timeout=4,
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+        )
+        r.raise_for_status()
+        indices = r.json().get("data", [])
+
+        vix_item   = next((x for x in indices if x.get("indexSymbol") == "INDIA VIX"), None)
+        nifty_item = next((x for x in indices if x.get("indexSymbol") == "NIFTY 50"), None)
+        if not vix_item:
+            return None
+
+        vix        = float(vix_item["last"])
+        year_low   = float(vix_item.get("yearLow",  8.0))
+        year_high  = float(vix_item.get("yearHigh", 28.0))
+
+        # Clamp percentile to [0, 1] and map to PCR [0.65, 1.50]
+        pct        = max(0.0, min(1.0, (vix - year_low) / max(year_high - year_low, 1.0)))
+        synth_pcr  = round(0.65 + pct * 0.85, 2)
+
+        sig = _pcr_signal(synth_pcr)
+        return {
+            "pcr":           synth_pcr,
+            "total_call_oi": 0,
+            "total_put_oi":  0,
+            "signal":        sig["signal"],
+            "signal_label":  sig["label"],
+            "signal_color":  sig["color"],
+            "signal_bg":     sig.get("bg", sig["color"] + "18"),
+            "description":   f"VIX {vix:.1f} → Synthetic PCR · NSE OI data blocked from cloud",
+            "caution":       sig.get("caution", False),
+            "caution_label": sig.get("caution_label", ""),
+            "source":        "vix_derived",
+            "vix":           vix,
+        }
+    except Exception as exc:
+        logger.debug(f"[PCR] VIX fallback failed: {exc}")
+        return None
+
+
 def _fetch_nifty_pcr_sync() -> Dict:
     """
     Fetch live Nifty PCR from NSE option chain.
+    Falls back to VIX-derived synthetic PCR when NSE API is blocked (cloud env).
     - Short 2s+2s warmup timeouts to avoid thread-pool starvation
     - Exponential backoff when NSE is repeatedly unreachable
     """
@@ -215,6 +267,20 @@ def _fetch_nifty_pcr_sync() -> Dict:
         backoff = min(30 * 60, 120 * (2 ** (_nse_fail_count - 1)))
         _nse_next_retry_ts = _time.time() + backoff
         logger.debug(f"[PCR] NSE unavailable (fail #{_nse_fail_count}), backoff {backoff}s: {e}")
+
+        # ── VIX-derived fallback ───────────────────────────────────────────────
+        # NSE option chain API is blocked from cloud IPs.
+        # Use India VIX (allIndices endpoint — always accessible) to compute
+        # a synthetic PCR proxy so the card shows meaningful data.
+        vix_result = _fetch_vix_derived_pcr()
+        if vix_result:
+            _pcr_cache["nifty_pcr"] = {"data": vix_result, "ts_epoch": _time.time()}
+            _PCR_HISTORY.append({"ts": datetime.now(timezone.utc).isoformat(), "pcr": vix_result["pcr"]})
+            if len(_PCR_HISTORY) > _MAX_PCR_HIS:
+                del _PCR_HISTORY[0]
+            logger.info(f"[PCR] Using VIX-derived PCR: {vix_result['pcr']} (VIX={vix_result.get('vix')})")
+            return vix_result
+        # ── Last resort: return cached stale data or UNAVAILABLE ──────────────
         return cached["data"] if cached else _UNAVAILABLE
 
 
@@ -1093,7 +1159,23 @@ async def _build_intel() -> Dict:
         "description": "NSE data temporarily unavailable",
         "caution": False, "caution_label": "", "source": "unavailable",
     }
-    pcr_data = _pcr_cache.get("nifty_pcr", {}).get("data", _PCR_UNAVAILABLE)
+    pcr_data = _pcr_cache.get("nifty_pcr", {}).get("data")
+    if not pcr_data:
+        # Cache is empty (first call before background loop runs) — compute inline
+        import time as _time
+        try:
+            vix_result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, _fetch_vix_derived_pcr),
+                timeout=6.0,
+            )
+            if vix_result:
+                pcr_data = vix_result
+                _pcr_cache["nifty_pcr"] = {"data": vix_result, "ts_epoch": _time.time()}
+                _PCR_HISTORY.append({"ts": datetime.now(timezone.utc).isoformat(), "pcr": vix_result["pcr"]})
+        except Exception:
+            pcr_data = None
+    if not pcr_data:
+        pcr_data = _PCR_UNAVAILABLE
     pcr_value          = pcr_data.get("pcr", 0.0)
     pcr_price_action   = _pcr_price_action_signal(pcr_value, nifty_chg) if pcr_value > 0 else {
         "signal": "UNAVAILABLE", "label": "PCR Unavailable", "color": "#64748b", "icon": "NEUTRAL", "detail": ""

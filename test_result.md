@@ -147,6 +147,8 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "Cloned superman-4 repo. Current app was already the same codebase (only 4 test files had different fallback URLs). Created missing .env files (backend and frontend). Both services running. Backend API responding with 200 OK. USER PREFERENCE: NO screenshots, NO testing, just code changes."
+  - agent: "main"
+    message: "PCR Unavailable bug fixed. Root cause: NSE option chain API is blocked from cloud IPs (timeout). Fix: Added VIX-derived synthetic PCR fallback in market_intel.py using NSE allIndices endpoint (which IS accessible). India VIX mapped to PCR range [0.65-1.50]. Also fixed timing issue where _build_intel() ran before PCR background loop. Verified: PCR = 0.85 | NEUTRAL/SLIGHTLY BEARISH | Source: vix_derived | VIX 13.37. Frontend updated to show VIX-Derived badge and VIX value instead of Unavailable."
 
 user_problem_statement: "Clone https://github.com/Sanjeev7090/super-2.0 repo 100% same to same everything"
 

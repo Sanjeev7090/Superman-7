@@ -485,8 +485,12 @@ const MarketIntelPanel = ({ onClose }) => {
                   isPcr: true,
                   value: data.pcr?.pcr > 0 ? data.pcr.pcr.toFixed(2) : '—',
                   valueColor: data.pcr?.signal_color || C.textPrimary,
-                  sub: data.pcr?.signal_label || 'Unavailable',
-                  subColor: data.pcr?.signal_color || C.textMuted,
+                  sub: data.pcr?.source === 'vix_derived'
+                    ? `${data.pcr.signal_label} (VIX ${data.pcr.vix?.toFixed(1)})`
+                    : (data.pcr?.signal_label || 'Unavailable'),
+                  subColor: data.pcr?.source === 'vix_derived'
+                    ? '#f59e0b'
+                    : (data.pcr?.signal_color || C.textMuted),
                   icon: <ChartBar size={14} />,
                 },
                 {
@@ -733,6 +737,13 @@ const MarketIntelPanel = ({ onClose }) => {
                     <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>
                       Nifty PCR Signal
                     </span>
+                    {/* VIX-Derived badge */}
+                    {data.pcr.source === 'vix_derived' && (
+                      <span className="text-[7px] font-bold px-1.5 py-0.5 rounded-full"
+                        style={{ background: '#f59e0b20', color: '#f59e0b', border: '1px solid #f59e0b40' }}>
+                        VIX-Derived
+                      </span>
+                    )}
                     {/* PCR Trend badge from last 5 readings */}
                     {(() => {
                       const hist = data.pcr_history || [];
@@ -760,7 +771,10 @@ const MarketIntelPanel = ({ onClose }) => {
                     })()}
                   </div>
                   <span className="text-[9px] font-mono" style={{ color: C.textMuted }}>
-                    OI PCR: <span className="font-bold" style={{ color: data.pcr.signal_color }}>{data.pcr.pcr}</span>
+                    {data.pcr.source === 'vix_derived'
+                      ? <span>VIX <span className="font-bold" style={{ color: '#f59e0b' }}>{data.pcr.vix?.toFixed(1)}</span></span>
+                      : <span>OI PCR: <span className="font-bold" style={{ color: data.pcr.signal_color }}>{data.pcr.pcr}</span></span>
+                    }
                   </span>
                 </div>
 
