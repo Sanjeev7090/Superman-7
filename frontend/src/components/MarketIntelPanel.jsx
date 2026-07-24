@@ -362,6 +362,7 @@ const UP_ROWS = [
 
 function BreadthCard({ breadth, C, isDark }) {
   const [showRef, setShowRef] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   if (!breadth || breadth.advances == null) return null;
 
   const { advances = 0, declines = 0, unchanged = 0, total = 50 } = breadth;
@@ -390,10 +391,12 @@ function BreadthCard({ breadth, C, isDark }) {
   };
 
   return (
-    <div className="rounded-xl p-4" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}
+    <div className="rounded-xl" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}
       data-testid="breadth-card">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+      {/* Header — always visible, click to expand */}
+      <div className="flex items-center justify-between px-4 py-3 cursor-pointer"
+        style={{ borderBottom: expanded ? `1px solid ${C.border}` : 'none' }}
+        onClick={() => setExpanded(v => !v)}>
         <div className="flex items-center gap-2">
           <ChartBar size={13} className="text-violet-400" />
           <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>
@@ -404,111 +407,122 @@ function BreadthCard({ breadth, C, isDark }) {
             {breadth.signal_label}
           </span>
         </div>
-        <button
-          onClick={() => setShowRef(v => !v)}
-          className="text-[8px] px-2 py-0.5 rounded transition-all"
-          style={{ color: C.textMuted, border: `1px solid ${C.border}` }}
-          data-testid="breadth-ref-toggle">
-          {showRef ? 'Hide' : 'Reference Table'}
-        </button>
-      </div>
-
-      {/* Advance/Decline bar + stats */}
-      <div className="flex items-center gap-3 mb-2">
-        {/* Stacked bar */}
-        <div className="flex-1 h-5 rounded-full overflow-hidden flex">
-          <div style={{ width: `${advPct}%`, background: '#22c55e', transition: 'width 0.4s' }} />
-          <div style={{ width: `${unchPct > 0 ? unchPct : 0}%`, background: isDark ? '#334155' : '#cbd5e1' }} />
-          <div style={{ width: `${decPct}%`, background: '#ef4444', transition: 'width 0.4s' }} />
-        </div>
-        {/* Per-stock impact note */}
-        <span className="text-[8px] whitespace-nowrap shrink-0" style={{ color: C.textMuted }}>
-          ~8-12 pts/stock
-        </span>
-      </div>
-
-      {/* Count row */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1">
-            <span className="text-[9px] font-bold" style={{ color: '#22c55e' }}>▲ {advances}</span>
-            <span className="text-[8px]" style={{ color: C.textMuted }}>up</span>
-          </div>
-          {unchanged > 0 && (
-            <div className="flex items-center gap-1">
-              <span className="text-[9px] font-bold" style={{ color: C.textMuted }}>→ {unchanged}</span>
-              <span className="text-[8px]" style={{ color: C.textMuted }}>flat</span>
-            </div>
-          )}
-          <div className="flex items-center gap-1">
-            <span className="text-[9px] font-bold" style={{ color: '#ef4444' }}>▼ {declines}</span>
-            <span className="text-[8px]" style={{ color: C.textMuted }}>down</span>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-[9px] font-bold font-mono" style={{ color: sigColor }}>
-            {breadth.impact_label}
-          </div>
-          <div className="text-[7px]" style={{ color: C.textMuted }}>{breadth.freq}</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[8px] font-bold" style={{ color: '#22c55e' }}>▲{advances}</span>
+          <span className="text-[8px] font-bold" style={{ color: '#ef4444' }}>▼{declines}</span>
+          <span className="text-[9px] rounded px-1.5 py-0.5" style={{ color: C.textMuted, background: C.panelBg }}>
+            {expanded ? '▲' : '▼'}
+          </span>
         </div>
       </div>
 
-      {/* Description */}
-      <div className="text-[8px] mb-2" style={{ color: C.textMuted }}>{breadth.description}</div>
-
-      {/* Collapsible reference tables */}
-      {showRef && (
-        <div className="mt-3 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
-          {/* Stocks DOWN table */}
-          <div>
-            <div className="text-[8px] uppercase tracking-wider mb-1.5 font-bold" style={{ color: '#ef4444' }}>
-              Stocks Down → Nifty Impact
+      {expanded && (
+        <div className="px-4 pb-4 pt-3">
+          {/* Advance/Decline bar + stats */}
+          <div className="flex items-center gap-3 mb-2">
+            <div className="flex-1 h-5 rounded-full overflow-hidden flex">
+              <div style={{ width: `${advPct}%`, background: '#22c55e', transition: 'width 0.4s' }} />
+              <div style={{ width: `${unchPct > 0 ? unchPct : 0}%`, background: isDark ? '#334155' : '#cbd5e1' }} />
+              <div style={{ width: `${decPct}%`, background: '#ef4444', transition: 'width 0.4s' }} />
             </div>
-            <div className="space-y-0.5">
-              {DOWN_ROWS.map(r => {
-                const active = isActiveDown(r.range);
-                return (
-                  <div key={r.range} className="flex items-center justify-between rounded px-2 py-1"
-                    style={{ background: active ? `${r.color}20` : 'transparent', border: `1px solid ${active ? r.color : C.borderSubtle}` }}>
-                    <div>
-                      <span className="text-[8px] font-bold" style={{ color: active ? r.color : C.textMuted }}>{r.range} down</span>
-                      <span className="text-[7px] ml-1.5" style={{ color: C.textMuted }}>{r.freq}</span>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[8px] font-mono font-bold" style={{ color: active ? r.color : C.textSecond }}>{r.pts}</div>
-                      <div className="text-[7px]" style={{ color: C.textMuted }}>{r.note}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <span className="text-[8px] whitespace-nowrap shrink-0" style={{ color: C.textMuted }}>
+              ~8-12 pts/stock
+            </span>
           </div>
-          {/* Stocks UP table */}
-          <div>
-            <div className="text-[8px] uppercase tracking-wider mb-1.5 font-bold" style={{ color: '#22c55e' }}>
-              Stocks Up → Nifty Impact
-            </div>
-            <div className="space-y-0.5">
-              {UP_ROWS.map(r => {
-                const active = isActiveUp(r.range);
-                return (
-                  <div key={r.range} className="flex items-center justify-between rounded px-2 py-1"
-                    style={{ background: active ? `${r.color}20` : 'transparent', border: `1px solid ${active ? r.color : C.borderSubtle}` }}>
-                    <div>
-                      <span className="text-[8px] font-bold" style={{ color: active ? r.color : C.textMuted }}>{r.range} up</span>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[8px] font-mono font-bold" style={{ color: active ? r.color : C.textSecond }}>{r.pts}</div>
-                      <div className="text-[7px]" style={{ color: C.textMuted }}>{r.note}</div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="mt-1 text-[7px] rounded px-1.5 py-1" style={{ color: C.textMuted, background: C.panelBg || C.cardBg }}>
-                Each declining stock ≈ 8-12 Nifty pts impact
+
+          {/* Count row */}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] font-bold" style={{ color: '#22c55e' }}>▲ {advances}</span>
+                <span className="text-[8px]" style={{ color: C.textMuted }}>up</span>
+              </div>
+              {unchanged > 0 && (
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] font-bold" style={{ color: C.textMuted }}>→ {unchanged}</span>
+                  <span className="text-[8px]" style={{ color: C.textMuted }}>flat</span>
+                </div>
+              )}
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] font-bold" style={{ color: '#ef4444' }}>▼ {declines}</span>
+                <span className="text-[8px]" style={{ color: C.textMuted }}>down</span>
               </div>
             </div>
+            <div className="text-right">
+              <div className="text-[9px] font-bold font-mono" style={{ color: sigColor }}>
+                {breadth.impact_label}
+              </div>
+              <div className="text-[7px]" style={{ color: C.textMuted }}>{breadth.freq}</div>
+            </div>
           </div>
+
+          {/* Description */}
+          <div className="text-[8px] mb-2" style={{ color: C.textMuted }}>{breadth.description}</div>
+
+          {/* Reference table toggle */}
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowRef(v => !v); }}
+            className="text-[8px] px-2 py-0.5 rounded transition-all mb-2"
+            style={{ color: C.textMuted, border: `1px solid ${C.border}` }}
+            data-testid="breadth-ref-toggle">
+            {showRef ? 'Hide Reference Table' : 'Reference Table'}
+          </button>
+
+          {/* Collapsible reference tables */}
+          {showRef && (
+            <div className="mt-2 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+              {/* Stocks DOWN table */}
+              <div>
+                <div className="text-[8px] uppercase tracking-wider mb-1.5 font-bold" style={{ color: '#ef4444' }}>
+                  Stocks Down → Nifty Impact
+                </div>
+                <div className="space-y-0.5">
+                  {DOWN_ROWS.map(r => {
+                    const active = isActiveDown(r.range);
+                    return (
+                      <div key={r.range} className="flex items-center justify-between rounded px-2 py-1"
+                        style={{ background: active ? `${r.color}20` : 'transparent', border: `1px solid ${active ? r.color : C.borderSubtle}` }}>
+                        <div>
+                          <span className="text-[8px] font-bold" style={{ color: active ? r.color : C.textMuted }}>{r.range} down</span>
+                          <span className="text-[7px] ml-1.5" style={{ color: C.textMuted }}>{r.freq}</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[8px] font-mono font-bold" style={{ color: active ? r.color : C.textSecond }}>{r.pts}</div>
+                          <div className="text-[7px]" style={{ color: C.textMuted }}>{r.note}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Stocks UP table */}
+              <div>
+                <div className="text-[8px] uppercase tracking-wider mb-1.5 font-bold" style={{ color: '#22c55e' }}>
+                  Stocks Up → Nifty Impact
+                </div>
+                <div className="space-y-0.5">
+                  {UP_ROWS.map(r => {
+                    const active = isActiveUp(r.range);
+                    return (
+                      <div key={r.range} className="flex items-center justify-between rounded px-2 py-1"
+                        style={{ background: active ? `${r.color}20` : 'transparent', border: `1px solid ${active ? r.color : C.borderSubtle}` }}>
+                        <div>
+                          <span className="text-[8px] font-bold" style={{ color: active ? r.color : C.textMuted }}>{r.range} up</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[8px] font-mono font-bold" style={{ color: active ? r.color : C.textSecond }}>{r.pts}</div>
+                          <div className="text-[7px]" style={{ color: C.textMuted }}>{r.note}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="mt-1 text-[7px] rounded px-1.5 py-1" style={{ color: C.textMuted, background: C.panelBg || C.cardBg }}>
+                    Each declining stock ≈ 8-12 Nifty pts impact
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
