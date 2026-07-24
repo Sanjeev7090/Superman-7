@@ -528,3 +528,19 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 **Testing**: 13/13 tests PASS (iteration_33.json)
 
+
+
+---
+
+## Bug Fix — Brent Crude Live Update (Jul 24, 2026)
+
+**Bug**: Market Intelligence panel mein Brent Crude live update nahi ho rahi thi.
+
+**Root Causes Fixed**:
+1. _fetch_brent_history() now returns brent_current + brent_chg_day (history-based, no rollover artifact).
+2. _build_intel() uses history-based Brent price/day-change as primary source.
+3. MarketIntelPanel.jsx: Auto-refresh every 2 minutes added (setInterval).
+4. Brent card shows '—' instead of '$0.00' when data unavailable.
+
+**Files**: market_intel.py, MarketIntelPanel.jsx
+**Testing**: 22/22 PASS (iteration_35.json)
