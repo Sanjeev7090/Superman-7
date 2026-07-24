@@ -562,3 +562,21 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 **Files**: market_intel.py, MarketIntelPanel.jsx
 **Testing**: 21/21 PASS (iteration_36.json)
+
+
+---
+
+## Feature — FII/DII IST-Aware Date Logic (Jul 24, 2026)
+
+**Feature**: FII/DII Activity section mein IST-aware date logic + MongoDB persistence.
+
+**What was changed**:
+1. backend: _ist_now(), _last_trading_day_for_fii(), _fii_data_availability_info() new helpers
+2. fetch_fii_intel(db=) now accepts DB for MongoDB persistence (save/restore on restart)
+3. After 6 PM IST: tries today's archive first; before 6 PM: shows previous day's data
+4. Availability info: status (released/pre_release/weekend), countdown timer, next_update
+5. 3-tier fallback: NSE live → MongoDB cache → unavailable with NSE link
+6. Frontend: date badge in header, Released/Pending/Weekend status card, countdown bar, Source badge, Refresh button, auto-refresh every 10 min after 6 PM, NSE link when unavailable
+
+**Files**: market_intel.py, server.py, MarketIntelPanel.jsx
+**Testing**: 25/25 PASS (iteration_37.json)

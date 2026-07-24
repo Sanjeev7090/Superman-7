@@ -1006,9 +1006,18 @@ def _fetch_fii_data_sync() -> Dict:
     s.get("https://www.nseindia.com/", timeout=8, headers={"Accept": "text/html"})
 
     def _trading_days_back(n: int = 5):
-        """Return last n calendar days that are weekdays."""
+        """
+        Return last n weekday dates to try.
+        After 6 PM IST: also include today first (NSE uploads by ~6 PM).
+        """
+        from zoneinfo import ZoneInfo
+        ist = datetime.now(ZoneInfo("Asia/Kolkata"))
         days = []
-        d = datetime.now().date()
+        d = ist.date()
+        # After 6 PM on a weekday → today's data might be available
+        if ist.hour >= 18 and d.weekday() < 5:
+            days.append(d)
+        # Then go backwards
         while len(days) < n:
             d -= timedelta(days=1)
             if d.weekday() < 5:   # Mon-Fri
