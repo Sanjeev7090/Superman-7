@@ -691,7 +691,11 @@ def _fetch_vix_history() -> Dict:
 
 
 def _fetch_brent_history() -> Dict:
-    """Fetch Brent Crude weekly/monthly change."""
+    """
+    Fetch Brent Crude live price + day/week/month changes from history.
+    Using history (daily closes) avoids futures-rollover artifacts that
+    cause `fast_info.previous_close` to show large artificial price swings.
+    """
     import yfinance as yf
     try:
         hist = yf.Ticker("BZ=F").history(period="3mo")
@@ -699,6 +703,7 @@ def _fetch_brent_history() -> Dict:
             return {}
         closes = hist["Close"].dropna()
         current = float(closes.iloc[-1])
+        prev_day = float(closes.iloc[-2]) if len(closes) > 1 else None
 
         def _pct(n: int) -> Optional[float]:
             if len(closes) > n:
@@ -706,7 +711,11 @@ def _fetch_brent_history() -> Dict:
                 return round((current - prev) / prev * 100, 2) if prev else None
             return None
 
+        day_chg = round((current - prev_day) / prev_day * 100, 2) if prev_day and prev_day > 0 else None
+
         return {
+            "brent_current":  round(current, 2),   # live price from history
+            "brent_chg_day":  day_chg,              # day % change (reliable, no rollover artifact)
             "brent_chg_week":  _pct(5),
             "brent_chg_month": _pct(21),
         }
@@ -1063,7 +1072,9 @@ async def _build_intel() -> Dict:
     reg_task = asyncio.ensure_future(_fetch_regulatory_sentiment())
     yf_data, regulatory = await asyncio.gather(yf_task, reg_task)
 
-    brent = yf_data.get("brent", 85.0)
+    # Brent: prefer history-based price (avoids futures rollover artifacts in fast_info)
+    # Will be overridden by more reliable history data in Phase 2 below
+    brent = yf_data.get("brent", 0.0)   # 0 = unknown until history confirms
     vix   = yf_data.get("vix",   15.0)
     nifty = yf_data.get("nifty", 24000.0)
     nasdaq = yf_data.get("nasdaq", 0.0)
@@ -1129,6 +1140,17 @@ async def _build_intel() -> Dict:
 
     expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
+
+    # ── Brent: override with history-based reliable values ─────────────────────
+    # history gives cleaner day-change without futures-rollover artifacts
+    if brent_hist.get("brent_current"):
+        brent = brent_hist["brent_current"]
+        if brent_hist.get("brent_chg_day") is not None:
+            brent_chg = brent_hist["brent_chg_day"]
+    elif not brent:           # fast_info also failed — keep 0 rather than fake 85
+        brent = 0.0
+        brent_chg = 0.0
+    # ───────────────────────────────────────────────────────────────────────────
 
     vix_52w_high   = vix_hist.get("vix_52w_high", 0.0)
     vix_52w_low    = vix_hist.get("vix_52w_low",  0.0)

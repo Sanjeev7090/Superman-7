@@ -8,7 +8,7 @@ import requests
 import time
 import sys
 
-BASE_URL = "https://hero-preview-22.preview.emergentagent.com"
+BASE_URL = "https://nifty-backfill.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 
 def log_test(name, success, details=""):

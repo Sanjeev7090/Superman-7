@@ -268,7 +268,12 @@ const MarketIntelPanel = ({ onClose }) => {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Initial load + auto-refresh every 2 minutes so Brent/VIX stay live
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 120000); // 2 min matches backend cache TTL
+    return () => clearInterval(interval);
+  }, [load]);
 
   const activeRow = data ? ROWS.findIndex(r => r.label === data.bias) : -1;
 
@@ -401,9 +406,11 @@ const MarketIntelPanel = ({ onClose }) => {
                     ))}
                   </div>
                 </div>
-                <div className="text-sm font-bold font-mono" style={{ color: C.textPrimary }}>${fmt(data.brent)}</div>
+                <div className="text-sm font-bold font-mono" style={{ color: C.textPrimary }}>
+                  {data.brent > 0 ? `$${fmt(data.brent)}` : '—'}
+                </div>
                 <div className="text-[10px] mt-0.5 font-mono" style={{ color: chgColor(brentChg) }}>
-                  {fmtPct(brentChg)} {brentTf === 'D' ? '(Day)' : brentTf === 'W' ? '(Week)' : '(Month)'}
+                  {data.brent > 0 ? `${fmtPct(brentChg)} ${brentTf === 'D' ? '(Day)' : brentTf === 'W' ? '(Week)' : '(Month)'}` : 'Fetching...'}
                 </div>
               </div>
 
