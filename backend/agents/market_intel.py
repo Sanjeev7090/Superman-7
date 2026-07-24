@@ -903,6 +903,50 @@ def _fetch_nifty_history() -> Dict:
         return {}
 
 
+def _fetch_nifty_today_actual() -> Dict:
+    """
+    Fetch Nifty's actual intraday move for today (open → close/current).
+    Returns actual_pts, actual_pct, market_closed, open_price, close_price.
+    Only meaningful after NSE market opens (9:15 AM IST).
+    """
+    import yfinance as yf
+    from zoneinfo import ZoneInfo
+    try:
+        IST = ZoneInfo("Asia/Kolkata")
+        now_ist = datetime.now(IST)
+        is_weekday = now_ist.weekday() < 5  # Mon-Fri
+        market_open_time  = now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
+        market_close_time = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
+
+        # Only fetch on weekdays after 9:15 AM
+        if not is_weekday or now_ist < market_open_time:
+            return {"available": False, "market_closed": False}
+
+        hist = yf.Ticker("^NSEI").history(period="1d", interval="5m")
+        if hist.empty:
+            return {"available": False, "market_closed": False}
+
+        open_price  = float(hist["Open"].iloc[0])
+        close_price = float(hist["Close"].iloc[-1])
+        actual_pts  = round(close_price - open_price, 2)
+        actual_pct  = round((actual_pts / open_price) * 100, 2) if open_price else 0.0
+        market_closed = now_ist >= market_close_time
+
+        return {
+            "available":     True,
+            "market_closed": market_closed,
+            "open_price":    round(open_price, 2),
+            "close_price":   round(close_price, 2),
+            "actual_pts":    actual_pts,
+            "actual_pct":    actual_pct,
+            "color":         "#22c55e" if actual_pts >= 0 else "#ef4444",
+            "label":         f"{'▲' if actual_pts >= 0 else '▼'} {abs(actual_pts):.0f} pts ({'+' if actual_pts >= 0 else ''}{actual_pct:.2f}%)",
+        }
+    except Exception as e:
+        logger.debug(f"Nifty today actual fetch failed: {e}")
+        return {"available": False, "market_closed": False}
+
+
 def _fetch_gift_nifty_history() -> Dict:
     """Fetch GIFT Nifty (SGX Nifty proxy) weekly/monthly change via NIFTYIFTB.NS or ES=F."""
     import yfinance as yf
@@ -1368,9 +1412,9 @@ async def _build_intel() -> Dict:
     gift_hist_task     = loop.run_in_executor(None, _fetch_gift_nifty_history)
     hs_hist_task       = loop.run_in_executor(None, _fetch_hang_seng_history)
     breadth_task       = loop.run_in_executor(None, _fetch_nifty_breadth_sync)
-    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist, breadth_data = await asyncio.gather(
-        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task, breadth_task)
-
+    actual_move_task   = loop.run_in_executor(None, _fetch_nifty_today_actual)
+    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist, breadth_data, today_actual = await asyncio.gather(
+        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task, breadth_task, actual_move_task)
     expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
 
@@ -1481,6 +1525,7 @@ async def _build_intel() -> Dict:
         },
         "matrix": BIAS_LEVELS,
         "breadth": breadth_data if breadth_data else {},
+        "today_actual": today_actual,
         "updated_at": now.isoformat(),
     }
     _cache["intel"] = {"data": data, "ts": now}

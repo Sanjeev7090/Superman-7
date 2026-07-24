@@ -831,6 +831,30 @@ const MarketIntelPanel = ({ onClose }) => {
                     <div className="text-[8px] mt-0.5 font-medium" style={{ color: isWeekend ? '#64748b' : (data.today_move?.color || C.textMuted) }}>
                       {isWeekend ? 'No trading' : (data.today_move?.probability || '—')}
                     </div>
+                    {/* ── Actual Achieved Points (shown after 3:30 PM IST) ── */}
+                    {!isWeekend && data.today_actual?.available && (
+                      <div className="mt-1 pt-1" style={{ borderTop: `1px dashed ${C.borderSubtle}` }}>
+                        <div className="text-[6px] uppercase tracking-wider mb-0.5" style={{ color: C.textMuted }}>
+                          {data.today_actual.market_closed ? 'Actual Achieved' : 'Live Move'}
+                        </div>
+                        <div
+                          className="text-[8px] font-bold font-mono px-1 py-0.5 rounded"
+                          style={{
+                            color: data.today_actual.color,
+                            background: `${data.today_actual.color}12`,
+                            border: `1px solid ${data.today_actual.color}30`,
+                          }}
+                          data-testid="today-actual-move"
+                        >
+                          {data.today_actual.label}
+                        </div>
+                        {data.today_actual.market_closed && (
+                          <div className="text-[6px] mt-0.5 leading-tight" style={{ color: C.textMuted }}>
+                            {data.today_actual.open_price?.toLocaleString('en-IN')} → {data.today_actual.close_price?.toLocaleString('en-IN')}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Vertical divider */}
