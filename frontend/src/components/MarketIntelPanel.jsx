@@ -361,7 +361,7 @@ const UP_ROWS = [
 ];
 
 function BreadthCard({ breadth, C, isDark }) {
-  const [showRef, setShowRef] = useState(false);
+  const [showRef, setShowRef] = useState(true);
   if (!breadth || breadth.advances == null) return null;
 
   const { advances = 0, declines = 0, unchanged = 0, total = 50 } = breadth;
@@ -1139,6 +1139,9 @@ const MarketIntelPanel = ({ onClose }) => {
               ); // end return
             })()} {/* end IIFE */}
 
+            {/* ── Nifty 50 Market Breadth (right after Bias) ──────────── */}
+            <BreadthCard breadth={data.breadth} C={C} isDark={isDark} />
+
             {/* Nasdaq ↔ Nifty Correlation Info Strip */}
             {data.nasdaq > 0 && (
               <div className="rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2"
@@ -1370,21 +1373,6 @@ const MarketIntelPanel = ({ onClose }) => {
               </div>
             )}
 
-            {/* Factor Scores */}
-            {data.scores && (
-              <div className="rounded-xl p-4" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
-                <div className="text-[9px] uppercase tracking-widest mb-3" style={{ color: C.textMuted }}>Factor Scores</div>
-                <div className="space-y-2">
-                  <ScoreBar label="Brent"      score={data.scores.brent} />
-                  <ScoreBar label="India VIX"  score={data.scores.vix} />
-                  <ScoreBar label="Regulatory" score={data.scores.regulatory} />
-                  <ScoreBar label="GIFT Nifty" score={data.scores.gift} />
-                  <div className="h-px my-1" style={{ background: C.borderSubtle }} />
-                  <ScoreBar label="Total"      score={data.scores.total} max={6} />
-                </div>
-              </div>
-            )}
-
             {/* VIX Percentile + Expiry row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
 
@@ -1478,9 +1466,6 @@ const MarketIntelPanel = ({ onClose }) => {
                 </div>
               )}
             </div>
-
-            {/* ── Nifty 50 Breadth Section ─────────────────────────────── */}
-            <BreadthCard breadth={data.breadth} C={C} isDark={isDark} />
 
             {/* Decision Matrix Table */}
             <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
