@@ -1094,21 +1094,140 @@ def _classify_fii_fo(net_contracts: int) -> Dict:
     else:                        return {"action": "Heavy Selling",   "nifty": "Bearish",         "move": "-150 to -400 pts", "color": "#ef4444"}
 
 
-async def fetch_fii_intel() -> Dict:
-    """Public API — FII/DII data with 1-hour cache."""
-    now    = datetime.now(timezone.utc)
+def _ist_now():
+    """Current datetime in IST (UTC+5:30)."""
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Asia/Kolkata"))
+
+
+def _last_trading_day_for_fii() -> str:
+    """
+    Determine which trading day's FII data we should display:
+    - NSE archives upload F&O participant data ~6 PM IST each trading day
+    - Before 6 PM IST → show previous trading day's data
+    - After 6 PM IST  → show today's data (if it's a weekday)
+    Returns a date string in 'DDMMYYYY' format (for NSE archive URL).
+    """
+    ist = _ist_now()
+    d = ist.date()
+    # Before 6 PM or weekend → go back one day
+    if ist.hour < 18 or d.weekday() >= 5:
+        d -= timedelta(days=1)
+    # Skip to nearest previous weekday (Mon-Fri)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d.strftime("%d%m%Y"), d.strftime("%d-%b-%Y")
+
+
+def _fii_data_availability_info() -> Dict:
+    """
+    Returns info about FII data availability window based on IST time.
+    Used to inform the frontend about current data freshness.
+    """
+    ist = _ist_now()
+    ist_hour = ist.hour
+    ist_min  = ist.minute
+    is_weekday = ist.date().weekday() < 5
+
+    if not is_weekday:
+        return {
+            "status": "weekend",
+            "message": "Market closed (Weekend). Showing last available data.",
+            "next_update": "Monday 6 PM IST",
+            "show_timer": False,
+        }
+
+    if ist_hour < 18:
+        # Data not yet available for today
+        mins_left = (18 - ist_hour) * 60 - ist_min
+        hrs_left  = mins_left // 60
+        m_left    = mins_left % 60
+        time_str  = f"{hrs_left}h {m_left}m" if hrs_left > 0 else f"{m_left}m"
+        return {
+            "status": "pre_release",
+            "message": f"Today's NSE F&O data available at 6 PM IST (~{time_str} away).",
+            "next_update": "Today 6 PM IST",
+            "show_timer": True,
+            "mins_to_release": mins_left,
+        }
+    else:
+        return {
+            "status": "released",
+            "message": "Today's data released. Fetching from NSE F&O archives...",
+            "next_update": "Tomorrow 6 PM IST",
+            "show_timer": False,
+        }
+
+
+async def fetch_fii_intel(db=None) -> Dict:
+    """
+    Public API — FII/DII data with IST-aware date logic and MongoDB persistence.
+    
+    Logic:
+    - Before 6 PM IST → previous trading day's data
+    - After 6 PM IST  → today's data
+    - Tries NSE archives (blocked from cloud IPs) → falls back to MongoDB cache
+    - Stores any successful fetch to MongoDB for persistence across restarts
+    """
+    now       = datetime.now(timezone.utc)
+    date_code, date_label = _last_trading_day_for_fii()
+    avail_info = _fii_data_availability_info()
+
+    # ── 1. Check in-memory cache (1 hour TTL) ─────────────────────────────────
     cached = _FII_CACHE.get("fii")
     if cached and (now - cached["ts"]).total_seconds() < _FII_CACHE_TTL:
-        return cached["data"]
+        result = cached["data"].copy()
+        result["availability"] = avail_info
+        result["data_for_date"] = date_label
+        return result
 
-    loop = asyncio.get_event_loop()
-    data = await loop.run_in_executor(None, _fetch_fii_data_sync)
+    # ── 2. Try live NSE fetch ──────────────────────────────────────────────────
+    loop  = asyncio.get_event_loop()
+    data  = await loop.run_in_executor(None, _fetch_fii_data_sync)
 
-    if not data:
-        data = {"source": "unavailable", "message": "NSE FII data available after 6 PM IST"}
+    if data:
+        # Successful fetch → persist to MongoDB
+        data["data_for_date"] = date_label
+        data["fetched_at_ist"] = _ist_now().strftime("%d-%b-%Y %I:%M %p IST")
+        if db is not None:
+            try:
+                await db["fii_intel_cache"].replace_one(
+                    {"_id": "latest"},
+                    {"_id": "latest", **{k: v for k, v in data.items()}, "cached_at": now.isoformat()},
+                    upsert=True
+                )
+            except Exception as ex:
+                logger.debug(f"FII MongoDB persist failed: {ex}")
 
-    _FII_CACHE["fii"] = {"data": data, "ts": now}
-    return data
+        _FII_CACHE["fii"] = {"data": data, "ts": now}
+        data["availability"] = avail_info
+        return data
+
+    # ── 3. Try MongoDB for last known good data ────────────────────────────────
+    if db is not None:
+        try:
+            doc = await db["fii_intel_cache"].find_one({"_id": "latest"})
+            if doc:
+                doc.pop("_id", None)
+                doc.pop("cached_at", None)
+                doc["source"]         = "mongodb_cache"
+                doc["availability"]   = avail_info
+                doc["data_for_date"]  = doc.get("data_for_date", date_label)
+                doc["cache_note"]     = f"NSE archives blocked from cloud. Showing last saved data ({doc.get('fetched_at_ist', 'unknown time')})."
+                # Also store in memory so we don't hit MongoDB every time
+                _FII_CACHE["fii"] = {"data": doc, "ts": now}
+                return doc
+        except Exception as ex:
+            logger.debug(f"FII MongoDB read failed: {ex}")
+
+    # ── 4. Full unavailability ─────────────────────────────────────────────────
+    return {
+        "source":        "unavailable",
+        "availability":  avail_info,
+        "data_for_date": date_label,
+        "message":       "NSE F&O archives are not accessible from cloud servers (IP-level block). Data will auto-update when accessible.",
+        "nse_url":       "https://www.nseindia.com/report-detail/fo_participant_vol",
+    }
 
 
 # ── Main Fetch ─────────────────────────────────────────────────────────────────

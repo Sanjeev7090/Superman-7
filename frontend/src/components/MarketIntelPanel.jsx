@@ -1344,8 +1344,8 @@ function FiiSection({ C, isDark }) {
   const [fiiData, setFiiData] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const loadFii = useCallback(async () => {
-    if (fiiData || loading) return;
+  const loadFii = useCallback(async (force = false) => {
+    if ((fiiData && !force) || loading) return;
     setLoading(true);
     try {
       const { data } = await axios.get(`${API}/market-intel/fii`);
@@ -1362,6 +1362,17 @@ function FiiSection({ C, isDark }) {
     setOpen(next);
     if (next) loadFii();
   };
+
+  // Auto-refresh FII data after 6 PM IST (every 10 min when panel is open)
+  useEffect(() => {
+    if (!open) return;
+    const ist = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+    const istDate = new Date(ist);
+    const afterSix = istDate.getHours() >= 18;
+    if (!afterSix) return; // Only auto-refresh if after 6 PM IST
+    const timer = setInterval(() => loadFii(true), 10 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [open, loadFii]);
 
   const live  = fiiData && fiiData.fii;
   const cls   = fiiData?.classification;
@@ -1404,6 +1415,12 @@ function FiiSection({ C, isDark }) {
               {fmtCHead(live.net)}
             </span>
           )}
+          {fiiData?.data_for_date && (
+            <span className="text-[8px] px-1.5 py-0.5 rounded font-mono ml-1"
+              style={{ color: C.textMuted, background: C.borderSubtle ? `${C.borderSubtle}50` : 'rgba(100,116,139,0.15)' }}>
+              {fiiData.data_for_date}
+            </span>
+          )}
           <span className="text-[9px] ml-1" style={{ color: C.textMuted }}>
             NSE F&amp;O
           </span>
@@ -1414,7 +1431,7 @@ function FiiSection({ C, isDark }) {
       {open && (
         <div className="px-4 pb-4 pt-1 space-y-3" style={{ background: C.panelBg }}>
 
-          {/* Live FII/DII Data */}
+          {/* Loading */}
           {loading && (
             <div className="flex items-center gap-2 py-2">
               <ArrowClockwise size={12} className="animate-spin text-sky-500" />
@@ -1422,13 +1439,36 @@ function FiiSection({ C, isDark }) {
             </div>
           )}
 
+          {/* Refresh button (visible when data loaded and after 6 PM) */}
+          {fiiData && !loading && (
+            <div className="flex items-center justify-between">
+              <div className="text-[8px]" style={{ color: C.textMuted }}>
+                {fiiData.source === 'NSE F&O Archive' ? 'Source: NSE F&O Archive' :
+                 fiiData.source === 'mongodb_cache' ? 'Source: Saved (MongoDB)' :
+                 fiiData.source === 'unavailable' ? 'Source: Unavailable' : 'Source: NSE'}
+              </div>
+              <button
+                onClick={() => loadFii(true)}
+                className="flex items-center gap-1 text-[8px] px-2 py-0.5 rounded transition-all hover:opacity-80"
+                style={{ color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)' }}
+                data-testid="fii-refresh-btn">
+                <ArrowClockwise size={9} /> Refresh
+              </button>
+            </div>
+          )}
+
           {live && (
             <div className="rounded-lg p-3 space-y-2" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>
-                  Latest F&amp;O Positions (Lots/Contracts)
+                  F&amp;O Positions (Index Futures, Lots)
                 </span>
-                <span className="text-[9px]" style={{ color: C.textMuted }}>{fiiData.date}</span>
+                <div className="flex items-center gap-1.5">
+                  {fiiData.source === 'mongodb_cache' && (
+                    <span className="text-[7px] px-1 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>Cached</span>
+                  )}
+                  <span className="text-[9px] font-mono font-semibold" style={{ color: C.textSecond }}>{fiiData.data_for_date || fiiData.date}</span>
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {[
@@ -1480,8 +1520,70 @@ function FiiSection({ C, isDark }) {
           )}
 
           {fiiData && !live && fiiData.source !== 'error' && (
-            <div className="text-[9px] py-1.5 px-2 rounded" style={{ background: isDark ? 'rgba(251,191,36,0.08)' : 'rgba(251,191,36,0.12)', color: '#fbbf24' }}>
-              {fiiData.message || 'NSE FII data available after 6 PM IST'}
+            <div className="space-y-2">
+              {/* Availability status */}
+              {fiiData.availability && (
+                <div className="rounded-lg p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="text-[9px] font-bold uppercase tracking-widest" style={{ color: C.textMuted }}>
+                        Data Status
+                      </div>
+                      <span className="text-[8px] px-1.5 py-0.5 rounded font-bold"
+                        style={{
+                          background: fiiData.availability.status === 'released'
+                            ? 'rgba(34,197,94,0.15)' : fiiData.availability.status === 'weekend'
+                            ? 'rgba(148,163,184,0.15)' : 'rgba(251,191,36,0.15)',
+                          color: fiiData.availability.status === 'released'
+                            ? '#22c55e' : fiiData.availability.status === 'weekend'
+                            ? '#94a3b8' : '#fbbf24',
+                        }}>
+                        {fiiData.availability.status === 'released' ? 'Released' :
+                         fiiData.availability.status === 'weekend' ? 'Weekend' : 'Pending'}
+                      </span>
+                    </div>
+                    <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>
+                      {fiiData.data_for_date}
+                    </span>
+                  </div>
+                  <div className="text-[8px] mb-2" style={{ color: C.textSecond }}>
+                    {fiiData.availability.message}
+                  </div>
+                  {/* Countdown bar for pre-release */}
+                  {fiiData.availability.show_timer && fiiData.availability.mins_to_release && (
+                    <div className="mb-2">
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }}>
+                        <div className="h-full rounded-full bg-amber-400"
+                          style={{ width: `${Math.max(0, 100 - (fiiData.availability.mins_to_release / 720) * 100)}%`, transition: 'width 0.3s' }} />
+                      </div>
+                      <div className="flex justify-between mt-0.5 text-[7px]" style={{ color: C.textMuted }}>
+                        <span>Market open</span>
+                        <span>6 PM IST</span>
+                      </div>
+                    </div>
+                  )}
+                  {/* Cache note */}
+                  {fiiData.cache_note && (
+                    <div className="text-[8px] p-1.5 rounded" style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24' }}>
+                      {fiiData.cache_note}
+                    </div>
+                  )}
+                  {/* NSE link */}
+                  {fiiData.nse_url && (
+                    <a href={fiiData.nse_url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1 mt-2 text-[8px] underline"
+                      style={{ color: '#60a5fa' }}>
+                      View on NSE →
+                    </a>
+                  )}
+                </div>
+              )}
+              {/* Fallback: old-style message if availability not present */}
+              {!fiiData.availability && (
+                <div className="text-[9px] py-1.5 px-2 rounded" style={{ background: isDark ? 'rgba(251,191,36,0.08)' : 'rgba(251,191,36,0.12)', color: '#fbbf24' }}>
+                  {fiiData.message || 'NSE FII data available after 6 PM IST'}
+                </div>
+              )}
             </div>
           )}
 

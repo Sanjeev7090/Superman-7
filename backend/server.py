@@ -11776,12 +11776,13 @@ async def get_market_intel():
 async def get_fii_intel():
     """
     FII/DII live data from NSE website.
-    Returns today's FII net buy/sell + classification + 5-day trend.
-    Cache: 1 hour (NSE updates once ~6 PM IST).
+    - Before 6 PM IST: shows previous trading day's data
+    - After 6 PM IST: tries to fetch today's data, falls back to previous day
+    - Persists to MongoDB so data survives server restarts
     """
     try:
         from agents.market_intel import fetch_fii_intel
-        return await fetch_fii_intel()
+        return await fetch_fii_intel(db=db)
     except Exception as e:
         logging.error(f"FII intel fetch error: {e}")
         return {"source": "error", "message": str(e)}
