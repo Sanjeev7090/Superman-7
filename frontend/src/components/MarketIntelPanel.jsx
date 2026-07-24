@@ -162,6 +162,125 @@ const fmtPct = (v) => {
   return `${sign}${Number(v).toFixed(2)}%`;
 };
 
+// ── Market News Intelligence Card ─────────────────────────────────────────────
+const SOURCE_COLORS = {
+  'ET Markets':        '#e8192c',
+  'Moneycontrol':      '#2563eb',
+  'Business Standard': '#1e40af',
+  'LiveMint':          '#16a34a',
+  'Google News':       '#4285F4',
+};
+
+function relativeTime(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const diff = (Date.now() - new Date(isoStr).getTime()) / 1000;
+    if (diff < 60)    return 'just now';
+    if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  } catch { return ''; }
+}
+
+function MarketNewsCard({ news, C }) {
+  const [expanded, setExpanded] = useState(true);
+  if (!news || !news.available) return null;
+
+  const { items = [], outlook, outlook_color, outlook_label, bull_count = 0, bear_count = 0, total = 0 } = news;
+
+  return (
+    <div className="rounded-xl overflow-hidden" data-testid="market-news-card"
+      style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 cursor-pointer"
+        style={{ borderBottom: expanded ? `1px solid ${C.border}` : 'none' }}
+        onClick={() => setExpanded(e => !e)}>
+        <div className="flex items-center gap-2">
+          <Globe size={13} style={{ color: outlook_color }} />
+          <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: C.textPrimary }}>
+            Market News Intelligence
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider"
+            style={{ color: outlook_color, background: `${outlook_color}18`, border: `1px solid ${outlook_color}40` }}>
+            {outlook}
+          </span>
+          <span className="text-[8px] font-medium" style={{ color: '#22c55e' }}>{bull_count}↑</span>
+          <span className="text-[8px] font-medium" style={{ color: '#ef4444' }}>{bear_count}↓</span>
+          <span className="text-[9px] rounded px-1.5 py-0.5" style={{ color: C.textMuted, background: C.panelBg }}>
+            {expanded ? '▲' : '▼'}
+          </span>
+        </div>
+      </div>
+
+      {expanded && (
+        <>
+          {/* Outlook summary */}
+          <div className="px-4 py-2.5 flex items-center gap-3" style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+            {total > 0 && (
+              <div className="flex-1 h-1.5 rounded-full overflow-hidden flex" style={{ background: C.panelBg }}>
+                <div style={{ width: `${(bull_count / total) * 100}%`, background: '#22c55e' }} />
+                <div style={{ width: `${(bear_count / total) * 100}%`, background: '#ef4444' }} />
+                <div style={{ flex: 1, background: '#94a3b820' }} />
+              </div>
+            )}
+            <span className="text-[8px] whitespace-nowrap font-medium" style={{ color: C.textMuted }}>
+              {outlook_label}
+            </span>
+          </div>
+
+          {/* News items */}
+          <div className="divide-y" style={{ borderColor: C.borderSubtle }}>
+            {items.map((item, i) => (
+              <div key={i} className="px-4 py-2.5 flex items-start gap-2.5" data-testid={`news-item-${i}`}>
+                <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full mt-1.5"
+                  style={{ background: item.sentiment_color }} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
+                      style={{
+                        color: SOURCE_COLORS[item.source] || '#94a3b8',
+                        background: `${SOURCE_COLORS[item.source] || '#94a3b8'}18`,
+                      }}>
+                      {item.source}
+                    </span>
+                    <span className="text-[8px]" style={{ color: C.textMuted }}>
+                      {relativeTime(item.published)}
+                    </span>
+                    <span className="text-[7px] font-bold px-1 py-0.5 rounded"
+                      style={{ color: item.sentiment_color, background: `${item.sentiment_color}15` }}>
+                      {item.sentiment}
+                    </span>
+                  </div>
+                  <a href={item.url} target="_blank" rel="noopener noreferrer"
+                    className="text-[10px] leading-snug font-medium hover:underline block"
+                    style={{ color: C.textSecond }}>
+                    {item.title}
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div className="px-4 py-2 flex items-center justify-between"
+            style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+            <span className="text-[8px]" style={{ color: C.textMuted }}>
+              ET Markets · Moneycontrol · Business Standard · LiveMint
+            </span>
+            {news.fetched_at && (
+              <span className="text-[8px]" style={{ color: C.textMuted }}>
+                {relativeTime(news.fetched_at)}
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Nifty 50 Breadth Section Card ─────────────────────────────────────────────
 const DOWN_ROWS = [
   { range: '35+',   pts: '-180 to -350 pts', freq: '~18% days', note: 'Strong correction', color: '#ef4444' },
@@ -1352,6 +1471,11 @@ const MarketIntelPanel = ({ onClose }) => {
                 </table>
               </div>
             </div>
+
+            {/* ── Market News Intelligence Card ───────────────────────── */}
+            {data.market_news?.available && (
+              <MarketNewsCard news={data.market_news} C={C} />
+            )}
 
             {/* ── FII Activity Section (Collapsible) ─────────────────────── */}
             <FiiSection C={C} isDark={isDark} />

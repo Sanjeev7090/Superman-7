@@ -566,7 +566,26 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Feature — FII/DII IST-Aware Date Logic (Jul 24, 2026)
+## Feature (Jul 2026) — Market News Intelligence Card
+
+**Feature**: Market Intelligence panel mein "Market News Intelligence" card add kiya.
+
+**What was added**:
+1. Backend (`market_intel.py`):
+   - `_NEWS_MARKET_RSS` — 6 RSS sources: ET Markets (2 feeds), LiveMint, Moneycontrol, Business Standard, Google News
+   - `_NEWS_BULLISH_KW` + `_NEWS_BEARISH_KW` + `_NIFTY_FILTER_KW` — keyword sets for sentiment scoring
+   - `_fetch_nifty_market_news_sync()` — fetches, filters, deduplicates, scores sentiment on top 10 headlines
+   - 15-min in-memory cache (`_news_market_cache`)
+   - Runs as parallel task in `_build_intel()` (no latency impact)
+   - Returns: `{items, outlook, outlook_color, outlook_label, bull_count, bear_count, total, confidence}`
+2. Frontend (`MarketIntelPanel.jsx`):
+   - `SOURCE_COLORS` map (ET red, Moneycontrol blue, BS navy, LiveMint green, Google blue)
+   - `relativeTime()` helper (just now / Xm ago / Xh ago)
+   - `MarketNewsCard` component — collapsible, bull/bear progress bar, per-item sentiment dot + source badge
+   - Rendered just before `FiiSection`
+
+**Sources**: ET Markets · LiveMint · Google News (active), Moneycontrol/BS attempted (stale/403 in cloud env)
+**Testing**: Backend API verified — 10 items, correct outlook, multi-source dedup confirmed
 
 **Feature**: FII/DII Activity section mein IST-aware date logic + MongoDB persistence.
 

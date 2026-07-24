@@ -657,6 +657,43 @@ POSITIVE_KEYWORDS = [
     "new scheme", "benefit", "positive", "reform", "deregulate",
 ]
 
+# ── Market News Sources & Sentiment Keywords ────────────────────────────────────
+_NEWS_MARKET_RSS = [
+    ("ET Markets",        "https://economictimes.indiatimes.com/indices/nifty_50/rssfeeds/1977021501.cms"),
+    ("ET Markets",        "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms"),
+    ("LiveMint",          "https://www.livemint.com/rss/markets"),
+    ("Moneycontrol",      "https://www.moneycontrol.com/rss/marketreports.xml"),
+    ("Business Standard", "https://www.business-standard.com/rss/markets-106.rss"),
+    ("Google News",       "https://news.google.com/rss/search?q=Nifty+50+Sensex+India+stock+market&hl=en-IN&gl=IN&ceid=IN:en"),
+]
+
+_NEWS_BULLISH_KW = [
+    "rally", "rallies", "surges", "surge", "rises", "gains", "gain", "bullish",
+    "buy", "strong", "growth", "upside", "positive", "rebound", "recovery",
+    "jumps", "jump", "breakout", "fii buying", "foreign buying", "optimism",
+    "support", "buying interest", "momentum", "outperform", "upgrade",
+    "all-time high", "record high", "green", "advances", "higher",
+]
+
+_NEWS_BEARISH_KW = [
+    "crash", "crashes", "falls", "fall", "drops", "drop", "decline", "declines",
+    "bearish", "sell", "selloff", "sell-off", "weak", "weakness", "downside",
+    "negative", "caution", "concern", "fear", "fii selling", "foreign selling",
+    "recession", "slowdown", "correction", "downgrade", "underperform",
+    "breakdown", "pressure", "plunge", "slump", "volatility", "rout",
+]
+
+_NIFTY_FILTER_KW = [
+    "nifty", "sensex", "nse", "bse", "stock market", "indian market",
+    "indian stock", "equity", "dalal street", "market", "index", "shares",
+    "midcap", "smallcap", "f&o", "options", "futures", "rupee", "rbi",
+    "sebi", "india market", "stock exchange", "bulls", "bears", "trading",
+    "q1 result", "q2 result", "quarter", "earnings", "fii", "dii",
+]
+
+_news_market_cache: Dict[str, Any] = {}
+_NEWS_MARKET_CACHE_TTL = 900  # 15 minutes
+
 
 async def _fetch_regulatory_sentiment() -> str:
     """Return Positive / Neutral / Negative based on recent SEBI/NSE news."""
@@ -680,6 +717,136 @@ async def _fetch_regulatory_sentiment() -> str:
     except Exception as e:
         logger.debug(f"Regulatory RSS failed: {e}")
     return "Neutral"
+
+
+# ── Market News Intelligence ────────────────────────────────────────────────────
+
+def _fetch_nifty_market_news_sync() -> Dict:
+    """
+    Fetch Nifty 50 market news from Indian trusted financial RSS sources.
+    Applies keyword-based sentiment scoring to each headline.
+    Returns: {items, outlook, outlook_color, outlook_label, confidence, ...}
+    """
+    import time as _time
+    import requests
+    import xml.etree.ElementTree as ET
+    import re as _re
+
+    # Cache check — avoid re-fetching within 15 minutes
+    cached = _news_market_cache.get("news")
+    if cached and (_time.time() - cached.get("ts", 0)) < _NEWS_MARKET_CACHE_TTL:
+        return cached["data"]
+
+    _HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+    }
+
+    all_items: List[Dict] = []
+
+    for source_name, url in _NEWS_MARKET_RSS:
+        try:
+            resp = requests.get(url, headers=_HEADERS, timeout=6)
+            if resp.status_code != 200:
+                continue
+            root = ET.fromstring(resp.content)
+            channel = root.find("channel") or root
+            for item in (channel.findall("item") or [])[:10]:
+                title = (item.findtext("title") or "").strip()
+                link  = (item.findtext("link") or "").strip()
+                pub   = (item.findtext("pubDate") or "").strip()
+                desc  = _re.sub(r"<[^>]+>", "", item.findtext("description") or "").strip()[:250]
+
+                if not title or not link:
+                    continue
+
+                # Filter: only market-relevant news
+                text_lower = (title + " " + desc).lower()
+                if not any(kw in text_lower for kw in _NIFTY_FILTER_KW):
+                    continue
+
+                # Keyword-based sentiment scoring
+                bull = sum(1 for kw in _NEWS_BULLISH_KW if kw in text_lower)
+                bear = sum(1 for kw in _NEWS_BEARISH_KW if kw in text_lower)
+                if bull > bear:
+                    sentiment, s_color = "BULLISH", "#22c55e"
+                elif bear > bull:
+                    sentiment, s_color = "BEARISH", "#ef4444"
+                else:
+                    sentiment, s_color = "NEUTRAL", "#94a3b8"
+
+                # Parse pub date to ISO
+                pub_iso = ""
+                try:
+                    from email.utils import parsedate_to_datetime
+                    pub_iso = parsedate_to_datetime(pub).isoformat()
+                except Exception:
+                    pub_iso = pub
+
+                all_items.append({
+                    "title":           title,
+                    "url":             link,
+                    "source":          source_name,
+                    "published":       pub_iso,
+                    "summary":         desc,
+                    "sentiment":       sentiment,
+                    "sentiment_color": s_color,
+                })
+        except Exception as e:
+            logger.debug(f"[MarketNews] {source_name} failed: {e}")
+
+    # Deduplicate by title prefix (first 55 chars)
+    seen: set = set()
+    unique: List[Dict] = []
+    for item in all_items:
+        key = item["title"][:55].lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+
+    # Sort most-recent first
+    unique.sort(key=lambda x: x.get("published", "") or "", reverse=True)
+    top = unique[:10]
+
+    # Compute overall market outlook from headlines
+    bull_c = sum(1 for i in top if i["sentiment"] == "BULLISH")
+    bear_c = sum(1 for i in top if i["sentiment"] == "BEARISH")
+    total  = len(top)
+
+    if total == 0:
+        outlook, outlook_color = "NEUTRAL", "#94a3b8"
+        outlook_label, confidence = "No data available", 0
+    elif bull_c >= bear_c + 2:
+        outlook, outlook_color = "BULLISH", "#22c55e"
+        outlook_label = f"{bull_c}/{total} headlines bullish"
+        confidence = round(bull_c / total * 100)
+    elif bear_c >= bull_c + 2:
+        outlook, outlook_color = "BEARISH", "#ef4444"
+        outlook_label = f"{bear_c}/{total} headlines bearish"
+        confidence = round(bear_c / total * 100)
+    else:
+        outlook, outlook_color = "NEUTRAL", "#eab308"
+        outlook_label = f"Mixed signals ({bull_c}\u2191 {bear_c}\u2193)"
+        confidence = 50
+
+    result: Dict = {
+        "items":         top,
+        "outlook":       outlook,
+        "outlook_color": outlook_color,
+        "outlook_label": outlook_label,
+        "confidence":    confidence,
+        "bull_count":    bull_c,
+        "bear_count":    bear_c,
+        "total":         total,
+        "fetched_at":    datetime.now(timezone.utc).isoformat(),
+        "available":     total > 0,
+    }
+    _news_market_cache["news"] = {"data": result, "ts": _time.time()}
+    logger.info(f"[MarketNews] Fetched {total} items | outlook={outlook}")
+    return result
 
 
 # ── GIFT Nifty Fetch ───────────────────────────────────────────────────────────
@@ -1413,8 +1580,9 @@ async def _build_intel() -> Dict:
     hs_hist_task       = loop.run_in_executor(None, _fetch_hang_seng_history)
     breadth_task       = loop.run_in_executor(None, _fetch_nifty_breadth_sync)
     actual_move_task   = loop.run_in_executor(None, _fetch_nifty_today_actual)
-    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist, breadth_data, today_actual = await asyncio.gather(
-        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task, breadth_task, actual_move_task)
+    news_task          = loop.run_in_executor(None, _fetch_nifty_market_news_sync)
+    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist, breadth_data, today_actual, market_news_data = await asyncio.gather(
+        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task, breadth_task, actual_move_task, news_task)
     expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
 
@@ -1526,6 +1694,7 @@ async def _build_intel() -> Dict:
         "matrix": BIAS_LEVELS,
         "breadth": breadth_data if breadth_data else {},
         "today_actual": today_actual,
+        "market_news": market_news_data if market_news_data else {"available": False, "items": []},
         "updated_at": now.isoformat(),
     }
     _cache["intel"] = {"data": data, "ts": now}
