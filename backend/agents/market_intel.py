@@ -659,40 +659,89 @@ POSITIVE_KEYWORDS = [
 
 # ── Market News Sources & Sentiment Keywords ────────────────────────────────────
 _NEWS_MARKET_RSS = [
-    ("ET Markets",        "https://economictimes.indiatimes.com/indices/nifty_50/rssfeeds/1977021501.cms"),
-    ("ET Markets",        "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms"),
-    ("LiveMint",          "https://www.livemint.com/rss/markets"),
-    ("Moneycontrol",      "https://www.moneycontrol.com/rss/marketreports.xml"),
-    ("Business Standard", "https://www.business-standard.com/rss/markets-106.rss"),
-    ("Google News",       "https://news.google.com/rss/search?q=Nifty+50+Sensex+India+stock+market&hl=en-IN&gl=IN&ceid=IN:en"),
+    # ET Markets — Nifty 50 index feed (most direct)
+    ("ET Markets",   "https://economictimes.indiatimes.com/indices/nifty_50/rssfeeds/1977021501.cms"),
+    # ET Markets — broader markets feed
+    ("ET Markets",   "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms"),
+    # LiveMint — markets feed
+    ("LiveMint",     "https://www.livemint.com/rss/markets"),
+    # Moneycontrol — market reports
+    ("Moneycontrol", "https://www.moneycontrol.com/rss/marketreports.xml"),
+    # Google News — Nifty 50 specific
+    ("Google News",  "https://news.google.com/rss/search?q=Nifty+50+FII+DII+India+market&hl=en-IN&gl=IN&ceid=IN:en"),
+    # Google News — macro factors affecting Nifty
+    ("Google News",  "https://news.google.com/rss/search?q=India+VIX+RBI+crude+oil+rupee+Sensex&hl=en-IN&gl=IN&ceid=IN:en"),
 ]
 
-_NEWS_BULLISH_KW = [
-    "rally", "rallies", "surges", "surge", "rises", "gains", "gain", "bullish",
-    "buy", "strong", "growth", "upside", "positive", "rebound", "recovery",
-    "jumps", "jump", "breakout", "fii buying", "foreign buying", "optimism",
-    "support", "buying interest", "momentum", "outperform", "upgrade",
-    "all-time high", "record high", "green", "advances", "higher",
+# ── Nifty 50 Important Factors — HIGH IMPACT (direct market movers) ───────────
+# News containing any of these ALWAYS passes the filter and gets HIGH impact tag
+_N50_HIGH_IMPACT_KW = [
+    "fii", "dii", "foreign institutional", "domestic institutional",
+    "india vix", "vix spike", "vix surges", "vix falls",
+    "rbi", "repo rate", "monetary policy", "interest rate", "rate cut", "rate hike",
+    "gift nifty", "sgx nifty", "nifty premium", "nifty discount",
+    "f&o expiry", "options expiry", "derivatives expiry", "monthly expiry", "weekly expiry",
+    "crude oil", "brent crude", "oil price",
+    "rupee", "usd/inr", "dollar india",
+    "us fed", "federal reserve", "fed rate", "fomc",
+    "budget", "union budget", "fiscal deficit",
+    "nifty 50", "sensex", "nifty bank", "banknifty",
+    "inflation india", "cpi india", "gdp india", "iip data",
+    "sebi circular", "sebi ban", "sebi order",
 ]
 
-_NEWS_BEARISH_KW = [
-    "crash", "crashes", "falls", "fall", "drops", "drop", "decline", "declines",
-    "bearish", "sell", "selloff", "sell-off", "weak", "weakness", "downside",
-    "negative", "caution", "concern", "fear", "fii selling", "foreign selling",
-    "recession", "slowdown", "correction", "downgrade", "underperform",
-    "breakdown", "pressure", "plunge", "slump", "volatility", "rout",
+# ── Nifty 50 Top-15 Heavyweight Companies (by index weight) ──────────────────
+# News about these companies passes filter with MEDIUM impact
+_N50_TOP_COMPANIES = [
+    "hdfc bank", "reliance industries", "reliance", "icici bank",
+    "infosys", "tcs", "tata consultancy",
+    "bajaj finance", "bharti airtel", "airtel",
+    "kotak mahindra", "kotak bank",
+    "larsen", "l&t", "sbi", "state bank of india",
+    "axis bank", "hindustan unilever", "hul",
+    "asian paints", "hcl tech", "wipro", "maruti",
+    "sun pharma", "ntpc", "power grid", "adani ports",
 ]
 
-_NIFTY_FILTER_KW = [
-    "nifty", "sensex", "nse", "bse", "stock market", "indian market",
-    "indian stock", "equity", "dalal street", "market", "index", "shares",
-    "midcap", "smallcap", "f&o", "options", "futures", "rupee", "rbi",
-    "sebi", "india market", "stock exchange", "bulls", "bears", "trading",
-    "q1 result", "q2 result", "quarter", "earnings", "fii", "dii",
+# ── Sentiment Keywords (Nifty 50 context) ─────────────────────────────────────
+_N50_BULLISH_KW = [
+    "rally", "rallies", "surge", "surges", "rises", "rise", "gains", "gain",
+    "bullish", "strong", "upside", "positive", "rebound", "recovery",
+    "jumps", "jump", "breakout", "fii buying", "foreign buying",
+    "buying interest", "support", "all-time high", "record high",
+    "rate cut", "outperform", "upgrade", "accumulate", "overweight",
+    "net buyer", "net inflow", "inflows", "higher", "advances",
+]
+
+_N50_BEARISH_KW = [
+    "crash", "fall", "falls", "drop", "drops", "decline", "declines",
+    "bearish", "selloff", "sell-off", "weak", "weakness", "downside",
+    "negative", "caution", "fear", "fii selling", "foreign selling",
+    "net seller", "outflow", "outflows", "correction", "breakdown",
+    "pressure", "plunge", "slump", "rout", "rate hike",
+    "overbought", "downgrade", "reduce", "underweight", "avoid",
 ]
 
 _news_market_cache: Dict[str, Any] = {}
 _NEWS_MARKET_CACHE_TTL = 900  # 15 minutes
+
+
+def _n50_classify_item(title: str, desc: str) -> Optional[str]:
+    """
+    Classify a news item for Nifty 50 relevance.
+    Returns: 'HIGH' | 'MEDIUM' | None (skip)
+    """
+    text = (title + " " + desc).lower()
+
+    # HIGH impact: direct Nifty 50 market movers
+    if any(kw in text for kw in _N50_HIGH_IMPACT_KW):
+        return "HIGH"
+
+    # MEDIUM impact: news about Nifty 50 top constituent companies
+    if any(co in text for co in _N50_TOP_COMPANIES):
+        return "MEDIUM"
+
+    return None  # Not Nifty 50 relevant — skip
 
 
 async def _fetch_regulatory_sentiment() -> str:
@@ -721,10 +770,15 @@ async def _fetch_regulatory_sentiment() -> str:
 
 # ── Market News Intelligence ────────────────────────────────────────────────────
 
-def _fetch_nifty_market_news_sync() -> Dict:
+def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
     """
-    Fetch Nifty 50 market news from Indian trusted financial RSS sources.
-    Applies keyword-based sentiment scoring to each headline.
+    Fetch Nifty 50 market news — only important factors that directly impact
+    Nifty 50 (FII/DII, VIX, RBI, GIFT Nifty, crude oil, rupee, top heavyweights).
+
+    impact_level:
+      HIGH   — direct Nifty movers (FII, VIX, RBI, crude, expiry, rupee, budget)
+      MEDIUM — major Nifty 50 constituent company news
+
     Returns: {items, outlook, outlook_color, outlook_label, confidence, ...}
     """
     import time as _time
@@ -732,10 +786,11 @@ def _fetch_nifty_market_news_sync() -> Dict:
     import xml.etree.ElementTree as ET
     import re as _re
 
-    # Cache check — avoid re-fetching within 15 minutes
-    cached = _news_market_cache.get("news")
-    if cached and (_time.time() - cached.get("ts", 0)) < _NEWS_MARKET_CACHE_TTL:
-        return cached["data"]
+    # Cache check (skip if force=True)
+    if not force:
+        cached = _news_market_cache.get("news")
+        if cached and (_time.time() - cached.get("ts", 0)) < _NEWS_MARKET_CACHE_TTL:
+            return cached["data"]
 
     _HEADERS = {
         "User-Agent": (
@@ -754,23 +809,24 @@ def _fetch_nifty_market_news_sync() -> Dict:
                 continue
             root = ET.fromstring(resp.content)
             channel = root.find("channel") or root
-            for item in (channel.findall("item") or [])[:10]:
+            for item in (channel.findall("item") or [])[:12]:
                 title = (item.findtext("title") or "").strip()
                 link  = (item.findtext("link") or "").strip()
                 pub   = (item.findtext("pubDate") or "").strip()
-                desc  = _re.sub(r"<[^>]+>", "", item.findtext("description") or "").strip()[:250]
+                desc  = _re.sub(r"<[^>]+>", "", item.findtext("description") or "").strip()[:300]
 
                 if not title or not link:
                     continue
 
-                # Filter: only market-relevant news
-                text_lower = (title + " " + desc).lower()
-                if not any(kw in text_lower for kw in _NIFTY_FILTER_KW):
+                # Strict Nifty 50 relevance filter — skip irrelevant news
+                impact_level = _n50_classify_item(title, desc)
+                if impact_level is None:
                     continue
 
                 # Keyword-based sentiment scoring
-                bull = sum(1 for kw in _NEWS_BULLISH_KW if kw in text_lower)
-                bear = sum(1 for kw in _NEWS_BEARISH_KW if kw in text_lower)
+                text_lower = (title + " " + desc).lower()
+                bull = sum(1 for kw in _N50_BULLISH_KW if kw in text_lower)
+                bear = sum(1 for kw in _N50_BEARISH_KW if kw in text_lower)
                 if bull > bear:
                     sentiment, s_color = "BULLISH", "#22c55e"
                 elif bear > bull:
@@ -794,6 +850,8 @@ def _fetch_nifty_market_news_sync() -> Dict:
                     "summary":         desc,
                     "sentiment":       sentiment,
                     "sentiment_color": s_color,
+                    "impact_level":    impact_level,
+                    "impact_color":    "#f97316" if impact_level == "HIGH" else "#eab308",
                 })
         except Exception as e:
             logger.debug(f"[MarketNews] {source_name} failed: {e}")
@@ -807,13 +865,24 @@ def _fetch_nifty_market_news_sync() -> Dict:
             seen.add(key)
             unique.append(item)
 
-    # Sort most-recent first
+    # Sort: HIGH impact first, then by recency within same impact tier
+    def _sort_key(x):
+        tier = 0 if x.get("impact_level") == "HIGH" else 1
+        return (tier, -(len(x.get("published", "") or "")))
+
+    # First sort by date to get most-recent per tier
     unique.sort(key=lambda x: x.get("published", "") or "", reverse=True)
+    # Then stable-sort by impact tier (HIGH first)
+    unique.sort(key=lambda x: 0 if x.get("impact_level") == "HIGH" else 1)
     top = unique[:10]
 
-    # Compute overall market outlook from headlines
-    bull_c = sum(1 for i in top if i["sentiment"] == "BULLISH")
-    bear_c = sum(1 for i in top if i["sentiment"] == "BEARISH")
+    # Overall outlook (weight HIGH items more)
+    bull_c = sum(2 if i["impact_level"] == "HIGH" else 1
+                 for i in top if i["sentiment"] == "BULLISH")
+    bear_c = sum(2 if i["impact_level"] == "HIGH" else 1
+                 for i in top if i["sentiment"] == "BEARISH")
+    raw_bull = sum(1 for i in top if i["sentiment"] == "BULLISH")
+    raw_bear = sum(1 for i in top if i["sentiment"] == "BEARISH")
     total  = len(top)
 
     if total == 0:
@@ -821,15 +890,15 @@ def _fetch_nifty_market_news_sync() -> Dict:
         outlook_label, confidence = "No data available", 0
     elif bull_c >= bear_c + 2:
         outlook, outlook_color = "BULLISH", "#22c55e"
-        outlook_label = f"{bull_c}/{total} headlines bullish"
-        confidence = round(bull_c / total * 100)
+        outlook_label = f"{raw_bull}/{total} headlines bullish"
+        confidence = min(95, round(raw_bull / total * 100))
     elif bear_c >= bull_c + 2:
         outlook, outlook_color = "BEARISH", "#ef4444"
-        outlook_label = f"{bear_c}/{total} headlines bearish"
-        confidence = round(bear_c / total * 100)
+        outlook_label = f"{raw_bear}/{total} headlines bearish"
+        confidence = min(95, round(raw_bear / total * 100))
     else:
         outlook, outlook_color = "NEUTRAL", "#eab308"
-        outlook_label = f"Mixed signals ({bull_c}\u2191 {bear_c}\u2193)"
+        outlook_label = f"Mixed signals ({raw_bull}\u2191 {raw_bear}\u2193)"
         confidence = 50
 
     result: Dict = {
@@ -838,14 +907,15 @@ def _fetch_nifty_market_news_sync() -> Dict:
         "outlook_color": outlook_color,
         "outlook_label": outlook_label,
         "confidence":    confidence,
-        "bull_count":    bull_c,
-        "bear_count":    bear_c,
+        "bull_count":    raw_bull,
+        "bear_count":    raw_bear,
+        "high_count":    sum(1 for i in top if i["impact_level"] == "HIGH"),
         "total":         total,
         "fetched_at":    datetime.now(timezone.utc).isoformat(),
         "available":     total > 0,
     }
     _news_market_cache["news"] = {"data": result, "ts": _time.time()}
-    logger.info(f"[MarketNews] Fetched {total} items | outlook={outlook}")
+    logger.info(f"[MarketNews] {total} items | HIGH={result['high_count']} | outlook={outlook}")
     return result
 
 

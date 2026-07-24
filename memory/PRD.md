@@ -566,26 +566,27 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
-## Feature (Jul 2026) — Market News Intelligence Card
+## Feature (Jul 2026) — Market News Intelligence Card (v2 — Nifty 50 Focus)
 
-**Feature**: Market Intelligence panel mein "Market News Intelligence" card add kiya.
+**Feature**: Market Intelligence panel mein "Nifty 50 News Intelligence" card — strict Nifty 50 important factors filter + manual refresh.
 
-**What was added**:
+**What was changed:**
 1. Backend (`market_intel.py`):
-   - `_NEWS_MARKET_RSS` — 6 RSS sources: ET Markets (2 feeds), LiveMint, Moneycontrol, Business Standard, Google News
-   - `_NEWS_BULLISH_KW` + `_NEWS_BEARISH_KW` + `_NIFTY_FILTER_KW` — keyword sets for sentiment scoring
-   - `_fetch_nifty_market_news_sync()` — fetches, filters, deduplicates, scores sentiment on top 10 headlines
-   - 15-min in-memory cache (`_news_market_cache`)
-   - Runs as parallel task in `_build_intel()` (no latency impact)
-   - Returns: `{items, outlook, outlook_color, outlook_label, bull_count, bear_count, total, confidence}`
-2. Frontend (`MarketIntelPanel.jsx`):
-   - `SOURCE_COLORS` map (ET red, Moneycontrol blue, BS navy, LiveMint green, Google blue)
-   - `relativeTime()` helper (just now / Xm ago / Xh ago)
-   - `MarketNewsCard` component — collapsible, bull/bear progress bar, per-item sentiment dot + source badge
-   - Rendered just before `FiiSection`
+   - `_N50_HIGH_IMPACT_KW`: 30+ direct Nifty 50 movers (FII/DII, India VIX, RBI, GIFT Nifty, crude oil, rupee, US Fed, budget, F&O expiry, Sensex)
+   - `_N50_TOP_COMPANIES`: Top-15 Nifty 50 heavyweights (HDFC Bank, Reliance, ICICI, TCS, etc.)
+   - `_n50_classify_item()`: Strict two-tier classifier — HIGH (direct factor) | MEDIUM (company news) | None (skip)
+   - Weighted sentiment scoring: HIGH impact items count 2x in overall outlook
+   - `force=True` param to bypass 15-min cache
+   - 2 Google News RSS queries: "Nifty 50 FII DII India market" + "India VIX RBI crude oil rupee Sensex"
+2. Backend (`server.py`): `POST /api/market-intel/news-refresh` endpoint — force-refreshes news cache
+3. Frontend (`MarketIntelPanel.jsx`):
+   - "HIGH IMPACT" orange badge on direct Nifty movers
+   - "Tracking" pill strip: FII/DII · India VIX · RBI · GIFT Nifty · Crude Oil · Rupee/USD · F&O Expiry · etc.
+   - Refresh button with spinner animation (calls news-refresh, then reloads market-intel)
+   - `refreshNews()` callback wired to `MarketNewsCard.onRefresh`
+4. `index.css`: Added `@keyframes spin` for refresh spinner
 
-**Sources**: ET Markets · LiveMint · Google News (active), Moneycontrol/BS attempted (stale/403 in cloud env)
-**Testing**: Backend API verified — 10 items, correct outlook, multi-source dedup confirmed
+**Testing**: Backend verified — 10/10 HIGH impact items, FII/DII/crude/Nifty headlines confirmed
 
 **Feature**: FII/DII Activity section mein IST-aware date logic + MongoDB persistence.
 

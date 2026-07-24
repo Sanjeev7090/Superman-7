@@ -11788,6 +11788,23 @@ async def get_fii_intel():
         return {"source": "error", "message": str(e)}
 
 
+@api_router.post("/market-intel/news-refresh")
+async def refresh_market_news():
+    """
+    Force-refresh market news cache — bypasses 15-min TTL.
+    Fetches latest Nifty 50 relevant news from all sources.
+    """
+    try:
+        from agents.market_intel import _fetch_nifty_market_news_sync, _news_market_cache
+        import asyncio
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: _fetch_nifty_market_news_sync(force=True))
+        return data
+    except Exception as e:
+        logging.error(f"Market news refresh error: {e}")
+        return {"available": False, "error": str(e)}
+
+
 # ======================= MIROFISH SWARM INTELLIGENCE =======================
 
 @api_router.post("/mirofish/analyze")
