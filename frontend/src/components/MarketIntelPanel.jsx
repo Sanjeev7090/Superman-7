@@ -853,6 +853,43 @@ const MarketIntelPanel = ({ onClose }) => {
                             {data.today_actual.open_price?.toLocaleString('en-IN')} → {data.today_actual.close_price?.toLocaleString('en-IN')}
                           </div>
                         )}
+                        {/* ── Accuracy Badge: Predicted vs Actual ── */}
+                        {data.today_actual.market_closed && data.today_move && (() => {
+                          const label  = data.today_move.label || '';
+                          const dir    = data.today_move.direction;
+                          const actual = data.today_actual.actual_pts || 0;
+                          let accuracy = '', color = '';
+                          if (dir === 'SIDEWAYS') {
+                            const m = label.match(/±(\d+) to ±(\d+)/);
+                            const max = m ? parseInt(m[2]) : 0;
+                            const abs = Math.abs(actual);
+                            if (max && abs <= max)           { accuracy = 'Within Range'; color = '#22c55e'; }
+                            else if (max && abs <= max*1.3)  { accuracy = 'Near Range';   color = '#eab308'; }
+                            else                             { accuracy = 'Exceeded';      color = '#f97316'; }
+                          } else if (dir === 'BULLISH') {
+                            const m = label.match(/\+(\d+) to \+(\d+)/);
+                            const [mn, mx] = m ? [parseInt(m[1]), parseInt(m[2])] : [0, 0];
+                            if (actual >= mn && actual <= mx)      { accuracy = 'On Target'; color = '#22c55e'; }
+                            else if (actual > mx)                  { accuracy = 'Exceeded';  color = '#22c55e'; }
+                            else if (actual > 0)                   { accuracy = 'Partial';   color = '#eab308'; }
+                            else                                   { accuracy = 'Missed';    color = '#ef4444'; }
+                          } else {
+                            const m = label.match(/-(\d+) to -(\d+)/);
+                            const [mn, mx] = m ? [parseInt(m[1]), parseInt(m[2])] : [0, 0];
+                            const abs = Math.abs(actual);
+                            if (actual < 0 && abs >= mn && abs <= mx) { accuracy = 'On Target'; color = '#22c55e'; }
+                            else if (actual < 0 && abs > mx)          { accuracy = 'Exceeded';  color = '#22c55e'; }
+                            else if (actual < 0)                      { accuracy = 'Partial';   color = '#eab308'; }
+                            else                                      { accuracy = 'Missed';    color = '#ef4444'; }
+                          }
+                          return accuracy ? (
+                            <div className="mt-0.5 text-[6px] font-semibold px-1 py-0.5 rounded-full text-center"
+                                 style={{ color, background: `${color}15`, border: `1px solid ${color}30` }}
+                                 data-testid="prediction-accuracy-badge">
+                              {accuracy}
+                            </div>
+                          ) : null;
+                        })()}
                       </div>
                     )}
                   </div>
