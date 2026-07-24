@@ -10,13 +10,14 @@ Data Sources (all free, no API key):
   - GIFT Nifty     : yfinance NIFTYIFTB.NS (fallback: estimate from ^GSPC futures)
   - S&P 500 Futures: yfinance ES=F (global cues proxy)
   - Regulatory     : SEBI / NSE RSS via aiohttp (keyword sentiment)
+  - Nifty 50 Breadth: yfinance bulk download (advances/declines count)
 
-Decision Matrix:
-  Strong Bullish : Brent < 82, VIX < 14, Positive regulatory, GIFT Green   → +300 to +600 pts
-  Mild Bullish   : Brent 80-83, VIX 13-15, Neutral, GIFT Mild Green        → +150 to +350 pts
-  Neutral        : Brent 82-85, VIX 14-16, Neutral, GIFT Flat              → -150 to +150 pts
-  Mild Bearish   : Brent 85+,  VIX 15+,  Neutral, GIFT Red                → -150 to -350 pts
-  Strong Bearish : Brent 87+,  VIX 16+,  Negative, GIFT Strong Red        → -400 to -800 pts
+Decision Matrix (updated with Breadth):
+  Strong Bullish : Brent < 82, VIX < 13.5, Positive, Gift +0.4%+, Breadth 28+  → +350 to +650 pts (95%+)
+  Mild Bullish   : Brent 80-83, VIX 13.5-15, Neutral, +0.2-0.4%, Breadth 22-27 → +180 to +380 pts (92%)
+  Neutral        : Brent 82-85, VIX 14-16, Neutral, ±0.2%, Breadth 18-22       → -120 to +120 pts (94%)
+  Mild Bearish   : Brent 85+,  VIX 15+,  Neutral, -0.2 to -0.4%, Breadth 12-17 → -160 to -380 pts (93%)
+  Strong Bearish : Brent 87+,  VIX 16+,  Negative, -0.4%+, Breadth <12         → -450 to -850 pts (95%)
 """
 
 from __future__ import annotations
@@ -291,76 +292,81 @@ BIAS_LEVELS = [
         "label": "Strong Bullish",
         "score_min": 2.5,
         "score_max": 99,
-        "move_label": "+300 to +600 pts",
-        "move_min": 300,
-        "move_max": 600,
-        "probability": "High",
+        "move_label": "+350 to +650 pts",
+        "move_min": 350,
+        "move_max": 650,
+        "probability": "95%+",
         "action": "Aggressive Long (Energy + Banking)",
         "color": "#22c55e",
-        "gift_color": "Green",
+        "gift_color": "+0.4%+",
         "brent_ref": "< $82",
-        "vix_ref": "< 14",
+        "vix_ref": "< 13.5",
         "regulatory_ref": "Positive",
+        "breadth_ref": "28+",
     },
     {
         "label": "Mild Bullish",
         "score_min": 0.8,
         "score_max": 2.5,
-        "move_label": "+150 to +350 pts",
-        "move_min": 150,
-        "move_max": 350,
-        "probability": "Medium-High",
+        "move_label": "+180 to +380 pts",
+        "move_min": 180,
+        "move_max": 380,
+        "probability": "92%",
         "action": "Selective Long",
         "color": "#86efac",
-        "gift_color": "Mild Green",
+        "gift_color": "+0.2% to +0.4%",
         "brent_ref": "$80-83",
-        "vix_ref": "13-15",
+        "vix_ref": "13.5-15",
         "regulatory_ref": "Neutral",
+        "breadth_ref": "22-27",
     },
     {
         "label": "Neutral",
         "score_min": -0.5,
         "score_max": 0.8,
-        "move_label": "-150 to +150 pts (Sideways)",
-        "move_min": -150,
-        "move_max": 150,
-        "probability": "High",
+        "move_label": "-120 to +120 pts (Sideways)",
+        "move_min": -120,
+        "move_max": 120,
+        "probability": "94%",
         "action": "Range trading, small positions",
         "color": "#94a3b8",
-        "gift_color": "Flat",
+        "gift_color": "-0.2% to +0.2%",
         "brent_ref": "$82-85",
         "vix_ref": "14-16",
         "regulatory_ref": "Neutral",
+        "breadth_ref": "18-22",
     },
     {
         "label": "Mild Bearish",
         "score_min": -2.0,
         "score_max": -0.5,
-        "move_label": "-150 to -350 pts",
-        "move_min": -350,
-        "move_max": -150,
-        "probability": "High",
+        "move_label": "-160 to -380 pts",
+        "move_min": -380,
+        "move_max": -160,
+        "probability": "93%",
         "action": "Selective Energy Long, Profit booking",
         "color": "#fca5a5",
-        "gift_color": "Red/Mild Red",
+        "gift_color": "-0.2% to -0.4%",
         "brent_ref": "$85+",
         "vix_ref": "15+",
         "regulatory_ref": "Neutral",
+        "breadth_ref": "12-17",
     },
     {
         "label": "Strong Bearish",
         "score_min": -99,
         "score_max": -2.0,
-        "move_label": "-400 to -800 pts",
-        "move_min": -800,
-        "move_max": -400,
-        "probability": "Medium",
+        "move_label": "-450 to -850 pts",
+        "move_min": -850,
+        "move_max": -450,
+        "probability": "95%",
         "action": "Hedging, Cash increase",
         "color": "#ef4444",
-        "gift_color": "Strong Red",
+        "gift_color": "-0.4% or less",
         "brent_ref": "$87+",
         "vix_ref": "16+",
         "regulatory_ref": "Negative",
+        "breadth_ref": "<12",
     },
 ]
 
@@ -423,6 +429,104 @@ def _determine_bias(score: float) -> Dict:
         if level["score_min"] <= score < level["score_max"]:
             return level
     return BIAS_LEVELS[2]  # default neutral
+
+
+# ── Nifty 50 Breadth ───────────────────────────────────────────────────────────
+
+def _breadth_signal(advances: int, declines: int, total: int) -> Dict:
+    """
+    Returns breadth signal, color, impact label based on advances count out of 50.
+    Decision matrix: 28+ = Strong Bull, 22-27 = Mild Bull, 18-22 = Neutral,
+                     12-17 = Mild Bear, <12 = Strong Bear.
+    Each declining stock ≈ 8-12 Nifty pts impact.
+    """
+    if total == 0:
+        return {"signal": "UNKNOWN", "label": "No Data", "color": "#64748b",
+                "impact_label": "—", "description": "Breadth data unavailable", "freq": "—"}
+
+    if advances >= 35:
+        return {"signal": "STRONG_BULL", "label": "Strong Bull Day", "color": "#22c55e",
+                "impact_label": "+220 to +420 pts", "description": "35+ stocks up — broad rally, heavy buying",
+                "freq": "~7% days"}
+    if advances >= 28:
+        return {"signal": "BULL", "label": "Bull Breadth", "color": "#4ade80",
+                "impact_label": "+150 to +220 pts", "description": "28+ stocks up — broad participation in rally",
+                "freq": "~8% days"}
+    if advances >= 22:
+        return {"signal": "MILD_BULL", "label": "Mild Bullish", "color": "#86efac",
+                "impact_label": "+90 to +200 pts", "description": "22-27 stocks up — normal up day",
+                "freq": "~15% days"}
+    if advances >= 18:
+        return {"signal": "NEUTRAL", "label": "Balanced", "color": "#94a3b8",
+                "impact_label": "-30 to +30 pts", "description": "18-22 stocks up — sideways/choppy market",
+                "freq": "~28% days"}
+    if advances >= 12:
+        return {"signal": "MILD_BEAR", "label": "Mild Bearish", "color": "#fca5a5",
+                "impact_label": "-80 to -180 pts", "description": "12-17 stocks up — more declines, normal down day",
+                "freq": "~32% days"}
+    # <12
+    return {"signal": "STRONG_BEAR", "label": "Heavy Selling", "color": "#ef4444",
+            "impact_label": "-180 to -350 pts", "description": "< 12 stocks up — broad sell-off across board",
+            "freq": "~18% days"}
+
+
+_breadth_cache: Dict[str, Any] = {}
+_BREADTH_CACHE_TTL = 300   # 5 min (matches market-intel stale TTL)
+
+
+def _fetch_nifty_breadth_sync() -> Dict:
+    """
+    Fetch Nifty 50 breadth (advances/declines) from moneycontrol AD cache.
+    Falls back to a fresh yfinance fetch if cache is stale.
+    Cache shared with /api/moneycontrol/advance-decline endpoint.
+    """
+    import time as _time
+    global _breadth_cache
+
+    cached = _breadth_cache.get("data")
+    if cached and (_time.time() - _breadth_cache.get("ts", 0)) < _BREADTH_CACHE_TTL:
+        return cached
+
+    try:
+        from moneycontrol.router import _ad_cache, _AD_TTL_SEC, _fetch_nifty50_ad_sync
+        ad_data = _ad_cache.get("data")
+        ad_ts   = _ad_cache.get("ts", 0)
+
+        if ad_data and (_time.time() - ad_ts) < _AD_TTL_SEC * 5:
+            # Reuse moneycontrol cache (slightly stale OK for breadth display)
+            raw = ad_data
+        else:
+            raw = _fetch_nifty50_ad_sync()
+
+        advances  = int(raw.get("advances", 0))
+        declines  = int(raw.get("declines", 0))
+        unchanged = int(raw.get("unchanged", 0))
+        total     = int(raw.get("total", 50)) or 50
+
+        sig = _breadth_signal(advances, declines, total)
+
+        result = {
+            "advances":      advances,
+            "declines":      declines,
+            "unchanged":     unchanged,
+            "total":         total,
+            "advances_pct":  round(advances / total * 100, 1),
+            "declines_pct":  round(declines / total * 100, 1),
+            "signal":        sig["signal"],
+            "signal_label":  sig["label"],
+            "signal_color":  sig["color"],
+            "impact_label":  sig["impact_label"],
+            "description":   sig["description"],
+            "freq":          sig["freq"],
+            "per_stock_pts": "~8-12 pts / declining stock",
+        }
+        _breadth_cache["data"] = result
+        _breadth_cache["ts"]   = _time.time()
+        return result
+
+    except Exception as e:
+        logger.debug(f"Breadth fetch failed: {e}")
+        return {}
 
 
 # ── Today / Tomorrow Move Calculator ──────────────────────────────────────────
@@ -1127,7 +1231,7 @@ async def _build_intel() -> Dict:
         hs_nifty_color  = "#94a3b8"
         hs_nifty_signal = "Neutral"
 
-    # Phase 2: parallel GIFT + history fetches (PCR runs in background separately)
+    # Phase 2: parallel GIFT + history fetches + breadth (PCR runs in background separately)
     gift_task          = loop.run_in_executor(None, _fetch_gift_nifty, nifty)
     vix_hist_task      = loop.run_in_executor(None, _fetch_vix_history)
     brent_hist_task    = loop.run_in_executor(None, _fetch_brent_history)
@@ -1135,8 +1239,9 @@ async def _build_intel() -> Dict:
     nifty_hist_task    = loop.run_in_executor(None, _fetch_nifty_history)
     gift_hist_task     = loop.run_in_executor(None, _fetch_gift_nifty_history)
     hs_hist_task       = loop.run_in_executor(None, _fetch_hang_seng_history)
-    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist = await asyncio.gather(
-        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task)
+    breadth_task       = loop.run_in_executor(None, _fetch_nifty_breadth_sync)
+    gift_nifty, vix_hist, brent_hist, nasdaq_hist, nifty_hist, gift_hist, hs_hist, breadth_data = await asyncio.gather(
+        gift_task, vix_hist_task, brent_hist_task, nasdaq_hist_task, nifty_hist_task, gift_hist_task, hs_hist_task, breadth_task)
 
     expiry_info  = _next_expiry_info()
     gift_premium = round(gift_nifty - nifty, 1)
@@ -1247,6 +1352,7 @@ async def _build_intel() -> Dict:
             "regulatory": reg_score, "gift": gift_score, "total": total_score,
         },
         "matrix": BIAS_LEVELS,
+        "breadth": breadth_data if breadth_data else {},
         "updated_at": now.isoformat(),
     }
     _cache["intel"] = {"data": data, "ts": now}

@@ -162,12 +162,182 @@ const fmtPct = (v) => {
   return `${sign}${Number(v).toFixed(2)}%`;
 };
 
+// ── Nifty 50 Breadth Section Card ─────────────────────────────────────────────
+const DOWN_ROWS = [
+  { range: '35+',   pts: '-180 to -350 pts', freq: '~18% days', note: 'Strong correction', color: '#ef4444' },
+  { range: '25-34', pts: '-80 to -180 pts',  freq: '~32% days', note: 'Normal down day',   color: '#fca5a5' },
+  { range: '15-24', pts: '-30 to +30 pts',   freq: '~28% days', note: 'Sideways/balanced', color: '#94a3b8' },
+  { range: '10-14', pts: '+80 to +180 pts',  freq: '~15% days', note: 'Recovery day',      color: '#86efac' },
+  { range: '<10',   pts: '+200 to +400 pts', freq: '~7% days',  note: 'Strong rally',      color: '#22c55e' },
+];
+const UP_ROWS = [
+  { range: '35+',   pts: '+220 to +420 pts', note: 'Strong Bull day', color: '#22c55e' },
+  { range: '25-34', pts: '+90 to +200 pts',  note: 'Normal up day',   color: '#86efac' },
+  { range: '<15',   pts: 'Weak / Flat',       note: 'Bearish breadth', color: '#94a3b8' },
+];
+
+function BreadthCard({ breadth, C, isDark }) {
+  const [showRef, setShowRef] = useState(false);
+  if (!breadth || breadth.advances == null) return null;
+
+  const { advances = 0, declines = 0, unchanged = 0, total = 50 } = breadth;
+  const advPct = total > 0 ? (advances / total) * 100 : 0;
+  const decPct = total > 0 ? (declines / total) * 100 : 0;
+  const unchPct = 100 - advPct - decPct;
+
+  const sigColor = breadth.signal_color || '#94a3b8';
+
+  // Current row highlight for Down reference table
+  const currentDeclines = declines;
+  const isActiveDown = (range) => {
+    if (range === '35+')   return currentDeclines >= 35;
+    if (range === '25-34') return currentDeclines >= 25 && currentDeclines <= 34;
+    if (range === '15-24') return currentDeclines >= 15 && currentDeclines <= 24;
+    if (range === '10-14') return currentDeclines >= 10 && currentDeclines <= 14;
+    if (range === '<10')   return currentDeclines < 10;
+    return false;
+  };
+  const isActiveUp = (range) => {
+    if (range === '35+')   return advances >= 35;
+    if (range === '25-34') return advances >= 25 && advances <= 34;
+    if (range === '<15')   return advances < 15;
+    return false;
+  };
+
+  return (
+    <div className="rounded-xl p-4" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}
+      data-testid="breadth-card">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <ChartBar size={13} className="text-violet-400" />
+          <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: C.textMuted }}>
+            Nifty 50 Market Breadth
+          </span>
+          <span className="text-[7px] font-bold px-1.5 py-0.5 rounded-full"
+            style={{ background: `${sigColor}20`, color: sigColor, border: `1px solid ${sigColor}40` }}>
+            {breadth.signal_label}
+          </span>
+        </div>
+        <button
+          onClick={() => setShowRef(v => !v)}
+          className="text-[8px] px-2 py-0.5 rounded transition-all"
+          style={{ color: C.textMuted, border: `1px solid ${C.border}` }}
+          data-testid="breadth-ref-toggle">
+          {showRef ? 'Hide' : 'Reference Table'}
+        </button>
+      </div>
+
+      {/* Advance/Decline bar + stats */}
+      <div className="flex items-center gap-3 mb-2">
+        {/* Stacked bar */}
+        <div className="flex-1 h-5 rounded-full overflow-hidden flex">
+          <div style={{ width: `${advPct}%`, background: '#22c55e', transition: 'width 0.4s' }} />
+          <div style={{ width: `${unchPct > 0 ? unchPct : 0}%`, background: isDark ? '#334155' : '#cbd5e1' }} />
+          <div style={{ width: `${decPct}%`, background: '#ef4444', transition: 'width 0.4s' }} />
+        </div>
+        {/* Per-stock impact note */}
+        <span className="text-[8px] whitespace-nowrap shrink-0" style={{ color: C.textMuted }}>
+          ~8-12 pts/stock
+        </span>
+      </div>
+
+      {/* Count row */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] font-bold" style={{ color: '#22c55e' }}>▲ {advances}</span>
+            <span className="text-[8px]" style={{ color: C.textMuted }}>up</span>
+          </div>
+          {unchanged > 0 && (
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] font-bold" style={{ color: C.textMuted }}>→ {unchanged}</span>
+              <span className="text-[8px]" style={{ color: C.textMuted }}>flat</span>
+            </div>
+          )}
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] font-bold" style={{ color: '#ef4444' }}>▼ {declines}</span>
+            <span className="text-[8px]" style={{ color: C.textMuted }}>down</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[9px] font-bold font-mono" style={{ color: sigColor }}>
+            {breadth.impact_label}
+          </div>
+          <div className="text-[7px]" style={{ color: C.textMuted }}>{breadth.freq}</div>
+        </div>
+      </div>
+
+      {/* Description */}
+      <div className="text-[8px] mb-2" style={{ color: C.textMuted }}>{breadth.description}</div>
+
+      {/* Collapsible reference tables */}
+      {showRef && (
+        <div className="mt-3 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+          {/* Stocks DOWN table */}
+          <div>
+            <div className="text-[8px] uppercase tracking-wider mb-1.5 font-bold" style={{ color: '#ef4444' }}>
+              Stocks Down → Nifty Impact
+            </div>
+            <div className="space-y-0.5">
+              {DOWN_ROWS.map(r => {
+                const active = isActiveDown(r.range);
+                return (
+                  <div key={r.range} className="flex items-center justify-between rounded px-2 py-1"
+                    style={{ background: active ? `${r.color}20` : 'transparent', border: `1px solid ${active ? r.color : C.borderSubtle}` }}>
+                    <div>
+                      <span className="text-[8px] font-bold" style={{ color: active ? r.color : C.textMuted }}>{r.range} down</span>
+                      <span className="text-[7px] ml-1.5" style={{ color: C.textMuted }}>{r.freq}</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[8px] font-mono font-bold" style={{ color: active ? r.color : C.textSecond }}>{r.pts}</div>
+                      <div className="text-[7px]" style={{ color: C.textMuted }}>{r.note}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {/* Stocks UP table */}
+          <div>
+            <div className="text-[8px] uppercase tracking-wider mb-1.5 font-bold" style={{ color: '#22c55e' }}>
+              Stocks Up → Nifty Impact
+            </div>
+            <div className="space-y-0.5">
+              {UP_ROWS.map(r => {
+                const active = isActiveUp(r.range);
+                return (
+                  <div key={r.range} className="flex items-center justify-between rounded px-2 py-1"
+                    style={{ background: active ? `${r.color}20` : 'transparent', border: `1px solid ${active ? r.color : C.borderSubtle}` }}>
+                    <div>
+                      <span className="text-[8px] font-bold" style={{ color: active ? r.color : C.textMuted }}>{r.range} up</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[8px] font-mono font-bold" style={{ color: active ? r.color : C.textSecond }}>{r.pts}</div>
+                      <div className="text-[7px]" style={{ color: C.textMuted }}>{r.note}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="mt-1 text-[7px] rounded px-1.5 py-1" style={{ color: C.textMuted, background: C.panelBg || C.cardBg }}>
+                Each declining stock ≈ 8-12 Nifty pts impact
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
 const ROWS = [
-  { label: 'Strong Bullish', brent: '< $82',  vix: '< 14', regulatory: 'Positive', gift: 'Green',        move: '+300 to +600 pts', prob: 'High',        action: 'Aggressive Long (Energy + Banking)', color: '#22c55e', bg: 'rgba(34,197,94,0.10)' },
-  { label: 'Mild Bullish',   brent: '$80-83', vix: '13-15', regulatory: 'Neutral',  gift: 'Mild Green',  move: '+150 to +350 pts', prob: 'Medium-High', action: 'Selective Long',                       color: '#86efac', bg: 'rgba(134,239,172,0.10)' },
-  { label: 'Neutral',        brent: '$82-85', vix: '14-16', regulatory: 'Neutral',  gift: 'Flat',        move: '-150 to +150 pts', prob: 'High',        action: 'Range trading, small positions',        color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' },
-  { label: 'Mild Bearish',   brent: '$85+',   vix: '15+',  regulatory: 'Neutral',  gift: 'Red/Mild Red',move: '-150 to -350 pts', prob: 'High',        action: 'Selective Energy Long, Profit booking', color: '#fca5a5', bg: 'rgba(252,165,165,0.10)' },
-  { label: 'Strong Bearish', brent: '$87+',   vix: '16+',  regulatory: 'Negative', gift: 'Strong Red',  move: '-400 to -800 pts', prob: 'Medium',      action: 'Hedging, Cash increase',                color: '#ef4444', bg: 'rgba(239,68,68,0.10)' },
+  { label: 'Strong Bullish', brent: '< $82',  vix: '< 13.5', regulatory: 'Positive', gift: '+0.4%+',           breadth: '28+',  move: '+350 to +650 pts', prob: '95%+', action: 'Aggressive Long (Energy + Banking)', color: '#22c55e', bg: 'rgba(34,197,94,0.10)' },
+  { label: 'Mild Bullish',   brent: '$80-83', vix: '13.5-15', regulatory: 'Neutral',  gift: '+0.2% to +0.4%',  breadth: '22-27',move: '+180 to +380 pts', prob: '92%',  action: 'Selective Long',                       color: '#86efac', bg: 'rgba(134,239,172,0.10)' },
+  { label: 'Neutral',        brent: '$82-85', vix: '14-16',   regulatory: 'Neutral',  gift: '-0.2% to +0.2%',  breadth: '18-22',move: '-120 to +120 pts', prob: '94%',  action: 'Range trading, small positions',        color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' },
+  { label: 'Mild Bearish',   brent: '$85+',   vix: '15+',     regulatory: 'Neutral',  gift: '-0.2% to -0.4%',  breadth: '12-17',move: '-160 to -380 pts', prob: '93%',  action: 'Selective Energy Long, Profit booking', color: '#fca5a5', bg: 'rgba(252,165,165,0.10)' },
+  { label: 'Strong Bearish', brent: '$87+',   vix: '16+',     regulatory: 'Negative', gift: '-0.4% or less',   breadth: '<12',  move: '-450 to -850 pts', prob: '95%',  action: 'Hedging, Cash increase',                color: '#ef4444', bg: 'rgba(239,68,68,0.10)' },
 ];
 
 const MarketIntelPanel = ({ onClose }) => {
@@ -521,6 +691,17 @@ const MarketIntelPanel = ({ onClose }) => {
                   valueColor: data.regulatory === 'Positive' ? '#22c55e' : data.regulatory === 'Negative' ? '#ef4444' : C.textSecond,
                 },
                 {
+                  label: 'N50 Breadth',
+                  isBreadth: true,
+                  value: data.breadth?.advances != null
+                    ? `${data.breadth.advances} / 50`
+                    : '—',
+                  valueColor: data.breadth?.signal_color || C.textPrimary,
+                  sub: data.breadth?.signal_label || 'Loading...',
+                  subColor: data.breadth?.signal_color || C.textMuted,
+                  icon: <ChartBar size={14} />,
+                },
+                {
                   label: 'Bias',
                   value: data.bias,
                   sub: `Score: ${data.scores?.total}`,
@@ -528,8 +709,9 @@ const MarketIntelPanel = ({ onClose }) => {
                   icon: <Gauge size={14} />,
                   valueColor: data.bias_color,
                 },
-              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf, marketStatus, showClock, openTimeIST, isPcr }) => (
-                <div key={label} className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+              ].map(({ label, value, sub, subColor, icon, valueColor, tf, setTf, marketStatus, showClock, openTimeIST, isPcr, isBreadth }) => (
+                <div key={label} className="rounded-xl p-3" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}
+                  data-testid={`card-${label.toLowerCase().replace(/\s+/g, '-')}`}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-1.5 text-[9px]" style={{ color: C.textMuted }}>
                       {icon}
@@ -544,6 +726,14 @@ const MarketIntelPanel = ({ onClose }) => {
                     )}
                   </div>
                   <div className="text-sm font-bold font-mono" style={{ color: valueColor || C.textPrimary }}>{value}</div>
+                  {/* Breadth mini bar */}
+                  {isBreadth && data.breadth?.advances != null && (
+                    <div className="flex h-1.5 rounded-full overflow-hidden my-1">
+                      <div style={{ width: `${(data.breadth.advances / (data.breadth.total || 50)) * 100}%`, background: '#22c55e' }} />
+                      <div style={{ width: `${(data.breadth.unchanged / (data.breadth.total || 50)) * 100}%`, background: isDark ? '#334155' : '#cbd5e1' }} />
+                      <div style={{ width: `${(data.breadth.declines / (data.breadth.total || 50)) * 100}%`, background: '#ef4444' }} />
+                    </div>
+                  )}
                   <div className="text-[10px] mt-0.5 font-mono" style={{ color: subColor }}>{sub}</div>
                   {/* PCR trend badge */}
                   {isPcr && (() => {
@@ -1031,6 +1221,9 @@ const MarketIntelPanel = ({ onClose }) => {
               )}
             </div>
 
+            {/* ── Nifty 50 Breadth Section ─────────────────────────────── */}
+            <BreadthCard breadth={data.breadth} C={C} isDark={isDark} />
+
             {/* Decision Matrix Table */}
             <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
               <div className="px-4 py-2.5" style={{ background: C.cardBg, borderBottom: `1px solid ${C.border}` }}>
@@ -1040,7 +1233,7 @@ const MarketIntelPanel = ({ onClose }) => {
                 <table className="w-full text-[10px]">
                   <thead>
                     <tr style={{ background: C.tableBg, borderBottom: `1px solid ${C.border}` }}>
-                      {['Bias', 'Brent Level', 'VIX', 'Regulatory', 'GIFT Nifty', 'Today Move', 'Probability', 'Example Action'].map(h => (
+                      {['Bias', 'Brent Level', 'VIX', 'Regulatory', 'GIFT Nifty', 'Breadth (Up)', 'Today Move', 'Probability', 'Example Action'].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-semibold uppercase tracking-widest whitespace-nowrap"
                           style={{ color: C.textMuted }}>{h}</th>
                       ))}
@@ -1076,13 +1269,17 @@ const MarketIntelPanel = ({ onClose }) => {
                             </span>
                           </td>
                           <td className="px-3 py-2.5" style={{ color: C.textCell }}>{row.gift}</td>
+                          <td className="px-3 py-2.5">
+                            <span className="font-mono font-bold text-[9px] px-1.5 py-0.5 rounded whitespace-nowrap"
+                              style={{ color: row.color, background: `${row.color}15` }}>
+                              {row.breadth} stocks
+                            </span>
+                          </td>
                           <td className="px-3 py-2.5 font-mono font-semibold whitespace-nowrap" style={{ color: C.textPrimary }}>{row.move}</td>
                           <td className="px-3 py-2.5">
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                              row.prob === 'High'        ? 'bg-emerald-500/15 text-emerald-500' :
-                              row.prob === 'Medium-High' ? 'bg-sky-500/15 text-sky-500'        :
-                              'bg-amber-500/15 text-amber-500'
-                            }`}>{row.prob}</span>
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-400">
+                              {row.prob}
+                            </span>
                           </td>
                           <td className="px-3 py-2.5 whitespace-nowrap" style={{ color: C.textSecond }}>{row.action}</td>
                         </tr>

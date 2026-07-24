@@ -1,0 +1,71 @@
+{
+  "summary": "Tested Nifty 50 Breadth feature (new addition to Market Intelligence panel). Backend: 21/21 tests pass. API returns breadth object with advances=16, declines=33, total=50, signal=MILD_BEAR, signal_label='Mild Bearish', impact_label='-80 to -180 pts'. Matrix rows all have breadth_ref field with correct values (28+, 22-27, 18-22, 12-17, <12). Frontend: N50 Breadth compact card shows '16 / 50 Mild Bearish' with mini bar in data strip. BreadthCard section shows advance-decline bar with both Stocks Down and Stocks Up reference tables (toggle works). Decision Matrix has 9 columns with 'Breadth (Up)' header. Brent regression confirmed: $91.60 (non-zero).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "BreadthCard Reference Table - Stocks Up",
+        "issues": [
+          "UP_ROWS table has a coverage gap: ranges defined are 35+, 25-34, <15. Range 15-24 (advances) is missing. With advances=16, no row gets highlighted in the Stocks Up table. Minor design issue — current declines-focused row correctly highlights 25-34 in Stocks Down table."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_breadth_feature.py",
+    "/app/test_reports/pytest/test_breadth_feature.xml"
+  ],
+  "action_items": [
+    "Optional: Fix UP_ROWS gap in MarketIntelPanel.jsx - add a row for '15-24' range in Stocks Up reference table so that advances=15-24 also gets an active highlight row. Currently ranges 35+, 25-34, <15 leave a gap for 15-24 advances."
+  ],
+  "critical_code_review_comments": [
+    "UP_ROWS in MarketIntelPanel.jsx defines only 3 ranges (35+, 25-34, <15), leaving a gap for advances 15-24. The isActiveUp function for '<15' uses advances < 15, so advances=16 (today's data) won't highlight any row in Stocks Up table.",
+    "Signal enum in _breadth_signal() goes up to STRONG_BULL (35+ advances) but Decision Matrix breadth_ref for 'Strong Bullish' row is '28+' — these are intentionally different dimensions (live signal vs reference range) and work correctly."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_breadth_feature.py"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21)",
+    "frontend": "100% (all 10 feature checks pass)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Breadth feature fully implemented and verified. API: advances=16, declines=33, total=50, signal=MILD_BEAR. Data strip card: card-n50-breadth shows '16/50 Mild Bearish'. BreadthCard section: data-testid=breadth-card with full advance-decline bar. Reference toggle: data-testid=breadth-ref-toggle toggles Stocks Down / Stocks Up tables. Decision Matrix: 9 columns, Breadth (Up) column with values 28+/22-27/18-22/12-17/<12 stocks. Brent=$91.60 (non-zero). Minor design note: UP_ROWS gap for advances 15-24. Test file: /app/backend/tests/test_breadth_feature.py (21 tests).",
+  "test_results": {
+    "backend_breadth_key_present": "PASS",
+    "backend_breadth_is_dict": "PASS",
+    "backend_breadth_has_advances": "PASS — advances=16",
+    "backend_breadth_has_declines": "PASS — declines=33",
+    "backend_breadth_has_total": "PASS — total=50",
+    "backend_breadth_has_signal": "PASS — MILD_BEAR",
+    "backend_breadth_has_signal_label": "PASS — Mild Bearish",
+    "backend_breadth_has_impact_label": "PASS — -80 to -180 pts",
+    "backend_breadth_signal_is_valid": "PASS",
+    "backend_breadth_data_consistency": "PASS — 16+33=49 <= 50",
+    "backend_breadth_advances_valid_range": "PASS",
+    "backend_breadth_declines_valid_range": "PASS",
+    "backend_breadth_signal_matches_advances": "PASS — 16 advances → MILD_BEAR (12-17 range)",
+    "backend_matrix_has_breadth_ref": "PASS — all 5 rows",
+    "backend_matrix_breadth_ref_values": "PASS — {28+, 22-27, 18-22, 12-17, <12}",
+    "backend_strong_bull_28plus": "PASS",
+    "backend_strong_bear_lt12": "PASS",
+    "backend_brent_non_zero": "PASS — $91.60",
+    "backend_brent_reasonable_range": "PASS",
+    "frontend_card_n50_breadth": "PASS — '16 / 50 Mild Bearish' with mini bar",
+    "frontend_breadth_card_section": "PASS — advance-decline bar visible",
+    "frontend_breadth_ref_toggle": "PASS — toggles Reference Table / Hide",
+    "frontend_ref_table_stocks_down": "PASS — visible after toggle",
+    "frontend_ref_table_stocks_up": "PASS — visible after toggle",
+    "frontend_decision_matrix_breadth_col": "PASS — 'Breadth (Up)' column header",
+    "frontend_decision_matrix_9_cols": "PASS — ['Bias','Brent Level','VIX','Regulatory','GIFT Nifty','Breadth (Up)','Today Move','Probability','Example Action']",
+    "frontend_matrix_row_breadth_values": "PASS — 28+ stocks / 22-27 stocks / 18-22 stocks / 12-17 stocks / <12 stocks",
+    "frontend_brent_non_zero_regression": "PASS — $91.60 shown"
+  }
+}
