@@ -286,6 +286,61 @@ def _compute_weekly_gainers_yf() -> List[dict]:
     return gainers[:10]
 
 
+def _compute_weekly_candidates_yf() -> dict:
+    """
+    Return BOTH bullish (call) and bearish (put) candidates from FNO universe.
+    Gainers → BUY/SELL CALL candidates
+    Losers  → BUY/SELL PUT candidates
+    """
+    sym_map = {s["symbol"]: s["name"] for s in FNO_STOCKS}
+
+    # Try NSEDirect live data first
+    live_gainers = dm.get_top_gainers_fno_sync(20)
+    fno_syms = {s["symbol"] for s in FNO_STOCKS}
+
+    if len(live_gainers) >= 3:
+        filtered = [g for g in live_gainers if g.get("symbol") in fno_syms]
+        if len(filtered) >= 3:
+            all_stocks = [{
+                "symbol":           g["symbol"],
+                "company_name":     g.get("company_name", sym_map.get(g["symbol"], g["symbol"])),
+                "current_price":    round(g.get("ltp", 0), 2),
+                "weekly_change_pct":round(g.get("change_pct", 0), 2),
+                "volume":           g.get("volume", 0),
+                "source":           g.get("source", "nse_direct"),
+            } for g in filtered]
+            all_stocks.sort(key=lambda x: x["weekly_change_pct"], reverse=True)
+            gainers = [s for s in all_stocks if s["weekly_change_pct"] > 0][:5]
+            losers  = [s for s in reversed(all_stocks) if s["weekly_change_pct"] < 0][:3]
+            return {"gainers": gainers, "losers": losers}
+
+    # yfinance fallback
+    tickers = [f"{s['symbol']}.NS" for s in FNO_STOCKS]
+    wk_chg  = dm.get_weekly_change_sync(tickers)
+
+    all_stocks = []
+    for s in FNO_STOCKS:
+        yf_sym = f"{s['symbol']}.NS"
+        pct = wk_chg.get(yf_sym)
+        if pct is None:
+            continue
+        quote = dm.get_quote_sync(s["symbol"])
+        price = quote.get("ltp", 0) if quote else 0
+        all_stocks.append({
+            "symbol":           s["symbol"],
+            "company_name":     sym_map[s["symbol"]],
+            "current_price":    round(price, 2),
+            "weekly_change_pct":pct,
+            "volume":           quote.get("volume", 0) if quote else 0,
+            "source":           "yfinance_fallback",
+        })
+
+    all_stocks.sort(key=lambda x: x["weekly_change_pct"], reverse=True)
+    gainers = [s for s in all_stocks if s["weekly_change_pct"] > 0][:5]
+    losers  = [s for s in reversed(all_stocks) if s["weekly_change_pct"] < 0][:3]
+    return {"gainers": gainers, "losers": losers}
+
+
 # ─── ATM Strike + Option Info ────────────────────────────────────────
 def _estimate_lot(price: float) -> int:
     if price > 5000: return 25
@@ -304,27 +359,118 @@ def _atm_strike_round(price: float) -> float:
     return float(round(price / step) * step)
 
 
-def _estimate_atm(symbol: str, price: float) -> dict:
-    """Estimate ATM info without live options data (formula-based)."""
+def _decide_signal(weekly_chg: float, iv: float = 20.0) -> dict:
+    """
+    Choose the best options trade based on weekly momentum + IV level.
+
+    Signal matrix (momentum-primary since IV is estimated, not live):
+    ─────────────────────────────────────────────────────────────────
+    weekly_chg > 10%             →  SELL OTM CALL  (severely overbought, mean-revert risk)
+    weekly_chg 8-10% + IV > 30   →  SELL OTM CALL  (overbought + elevated premium)
+    weekly_chg 2–8%              →  BUY OTM CALL   (bullish momentum)
+    weekly_chg 0–2%              →  BUY OTM CALL   (mild positive bias)
+    weekly_chg -2–0%             →  BUY OTM PUT    (mild bearish, downtrend starting)
+    weekly_chg -5 to -2%         →  BUY OTM PUT    (bearish momentum)
+    weekly_chg -8 to -5%         →  SELL OTM PUT   (oversold, bounce likely)
+    weekly_chg < -8%             →  SELL OTM PUT   (severely oversold + expensive puts)
+    ─────────────────────────────────────────────────────────────────
+    Returns dict with: signal, option_type, trade_type, rationale
+    """
+    if weekly_chg > 10 or (weekly_chg > 8 and iv >= 30):
+        return {
+            "signal":      "SELL OTM CALL",
+            "option_type": "CE",
+            "trade_type":  "SELL",
+            "rationale":   f"Severely overbought (+{weekly_chg:.1f}% weekly) — mean reversion risk, sell inflated call premium",
+            "sl_mult":     1.50,
+            "tgt_mult":    0.30,
+            "sl_pct":      50,
+            "tgt_pct":     70,
+        }
+    elif weekly_chg >= 0:
+        return {
+            "signal":      "BUY OTM CALL",
+            "option_type": "CE",
+            "trade_type":  "BUY",
+            "rationale":   f"Bullish momentum +{weekly_chg:.1f}% weekly — buy call for upside",
+            "sl_mult":     0.90,
+            "tgt_mult":    1.20,
+            "sl_pct":      10,
+            "tgt_pct":     20,
+        }
+    elif weekly_chg >= -5:
+        return {
+            "signal":      "BUY OTM PUT",
+            "option_type": "PE",
+            "trade_type":  "BUY",
+            "rationale":   f"Bearish momentum {weekly_chg:.1f}% weekly — buy put for downside",
+            "sl_mult":     0.90,
+            "tgt_mult":    1.20,
+            "sl_pct":      10,
+            "tgt_pct":     20,
+        }
+    else:
+        return {
+            "signal":      "SELL OTM PUT",
+            "option_type": "PE",
+            "trade_type":  "SELL",
+            "rationale":   f"Severely oversold ({weekly_chg:.1f}% weekly) — support likely, sell expensive put premium",
+            "sl_mult":     1.50,
+            "tgt_mult":    0.30,
+            "sl_pct":      50,
+            "tgt_pct":     70,
+        }
+
+
+def _estimate_atm(symbol: str, price: float, sig_info: dict = None) -> dict:
+    """
+    Estimate ATM/OTM info for any signal type (BUY CALL, SELL CALL, BUY PUT, SELL PUT).
+    sig_info comes from _decide_signal(); defaults to BUY CALL if not provided.
+    """
+    if sig_info is None:
+        sig_info = _decide_signal(1.0)   # default = bullish
+
+    option_type = sig_info.get("option_type", "CE")  # CE or PE
+    trade_type  = sig_info.get("trade_type", "BUY")
+    signal      = sig_info.get("signal", "BUY OTM CALL")
+
     strike = _atm_strike_round(price)
     ltp    = round(price * 0.018, 2)   # ~1.8% of spot = typical ATM premium
     lot    = _estimate_lot(price)
-    expiry = (datetime.now() + timedelta(days=(3 - datetime.now().weekday()) % 7 + 1)).strftime("%Y-%m-%d")
+
+    # Next Thursday expiry
+    today = datetime.now()
+    days_to_thu = (3 - today.weekday()) % 7
+    if days_to_thu == 0:
+        days_to_thu = 7
+    expiry = (today + timedelta(days=days_to_thu)).strftime("%Y-%m-%d")
+
+    sl_mult  = sig_info.get("sl_mult",  0.90)
+    tgt_mult = sig_info.get("tgt_mult", 1.20)
+    sl_pct   = sig_info.get("sl_pct",   10)
+    tgt_pct  = sig_info.get("tgt_pct",  20)
+
+    # For SELL signals: margin is much higher (naked option selling)
+    margin = round(ltp * lot, 0) if trade_type == "BUY" else round(price * lot * 0.15, 0)
+
     return {
         "expiry":         expiry,
         "atm_strike":     strike,
         "option_ltp":     ltp,
         "option_oi":      0,
         "iv":             20.0,
-        "signal":         "BUY ATM CALL",
+        "signal":         signal,
+        "option_type":    option_type,
+        "trade_type":     trade_type,
+        "rationale":      sig_info.get("rationale", ""),
         "entry_time":     "3:15 PM IST",
         "exit_time":      "9:15 AM IST (next day)",
-        "sl_price":       round(ltp * 0.90, 2),
-        "sl_pct":         10,
-        "target_price":   round(ltp * 1.20, 2),
-        "target_pct":     20,
+        "sl_price":       round(ltp * sl_mult, 2),
+        "sl_pct":         sl_pct,
+        "target_price":   round(ltp * tgt_mult, 2),
+        "target_pct":     tgt_pct,
         "lot_size":       lot,
-        "margin_approx":  round(ltp * lot, 0),
+        "margin_approx":  margin,
         "estimated":      True,
     }
 
@@ -468,20 +614,25 @@ def _demo_run() -> dict:
 # ─── Performance Tracking ────────────────────────────────────────────
 def _check_option_perf(
     symbol: str, entry_date: str, entry_price: float,
-    entry_ltp: float, atm_strike: float
+    entry_ltp: float, atm_strike: float,
+    trade_type: str = "BUY", option_type: str = "CE",
 ) -> dict:
     """
-    Estimate option performance using next-day underlying price (delta ≈ 0.5 for ATM).
-    yfinance does NOT provide NSE options data, so we use underlying price movement.
+    Estimate option performance using next-day underlying price.
+    Supports all 4 signal types: BUY CALL, SELL CALL, BUY PUT, SELL PUT.
+
+    Delta approximation:
+      CE (Call) delta ≈ +0.5  → call gains when stock rises
+      PE (Put)  delta ≈ -0.5  → put gains when stock falls
+    P&L for SELL = inverse of BUY (profit when option loses value)
     """
-    base = {"entry_ltp": round(entry_ltp, 2), "status": "no_data"}
+    base = {"entry_ltp": round(entry_ltp, 2), "status": "no_data",
+            "trade_type": trade_type, "option_type": option_type}
     try:
-        # Use DataManager (Groww first, then yfinance) — cached
         hist = dm.get_single_ohlcv_sync(f"{symbol}.NS", period="5d", interval="1h")
         if hist.empty:
             return {**base, "status": "no_data"}
 
-        # Convert index to IST
         import pytz
         ist = pytz.timezone("Asia/Kolkata")
         hist.index = hist.index.tz_convert(ist)
@@ -489,7 +640,6 @@ def _check_option_perf(
         from datetime import date as _date
         entry_dt = datetime.strptime(entry_date, "%Y-%m-%d").date()
 
-        # Find first hourly bar on the NEXT trading day at or after 9:00 AM IST
         exit_rows = hist[
             (hist.index.date > entry_dt) &
             (hist.index.hour >= 9)
@@ -497,14 +647,21 @@ def _check_option_perf(
         if exit_rows.empty:
             return {**base, "status": "pending"}
 
-        exit_stock_price = float(exit_rows.iloc[0]["Open"])
+        exit_stock_price  = float(exit_rows.iloc[0]["Open"])
+        underlying_move   = exit_stock_price - entry_price
 
-        # ATM call P&L estimate via delta ≈ 0.5
-        underlying_move = exit_stock_price - entry_price
-        option_change   = 0.5 * underlying_move          # delta approx
-        exit_ltp_est    = max(0.05, round(entry_ltp + option_change, 2))
+        # Delta: CE +0.5, PE -0.5
+        delta             = 0.5 if option_type == "CE" else -0.5
+        option_change     = delta * underlying_move
+        exit_ltp_est      = max(0.05, round(entry_ltp + option_change, 2))
 
-        pct = round((exit_ltp_est - entry_ltp) / entry_ltp * 100, 2) if entry_ltp > 0 else 0
+        # For BUY: profit = exit > entry
+        # For SELL: profit = exit < entry (premium decayed)
+        if trade_type == "BUY":
+            pct = round((exit_ltp_est - entry_ltp) / entry_ltp * 100, 2) if entry_ltp > 0 else 0
+        else:   # SELL — we received premium, profit if option decays
+            pct = round((entry_ltp - exit_ltp_est) / entry_ltp * 100, 2) if entry_ltp > 0 else 0
+
         return {
             "exit_ltp":         exit_ltp_est,
             "entry_ltp":        round(entry_ltp, 2),
@@ -513,6 +670,8 @@ def _check_option_perf(
             "entry_underlying": round(entry_price, 2),
             "status":           "win" if pct >= 0 else "loss",
             "method":           "delta_est",
+            "trade_type":       trade_type,
+            "option_type":      option_type,
             "checked_at":       datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
@@ -535,16 +694,19 @@ async def _track_perf_async(date_str: str) -> dict:
     loop = asyncio.get_event_loop()
     updated = []
     for stock in doc.get("stocks", []):
-        atm   = stock.get("atm_info", {})
-        price = stock.get("current_price", 0)
-        ltp   = atm.get("option_ltp", 0)
+        atm    = stock.get("atm_info", {})
+        price  = stock.get("current_price", 0)
+        ltp    = atm.get("option_ltp", 0)
         strike = atm.get("atm_strike", 0)
+        trade_type  = atm.get("trade_type", "BUY")
+        option_type = atm.get("option_type", "CE")
 
         if price and ltp and strike:
             with ThreadPoolExecutor(max_workers=1) as pool:
                 perf = await loop.run_in_executor(
                     pool, _check_option_perf,
-                    stock["symbol"], date_str, float(price), float(ltp), float(strike)
+                    stock["symbol"], date_str, float(price), float(ltp), float(strike),
+                    trade_type, option_type,
                 )
         else:
             perf = {"status": "no_data"}
@@ -561,7 +723,10 @@ async def _track_perf_async(date_str: str) -> dict:
 
 # ─── Main Workflow ───────────────────────────────────────────────────
 async def _run_workflow(manual: bool = False) -> dict:
-    """Fetch top 3 weekly F&O gainers + enrich with ATM call info."""
+    """
+    Fetch top F&O gainers + bearish losers, decide BUY/SELL CALL/PUT signal,
+    enrich with ATM info (call or put), and store to MongoDB.
+    """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     db    = _get_db()
 
@@ -576,32 +741,68 @@ async def _run_workflow(manual: bool = False) -> dict:
     logger.info("Moneycontrol movers: starting workflow...")
     loop = asyncio.get_event_loop()
 
-    # Step 1 — Scrape Moneycontrol
+    # Step 1 — Scrape Moneycontrol or yfinance
     with ThreadPoolExecutor(max_workers=1) as pool:
         mc_list = await loop.run_in_executor(pool, _scrape_moneycontrol_weekly)
 
     source = "moneycontrol"
     if len(mc_list) < 3:
-        logger.info("MC scrape insufficient; falling back to yfinance gainers")
+        logger.info("MC scrape insufficient; falling back to yfinance candidates")
         with ThreadPoolExecutor(max_workers=1) as pool:
-            mc_list = await loop.run_in_executor(pool, _compute_weekly_gainers_yf)
-        source = "yfinance_fallback"
+            candidates = await loop.run_in_executor(pool, _compute_weekly_candidates_yf)
+        gainers = candidates.get("gainers", [])
+        losers  = candidates.get("losers", [])
+        source  = "yfinance_fallback"
+    else:
+        gainers = mc_list[:5]
+        losers  = []   # MC only provides gainers; losers from yfinance
 
-    if len(mc_list) < 3:
-        logger.warning("All gainers sources failed; using demo data")
+        # Also fetch losers from yfinance for bearish opportunities
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                yf_cands = await loop.run_in_executor(pool, _compute_weekly_candidates_yf)
+            losers = yf_cands.get("losers", [])
+        except Exception:
+            pass
+
+    all_candidates = gainers[:5] + losers[:3]
+
+    if len(all_candidates) < 1:
+        logger.warning("All sources failed; using demo data")
         result = _demo_run()
         await db[COLL].replace_one({"date": today}, result, upsert=True)
         return result
 
-    top5 = mc_list[:5]
-
-    # Step 2 — Enrich with ATM options info
+    # Step 2 — Decide signal + enrich with ATM options info
     enriched = []
-    for stock in top5:
-        sym   = stock["symbol"]
-        price = stock["current_price"]
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            atm = await loop.run_in_executor(pool, _get_atm_info, sym, price)
+    for stock in all_candidates:
+        sym        = stock["symbol"]
+        price      = stock["current_price"]
+        weekly_chg = stock.get("weekly_change_pct", 0)
+
+        # Decide signal based on momentum
+        sig_info = _decide_signal(weekly_chg, iv=20.0)
+
+        # Try live ATM info; fall back to formula-based
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                atm_live = await loop.run_in_executor(pool, _get_atm_info, sym, price)
+            # Overlay signal decision onto live ATM info
+            atm = {
+                **atm_live,
+                "signal":      sig_info["signal"],
+                "option_type": sig_info["option_type"],
+                "trade_type":  sig_info["trade_type"],
+                "rationale":   sig_info["rationale"],
+                "sl_pct":      sig_info["sl_pct"],
+                "tgt_pct":     sig_info["tgt_pct"],
+                "sl_price":    round(atm_live["option_ltp"] * sig_info["sl_mult"],  2),
+                "target_price":round(atm_live["option_ltp"] * sig_info["tgt_mult"], 2),
+                "target_pct":  sig_info["tgt_pct"],
+            }
+        except Exception:
+            atm = _estimate_atm(sym, price, sig_info)
+
         enriched.append({**stock, "atm_info": atm})
 
     now    = datetime.now(timezone.utc)
@@ -614,7 +815,6 @@ async def _run_workflow(manual: bool = False) -> dict:
         "signals_ready_at": "3:15 PM IST",
     }
 
-    # Store to MongoDB
     await db[COLL].replace_one({"date": today}, {k: v for k, v in result.items()}, upsert=True)
     logger.info(f"Moneycontrol movers: {len(enriched)} stocks stored ({source})")
     return result
@@ -941,7 +1141,9 @@ async def _backfill_historical(days: int = 7) -> dict:
 
             enriched = []
             for stock in picks:
-                atm = _estimate_atm(stock["symbol"], stock["current_price"])
+                weekly_chg = stock.get("weekly_change_pct", 0)
+                sig_info   = _decide_signal(weekly_chg, iv=20.0)
+                atm = _estimate_atm(stock["symbol"], stock["current_price"], sig_info)
                 atm["entry_date"] = date_str
                 enriched.append({**stock, "atm_info": atm})
 

@@ -134,53 +134,84 @@ function SourceBadge({ source }) {
   );
 }
 
+/* ─── Signal Config per Type ────────────────────────────────────── */
+function getSignalConfig(signal, tradeType, optionType) {
+  const s = (signal || '').toUpperCase();
+  if (s.includes('SELL') && optionType === 'CE') return {
+    color: '#f59e0b', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)',
+    headerBg: 'rgba(245,158,11,0.08)', badgeBg: 'rgba(245,158,11,0.15)',
+    icon: 'SELL_CALL', label: 'SELL OTM CALL', btnColor: '#f59e0b',
+    slLabel: 'SL (call rises)', tgtLabel: 'Target (decay)',
+    tip: 'Premium collected upfront. Profit when call expires worthless.',
+  };
+  if (s.includes('SELL') && optionType === 'PE') return {
+    color: '#38bdf8', bg: 'rgba(56,189,248,0.08)', border: 'rgba(56,189,248,0.25)',
+    headerBg: 'rgba(56,189,248,0.08)', badgeBg: 'rgba(56,189,248,0.15)',
+    icon: 'SELL_PUT', label: 'SELL OTM PUT', btnColor: '#38bdf8',
+    slLabel: 'SL (put rises)', tgtLabel: 'Target (decay)',
+    tip: 'Premium collected upfront. Profit when put expires worthless.',
+  };
+  if (optionType === 'PE') return {
+    color: '#f87171', bg: 'rgba(248,113,113,0.08)', border: 'rgba(248,113,113,0.25)',
+    headerBg: 'rgba(248,113,113,0.08)', badgeBg: 'rgba(248,113,113,0.15)',
+    icon: 'BUY_PUT', label: 'BUY OTM PUT', btnColor: '#f87171',
+    slLabel: 'SL', tgtLabel: 'Target',
+    tip: 'Directional bearish trade. Buy put, profit if stock falls.',
+  };
+  // default BUY CALL
+  return {
+    color: '#00E676', bg: 'rgba(0,230,118,0.08)', border: 'rgba(0,230,118,0.25)',
+    headerBg: 'rgba(0,230,118,0.08)', badgeBg: 'rgba(0,230,118,0.15)',
+    icon: 'BUY_CALL', label: 'BUY OTM CALL', btnColor: '#00E676',
+    slLabel: 'SL', tgtLabel: 'Target',
+    tip: 'Directional bullish trade. Buy call, profit if stock rises.',
+  };
+}
+
 /* ─── Pick Explanation ──────────────────────────────────────────── */
 function pickExplanation(s) {
   const atm = s.atm_info || {};
+  // Use backend rationale when available (from _decide_signal)
+  if (atm.rationale) return atm.rationale;
+
   const chg = s.weekly_change_pct || 0;
   const vol = s.volume || 0;
-
-  // Momentum reason
-  let reason = '';
-  if (chg >= 10)       reason = `Strong breakout momentum — +${chg.toFixed(1)}% in 1 week`;
-  else if (chg >= 5)   reason = `Bullish momentum — +${chg.toFixed(1)}% weekly gain`;
-  else if (chg >= 2)   reason = `Steady uptrend — +${chg.toFixed(1)}% weekly move`;
-  else if (chg >= 0)   reason = `Positive bias — +${chg.toFixed(1)}% weekly`;
-  else                 reason = `Oversold bounce setup — ${chg.toFixed(1)}% weekly`;
-
-  // Volume context
-  let volNote = '';
-  if (vol >= 5_000_000)      volNote = ' · Very high volume';
-  else if (vol >= 2_000_000) volNote = ' · High volume';
-  else if (vol >= 500_000)   volNote = ' · Moderate volume';
-
-  // IV context
-  let ivNote = '';
-  if (atm.iv && atm.iv > 35)       ivNote = ' · High IV — options expensive';
-  else if (atm.iv && atm.iv > 20)  ivNote = ' · Normal IV';
-  else if (atm.iv && atm.iv > 0)   ivNote = ' · Low IV — options cheap';
-
+  let reason = chg >= 10 ? `Strong breakout — +${chg.toFixed(1)}% in 1 week`
+    : chg >= 5  ? `Bullish momentum — +${chg.toFixed(1)}% weekly`
+    : chg >= 2  ? `Steady uptrend — +${chg.toFixed(1)}% weekly`
+    : chg >= 0  ? `Mild positive bias — +${chg.toFixed(1)}%`
+    : chg >= -5 ? `Bearish momentum — ${chg.toFixed(1)}% weekly`
+    :             `Severely oversold — ${chg.toFixed(1)}% weekly`;
+  let volNote = vol >= 5_000_000 ? ' · Very high volume'
+    : vol >= 2_000_000 ? ' · High volume'
+    : vol >= 500_000   ? ' · Moderate volume' : '';
+  let ivNote = atm.iv > 35 ? ' · High IV — options expensive'
+    : atm.iv > 20 ? ' · Normal IV' : atm.iv > 0 ? ' · Low IV — cheap options' : '';
   return reason + volNote + ivNote;
 }
 
 /* ─── Signal Card ───────────────────────────────────────────────── */
 function SignalCard({ stock, rank, onPaperTrade }) {
-  const atm  = stock.atm_info || {};
-  const chg  = stock.weekly_change_pct || 0;
-  const isUp = chg >= 0;
-  const perf = stock.performance || null;
+  const atm       = stock.atm_info || {};
+  const chg       = stock.weekly_change_pct || 0;
+  const tradeType = atm.trade_type || 'BUY';
+  const optType   = atm.option_type || 'CE';
+  const cfg       = getSignalConfig(atm.signal, tradeType, optType);
+  const isSell    = tradeType === 'SELL';
+  const perf      = stock.performance || null;
+  const expl      = pickExplanation(stock);
 
   return (
     <div
-      className="rounded-xl border border-white/10 bg-zinc-900/60 overflow-hidden"
+      className="rounded-xl border overflow-hidden"
+      style={{ borderColor: cfg.border, background: cfg.bg }}
       data-testid={`mc-signal-${stock.symbol}`}
     >
       {/* Card Header */}
-      <div className={`px-3 py-2 flex items-center justify-between ${isUp ? 'bg-emerald-500/10' : 'bg-rose-500/10'}`}>
+      <div className="px-3 py-2 flex items-center justify-between" style={{ background: cfg.headerBg }}>
         <div className="flex items-center gap-2">
-          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${isUp ? 'bg-emerald-500/30 text-emerald-300' : 'bg-rose-500/30 text-rose-300'}`}>
-            #{rank}
-          </span>
+          <span className="text-[9px] font-black px-1.5 py-0.5 rounded"
+            style={{ background: cfg.badgeBg, color: cfg.color }}>#{rank}</span>
           <div>
             <p className="text-xs font-black text-zinc-100 leading-none">{stock.symbol}</p>
             <p className="text-[10px] text-zinc-500 mt-0.5 leading-none truncate max-w-[120px]">{stock.company_name}</p>
@@ -188,25 +219,52 @@ function SignalCard({ stock, rank, onPaperTrade }) {
         </div>
         <div className="text-right flex flex-col items-end gap-1">
           <p className="text-xs font-mono font-bold text-zinc-200">{fmtPrice(stock.current_price)}</p>
-          <p className={`text-[10px] font-bold ${pctColor(chg)}`}>
+          <p className="text-[10px] font-bold" style={{ color: chg >= 0 ? '#4ade80' : '#f87171' }}>
             {chg >= 0 ? '+' : ''}{chg.toFixed(2)}% 1W
           </p>
         </div>
       </div>
 
-      {/* ATM Signal Details */}
-      <div className="px-3 py-2.5 space-y-1.5">
-        {/* Signal label */}
-        <div className="flex items-center gap-1.5 mb-2">
-          <TrendUp size={12} className="text-[#00E676]" weight="bold" />
-          <span className="text-[10px] font-black text-[#00E676] uppercase tracking-wider">
-            {(atm.signal || 'BUY OTM CALL').replace(/ATM/gi, 'OTM')}
+      {/* Signal Body */}
+      <div className="px-3 py-2.5 space-y-2">
+
+        {/* Signal Badge Row */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg"
+            style={{ background: cfg.badgeBg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
+            {isSell ? '⬇ ' : '⬆ '}{cfg.label}
           </span>
-          {atm.estimated && (
-            <span className="text-[8px] text-zinc-600 border border-zinc-700 px-1 rounded">EST</span>
+          {optType === 'PE' && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+              style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171', border: '1px solid rgba(248,113,113,0.3)' }}>
+              PUT
+            </span>
           )}
+          {optType === 'CE' && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+              style={{ background: 'rgba(74,222,128,0.15)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.3)' }}>
+              CALL
+            </span>
+          )}
+          {atm.estimated && <span className="text-[8px] text-zinc-600 border border-zinc-700 px-1 rounded">EST</span>}
         </div>
 
+        {/* Rationale / Explanation */}
+        <p className="text-[10px] leading-relaxed px-2 py-1.5 rounded-lg"
+          style={{ background: 'rgba(255,255,255,0.03)', color: '#94a3b8' }}>
+          📌 {expl}
+        </p>
+
+        {/* Sell side tip */}
+        {isSell && (
+          <div className="flex items-start gap-1.5 px-2 py-1.5 rounded-lg"
+            style={{ background: `${cfg.color}10`, border: `1px solid ${cfg.color}25` }}>
+            <span style={{ color: cfg.color }} className="text-[9px] font-black mt-0.5">ℹ</span>
+            <p className="text-[9px] leading-relaxed" style={{ color: cfg.color }}>{cfg.tip}</p>
+          </div>
+        )}
+
+        {/* Grid: Strike / Expiry / LTP / IV */}
         <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
           <div>
             <span className="text-zinc-600">OTM Strike</span>
@@ -217,30 +275,30 @@ function SignalCard({ stock, rank, onPaperTrade }) {
             <p className="font-mono text-zinc-300">{atm.expiry || '—'}</p>
           </div>
           <div>
-            <span className="text-zinc-600">Option LTP</span>
+            <span className="text-zinc-600">{isSell ? 'Premium Sold' : 'Option LTP'}</span>
             <p className="font-mono font-bold text-zinc-100">{fmtPrice(atm.option_ltp)}</p>
           </div>
           <div>
-            <span className="text-zinc-600">IV</span>
+            <span className="text-zinc-600">IV (est.)</span>
             <p className="font-mono text-purple-300">{atm.iv ? `${atm.iv}%` : '—'}</p>
           </div>
         </div>
 
-        {/* SL / Target bar */}
-        <div className="mt-2 flex items-center gap-2 text-[10px]">
+        {/* SL / Target */}
+        <div className="flex items-center gap-2 text-[10px]">
           <div className="flex-1 text-center py-1 rounded bg-rose-500/15 border border-rose-500/20">
-            <p className="text-rose-400 font-bold">SL</p>
+            <p className="text-rose-400 font-bold">{cfg.slLabel}</p>
             <p className="font-mono text-rose-300">{fmtPrice(atm.sl_price)}</p>
-            <p className="text-zinc-600">-{atm.sl_pct || 10}%</p>
+            <p className="text-zinc-600">{isSell ? '+' : '-'}{atm.sl_pct || 10}%</p>
           </div>
           <div className="flex-1 text-center py-1 rounded bg-emerald-500/15 border border-emerald-500/20">
-            <p className="text-emerald-400 font-bold">Target</p>
+            <p className="text-emerald-400 font-bold">{cfg.tgtLabel}</p>
             <p className="font-mono text-emerald-300">{fmtPrice(atm.target_price)}</p>
-            <p className="text-zinc-600">+{atm.target_pct || 20}%</p>
+            <p className="text-zinc-600">{isSell ? '-' : '+'}{atm.target_pct || 20}%</p>
           </div>
         </div>
 
-        {/* Timing */}
+        {/* Entry / Exit timing */}
         <div className="flex items-center justify-between text-[10px] pt-1 border-t border-white/5">
           <span className="flex items-center gap-1 text-zinc-500">
             <Clock size={9} />
@@ -255,21 +313,26 @@ function SignalCard({ stock, rank, onPaperTrade }) {
         {atm.lot_size && (
           <div className="flex items-center justify-between text-[10px] text-zinc-500 pt-0.5">
             <span>Lot: <span className="text-zinc-300 font-mono">{atm.lot_size}</span></span>
-            <span>~Margin: <span className="text-zinc-300 font-mono">{fmtPrice(atm.margin_approx)}</span></span>
+            <span>{isSell ? '~Margin Req.' : '~Cost'}: <span className="text-zinc-300 font-mono">{fmtPrice(atm.margin_approx)}</span></span>
           </div>
         )}
 
-        {/* Performance Result (shown if next-day data available) */}
+        {/* Performance Result */}
         <PerfBadge perf={perf} />
 
         {/* Execute Button */}
         <button
           onClick={() => onPaperTrade && onPaperTrade(stock, atm)}
-          className="w-full mt-1.5 py-1.5 rounded-lg bg-[#00E676]/15 border border-[#00E676]/30 text-[#00E676] text-[10px] font-black uppercase tracking-wider hover:bg-[#00E676]/25 hover:border-[#00E676]/60 transition-all flex items-center justify-center gap-1.5"
+          className="w-full mt-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"
+          style={{
+            background: `${cfg.btnColor}18`,
+            border: `1px solid ${cfg.btnColor}40`,
+            color: cfg.btnColor,
+          }}
           data-testid={`mc-execute-${stock.symbol}`}
         >
           <Play size={10} weight="fill" />
-          Execute on Paper Trade
+          {isSell ? `Execute SELL ${optType}` : `Execute BUY ${optType}`} — Paper Trade
         </button>
       </div>
     </div>
@@ -359,7 +422,13 @@ function HistoryRow({ day, defaultExpanded = false }) {
             return (
               <div key={i} className="rounded-lg border border-white/8 bg-zinc-900/40 overflow-hidden">
                 {/* Stock header */}
-                <div className={`px-3 py-2 flex items-center justify-between ${chg >= 0 ? 'bg-emerald-500/8' : 'bg-rose-500/8'}`}>
+                <div className={`px-3 py-2 flex items-center justify-between`}
+                  style={{
+                    background: (() => {
+                      const cfg = getSignalConfig(atm.signal, atm.trade_type, atm.option_type);
+                      return cfg.headerBg;
+                    })()
+                  }}>
                   <div className="flex items-center gap-2">
                     <span className="text-[9px] font-black px-1 py-0.5 rounded bg-zinc-800 text-zinc-300">
                       #{i + 1}
@@ -370,6 +439,16 @@ function HistoryRow({ day, defaultExpanded = false }) {
                         <span className="text-[9px] text-zinc-500 ml-1.5">{s.company_name}</span>
                       )}
                     </div>
+                    {/* Signal badge */}
+                    {atm.signal && (() => {
+                      const cfg = getSignalConfig(atm.signal, atm.trade_type, atm.option_type);
+                      return (
+                        <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full"
+                          style={{ background: cfg.badgeBg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
+                          {cfg.label}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`text-[11px] font-mono font-bold ${chg >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -542,7 +621,7 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
           <div className="flex items-center gap-2">
             <Lightning size={13} className="text-[#00E676]" weight="fill" />
             <h3 className="text-xs font-black tracking-tight text-zinc-100 uppercase">
-              STOCKS OTM
+              OTM SIGNALS
             </h3>
             <span className="text-[9px] text-zinc-600 font-mono">·</span>
             <span className="text-[9px] text-zinc-500 font-mono uppercase tracking-wider">Moneycontrol Movers</span>
@@ -600,44 +679,47 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
         </div>
       ) : (
         <div className="px-3 py-3 space-y-3">
-          {/* Top 3 Movers Table */}
+          {/* Top Movers Table — now shows signal type per row */}
           {data?.stocks?.length > 0 && (
             <div>
               <p className="text-[9px] font-black text-zinc-600 uppercase tracking-wider mb-1.5">
-                1-Week F&O Top Gainers
+                F&O Signal Watchlist — {data.stocks.length} opportunities
               </p>
               <table className="w-full text-[11px] border-collapse" data-testid="mc-stocks-table">
                 <thead>
                   <tr className="border-b border-white/10">
                     <th className="text-left py-1 text-zinc-600 font-bold">#</th>
                     <th className="text-left py-1 text-zinc-600 font-bold">Symbol</th>
-                    <th className="text-right py-1 text-zinc-600 font-bold">Price</th>
                     <th className="text-right py-1 text-zinc-600 font-bold">1W%</th>
-                    {data.stocks[0]?.volume > 0 && (
-                      <th className="text-right py-1 text-zinc-600 font-bold">Vol</th>
-                    )}
+                    <th className="text-right py-1 text-zinc-600 font-bold">Signal</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.stocks.map((s, i) => (
-                    <tr key={s.symbol} className="border-b border-white/5 hover:bg-white/5 transition-colors"
-                        data-testid={`mc-stock-row-${s.symbol}`}>
-                      <td className="py-1.5 text-zinc-600 font-mono">{i + 1}</td>
-                      <td className="py-1.5">
-                        <div>
-                          <span className="font-bold text-zinc-100">{s.symbol}</span>
-                          <p className="text-[9px] text-zinc-600 truncate max-w-[80px]">{s.company_name}</p>
-                        </div>
-                      </td>
-                      <td className="py-1.5 text-right font-mono text-zinc-300">{fmtPrice(s.current_price)}</td>
-                      <td className={`py-1.5 text-right font-bold ${pctColor(s.weekly_change_pct)}`}>
-                        {s.weekly_change_pct >= 0 ? '+' : ''}{s.weekly_change_pct?.toFixed?.(2)}%
-                      </td>
-                      {data.stocks[0]?.volume > 0 && (
-                        <td className="py-1.5 text-right text-zinc-500">{fmtNum(s.volume)}</td>
-                      )}
-                    </tr>
-                  ))}
+                  {data.stocks.map((s, i) => {
+                    const atm = s.atm_info || {};
+                    const cfg = getSignalConfig(atm.signal, atm.trade_type, atm.option_type);
+                    return (
+                      <tr key={s.symbol} className="border-b border-white/5 hover:bg-white/5 transition-colors"
+                          data-testid={`mc-stock-row-${s.symbol}`}>
+                        <td className="py-1.5 text-zinc-600 font-mono">{i + 1}</td>
+                        <td className="py-1.5">
+                          <div>
+                            <span className="font-bold text-zinc-100">{s.symbol}</span>
+                            <p className="text-[9px] text-zinc-600 truncate max-w-[80px]">{s.company_name}</p>
+                          </div>
+                        </td>
+                        <td className={`py-1.5 text-right font-bold ${pctColor(s.weekly_change_pct)}`}>
+                          {s.weekly_change_pct >= 0 ? '+' : ''}{s.weekly_change_pct?.toFixed?.(2)}%
+                        </td>
+                        <td className="py-1.5 text-right">
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full"
+                            style={{ background: cfg.badgeBg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
+                            {cfg.label}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -645,10 +727,11 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
 
           {/* Signals Ready Label */}
           {data?.stocks?.length > 0 && (
-            <div className="flex items-center gap-2 py-1.5 px-3 rounded-lg bg-[#00E676]/8 border border-[#00E676]/20">
+            <div className="flex items-center gap-2 py-1.5 px-3 rounded-lg border"
+              style={{ background: 'rgba(0,230,118,0.06)', borderColor: 'rgba(0,230,118,0.2)' }}>
               <Clock size={10} className="text-[#00E676]" />
               <span className="text-[10px] text-[#00E676] font-bold">
-                OTM Call Signals ready at {data.signals_ready_at || '3:15 PM IST'} — Execute & hold till next morning
+                Signals ready at {data.signals_ready_at || '3:15 PM IST'} — Execute & hold till next morning 9:15 AM
               </span>
             </div>
           )}
