@@ -171,9 +171,10 @@ const DOWN_ROWS = [
   { range: '<10',   pts: '+200 to +400 pts', freq: '~7% days',  note: 'Strong rally',      color: '#22c55e' },
 ];
 const UP_ROWS = [
-  { range: '35+',   pts: '+220 to +420 pts', note: 'Strong Bull day', color: '#22c55e' },
-  { range: '25-34', pts: '+90 to +200 pts',  note: 'Normal up day',   color: '#86efac' },
-  { range: '<15',   pts: 'Weak / Flat',       note: 'Bearish breadth', color: '#94a3b8' },
+  { range: '35+',   pts: '+220 to +420 pts', note: 'Strong Bull day',    color: '#22c55e' },
+  { range: '25-34', pts: '+90 to +200 pts',  note: 'Normal up day',      color: '#86efac' },
+  { range: '15-24', pts: '+20 to +80 pts',   note: 'Weak rally / flat',  color: '#94a3b8' },
+  { range: '<15',   pts: 'Weak / Flat',       note: 'Bearish breadth',    color: '#fca5a5' },
 ];
 
 function BreadthCard({ breadth, C, isDark }) {
@@ -200,6 +201,7 @@ function BreadthCard({ breadth, C, isDark }) {
   const isActiveUp = (range) => {
     if (range === '35+')   return advances >= 35;
     if (range === '25-34') return advances >= 25 && advances <= 34;
+    if (range === '15-24') return advances >= 15 && advances <= 24;
     if (range === '<15')   return advances < 15;
     return false;
   };

@@ -544,3 +544,21 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 **Files**: market_intel.py, MarketIntelPanel.jsx
 **Testing**: 22/22 PASS (iteration_35.json)
+
+
+---
+
+## Feature — Nifty 50 Breadth Card (Jul 24, 2026)
+
+**Feature**: Market Intelligence me Nifty 50 Breadth card add kiya.
+
+**What was added**:
+1. Backend: _breadth_signal() + _fetch_nifty_breadth_sync() in market_intel.py (reuses moneycontrol AD cache)
+2. Backend: BIAS_LEVELS updated with breadth_ref field + new move ranges + probabilities
+3. Frontend: Compact 'N50 Breadth' card in data strip (X/50 + mini bar + signal)
+4. Frontend: Full BreadthCard section with stacked advance-decline bar, Key Day Types reference tables (Down + Up, active row highlighted), collapsible toggle
+5. Frontend: Decision Matrix updated to 9 columns (added 'Breadth (Up)' column)
+6. UP_ROWS: Added missing 15-24 range row
+
+**Files**: market_intel.py, MarketIntelPanel.jsx
+**Testing**: 21/21 PASS (iteration_36.json)
