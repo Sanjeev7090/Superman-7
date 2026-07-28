@@ -337,9 +337,10 @@ function detectTrendlines(bars) {
   lowBuckets.forEach(group => {
     if (group.length < 2) return;
     const avg = group.reduce((s, p) => s + p.price, 0) / group.length;
+    const stats = computeSRStats(bars, avg, touchTol, true);
     result.push({ type: 'h_support', label: `Support ×${group.length}`, color: '#3B82F6',
       lineStyle: 2, lineWidth: 1, startTs: firstTs, startPrice: avg,
-      endTs: lastTs, endPrice: avg, touches: group.length });
+      endTs: lastTs, endPrice: avg, touches: group.length, stats });
   });
 
   // ── 4. Horizontal Resistance (clustered pivot highs) ──
@@ -352,9 +353,10 @@ function detectTrendlines(bars) {
   highBuckets.forEach(group => {
     if (group.length < 2) return;
     const avg = group.reduce((s, p) => s + p.price, 0) / group.length;
+    const stats = computeSRStats(bars, avg, touchTol, false);
     result.push({ type: 'h_resistance', label: `Resistance ×${group.length}`, color: '#FF6B00',
       lineStyle: 2, lineWidth: 1, startTs: firstTs, startPrice: avg,
-      endTs: lastTs, endPrice: avg, touches: group.length });
+      endTs: lastTs, endPrice: avg, touches: group.length, stats });
   });
 
   // ── 5. Channel Lines (parallel to uptrend/downtrend) ──
@@ -419,6 +421,36 @@ function detectTrendlines(bars) {
     typeCount[l.type] = (typeCount[l.type] ?? 0) + 1;
     return typeCount[l.type] <= (MAX_PER_TYPE[l.type] ?? 3);
   });
+}
+
+// ── S/R Level Statistics: Retests / Breakouts / Held ────────────────────────
+// isSupportLevel=true  → breakout = close below level
+// isSupportLevel=false → breakout = close above level
+function computeSRStats(bars, levelPrice, tol, isSupportLevel) {
+  let retests = 0, breakouts = 0;
+  const n = bars.length;
+  let i = 0;
+  while (i < n) {
+    const b = bars[i];
+    const touches = b.low <= levelPrice + tol && b.high >= levelPrice - tol;
+    if (touches) {
+      retests++;
+      // Confirm break: look ahead 1-3 bars for close beyond level
+      let broke = false;
+      for (let j = i; j < Math.min(i + 4, n); j++) {
+        if (isSupportLevel  && bars[j].close < levelPrice - tol * 0.5) { broke = true; break; }
+        if (!isSupportLevel && bars[j].close > levelPrice + tol * 0.5) { broke = true; break; }
+      }
+      if (broke) breakouts++;
+      // Skip consecutive touching bars
+      while (i < n && bars[i].low <= levelPrice + tol && bars[i].high >= levelPrice - tol) i++;
+    } else {
+      i++;
+    }
+  }
+  const held = Math.max(0, retests - breakouts);
+  const pct  = retests > 0 ? Math.round((held / retests) * 100) : 0;
+  return { retests, breakouts, held, pct };
 }
 
 // ── SMC Auto Mark: compute FVG / Liquidity / Order Blocks ─────────
@@ -1121,6 +1153,10 @@ const ChartPanel = ({
   const rejCanvasRef = useRef(null);
   const rejAnimRef   = useRef(null);
   const rejDataRef   = useRef(null);
+  // S/R Stats canvas overlay
+  const srStatsCanvasRef = useRef(null);
+  const srStatsAnimRef   = useRef(null);
+  const srStatsDataRef   = useRef([]);
   // MTF Market Direction — 1H / 45M / 15M
   const [mtfDirection, setMtfDirection] = useState({ '1H': null, '45M': null, '15M': null });
   const { theme } = useTheme();
@@ -1385,6 +1421,86 @@ const ChartPanel = ({
         }
       }
     }
+
+    ctx.restore();
+  }, []);
+
+  // ── S/R Stats Canvas Draw ──────────────────────────────────────
+  const drawSRStatsCanvas = useCallback(() => {
+    const canvas  = srStatsCanvasRef.current;
+    const chart   = chartRef.current;
+    const series  = candlestickSeriesRef.current;
+    const levels  = srStatsDataRef.current;
+    if (!canvas || !chart || !series) return;
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const W   = container.clientWidth;
+    const H   = container.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width  !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+      canvas.width        = Math.round(W * dpr);
+      canvas.height       = Math.round(H * dpr);
+      canvas.style.width  = `${W}px`;
+      canvas.style.height = `${H}px`;
+    }
+
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+
+    const toY = p => { try { return series.priceToCoordinate(p); } catch { return null; } };
+    const PRICE_SCALE_W = 60;
+
+    levels.forEach(lv => {
+      if (!lv.stats) return;
+      const price = lv.startPrice;
+      const yRaw  = toY(price);
+      if (yRaw == null || yRaw < 8 || yRaw > H - 8) return;
+
+      const { retests, breakouts, held, pct } = lv.stats;
+      const isSupport = lv.type === 'h_support';
+      const baseColor = isSupport ? '#3B82F6' : '#FF6B00';
+
+      // ── Stats pill drawn at LEFT side ──
+      const text   = `R:${retests}  B:${breakouts}  H:${held}  ${pct}%`;
+      ctx.font     = 'bold 7.5px monospace';
+      const tw     = ctx.measureText(text).width;
+      const PX     = 6, PY = 4;
+      const boxW   = tw + PX * 2;
+      const boxH   = 13;
+      const rx     = 4;
+      const ry     = yRaw - boxH / 2;
+
+      // Pill background
+      ctx.fillStyle = `${baseColor}22`;
+      ctx.strokeStyle = `${baseColor}70`;
+      ctx.lineWidth   = 0.7;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rx, ry, boxW, boxH, 2);
+      else ctx.rect(rx, ry, boxW, boxH);
+      ctx.fill();
+      ctx.stroke();
+
+      // Text
+      ctx.fillStyle = baseColor;
+      ctx.fillText(text, rx + PX, yRaw + 2.5);
+
+      // Level type label on right edge (before price scale)
+      const typeLabel = isSupport ? 'SUP' : 'RES';
+      const tlw  = ctx.measureText(typeLabel).width;
+      const tlRx = W - PRICE_SCALE_W - tlw - 8;
+      ctx.fillStyle   = `${baseColor}30`;
+      ctx.strokeStyle = `${baseColor}60`;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(tlRx - 2, ry, tlw + 8, boxH, 2);
+      else ctx.rect(tlRx - 2, ry, tlw + 8, boxH);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = baseColor;
+      ctx.fillText(typeLabel, tlRx + 1, yRaw + 2.5);
+    });
 
     ctx.restore();
   }, []);
@@ -2194,6 +2310,8 @@ const ChartPanel = ({
         trendLineSeriesRef.current.push(s);
       } catch (e) {}
     });
+    // Store h_support / h_resistance levels (with stats) for SR Stats canvas
+    srStatsDataRef.current = lines.filter(l => l.type === 'h_support' || l.type === 'h_resistance');
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stockData, trendlinesActive, trendFilter]);
 
@@ -2736,6 +2854,19 @@ const ChartPanel = ({
     rejAnimRef.current = requestAnimationFrame(loop);
     return () => { if (rejAnimRef.current) cancelAnimationFrame(rejAnimRef.current); };
   }, [rejActive, drawREJCanvas]);
+
+  // ── S/R Stats canvas: animate when trendlines are on ──────────
+  useEffect(() => {
+    if (srStatsAnimRef.current) cancelAnimationFrame(srStatsAnimRef.current);
+    if (!trendlinesActive) {
+      const c = srStatsCanvasRef.current;
+      if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+      return;
+    }
+    const loop = () => { drawSRStatsCanvas(); srStatsAnimRef.current = requestAnimationFrame(loop); };
+    srStatsAnimRef.current = requestAnimationFrame(loop);
+    return () => { if (srStatsAnimRef.current) cancelAnimationFrame(srStatsAnimRef.current); };
+  }, [trendlinesActive, drawSRStatsCanvas]);
 
   useEffect(() => {
     if (showGannLines && pivotPoint && stockData) {
@@ -3454,6 +3585,17 @@ const ChartPanel = ({
             zIndex: 6,
             pointerEvents: 'none',
             display: rejActive ? 'block' : 'none',
+          }}
+        />
+
+        {/* S/R Stats Canvas — Retests/Breakouts/Held badges on horizontal levels */}
+        <canvas
+          ref={srStatsCanvasRef}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            zIndex: 7,
+            pointerEvents: 'none',
+            display: trendlinesActive ? 'block' : 'none',
           }}
         />
 
