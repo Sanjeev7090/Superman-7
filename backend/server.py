@@ -846,13 +846,20 @@ async def get_stock_bars(
         
         bars = []
         for index, row in hist.iterrows():
+            o = float(row['Open'])
+            h = float(row['High'])
+            l = float(row['Low'])
+            c = float(row['Close'])
+            v = float(row['Volume'])
+            # Skip bars with NaN / Infinity — not JSON-serializable
+            import math
+            if any(not math.isfinite(x) for x in [o, h, l, c]):
+                continue
+            if not math.isfinite(v):
+                v = 0.0
             bars.append(OHLCVBar(
                 timestamp=int(index.timestamp() * 1000),
-                open=float(row['Open']),
-                high=float(row['High']),
-                low=float(row['Low']),
-                close=float(row['Close']),
-                volume=float(row['Volume'])
+                open=o, high=h, low=l, close=c, volume=v
             ))
         
         result = StockDataResponse(ticker=ticker.upper(), bars=bars)

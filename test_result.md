@@ -694,22 +694,27 @@ frontend:
       - working: true
         agent: "testing"
         comment: "VERIFIED: REJ button fully functional. (1) Button exists in chart toolbar with data-testid='rej-toggle' at line 3066 ✓ (2) Button positioned correctly AFTER VP button (VP x=741, REJ x=778) ✓ (3) Button is clickable and toggles on/off ✓ (4) Button turns cyan (#06b6d4) when activated - verified CSS classes 'text-[#06b6d4] border-[#06b6d4]/40 bg-[#06b6d4]/8' ✓ (5) REJ canvas overlay present in DOM (lines 3449-3458) ✓ (6) REJ logic implemented: detect15mRejection() finds Hammer/Shooting Star patterns, find1mConfirmation() validates with strong candle, detectRejectionConfirmSetup() computes Entry/SL/Target with 1:2 RR ✓ (7) drawREJCanvas() renders overlay with rejection box, confirmation highlight, Entry/SL/Target lines, or 'REJ: No setup found' message ✓ All requirements met."
+      - working: true
+        agent: "testing"
+        comment: "RE-VERIFIED with live RELIANCE chart: (1) REJ button found at x=777.98, y=191.00 with data-testid='rej-toggle' ✓ (2) Positioned AFTER VP button (VP x=740.98, REJ x=777.98) ✓ (3) Button clickable and toggles correctly ✓ (4) Button turns CYAN (#06b6d4) when activated - verified class change from before click (no cyan) to after click (has cyan) ✓ (5) 18 canvas elements present (16 visible) including REJ overlay canvas ✓ (6) Chart loaded with RELIANCE.NS candlestick data successfully ✓ (7) All 10 test steps completed successfully. REJ button implementation is 100% working as specified."
 
   - task: "Stock data API - RELIANCE chart loading"
     implemented: true
-    working: false
+    working: true
     file: "backend/server.py"
-    stuck_count: 1
-    priority: "critical"
-    needs_retesting: true
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
     status_history:
       - working: false
         agent: "testing"
         comment: "CRITICAL BUG: Stock data API failing with 500 errors when loading RELIANCE chart. Error: 'ValueError: Out of range float values are not JSON compliant' in backend/server.py. Affects both /api/stock/bars/RELIANCE.NS and /api/groww/candles/RELIANCE endpoints. Frontend shows 'Failed to load stock data' error. This prevents chart from rendering candles, blocking full verification of REJ overlay content (whether it shows 'No setup found' or trading signals). Root cause: JSON serialization failing due to NaN/Inf float values in stock data response. Needs immediate fix - likely in yfinance data processing or Groww API response handling."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED FIXED: Stock data API now working correctly. Successfully loaded RELIANCE.NS chart with full candlestick data. GET /api/stock/bars/RELIANCE.NS returns HTTP 200 with valid bars array. Chart renders properly with price data around 1278.00. NaN fix has been successfully applied. Tested with yfinance data source (1D timeframe). No JSON serialization errors. Chart displays candles, volume, and all indicators correctly."
 
 test_plan:
-  current_focus:
-    - "Stock data API - RELIANCE chart loading"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -717,3 +722,5 @@ test_plan:
 agent_communication:
   - agent: "testing"
     message: "REJ Button Testing Complete. ✅ WORKING: (1) REJ button exists in chart toolbar with data-testid='rej-toggle', (2) Button positioned correctly AFTER VP button (VP x=741, REJ x=778), (3) Button is clickable and toggles on/off, (4) Button turns cyan (#06b6d4) when activated - verified in CSS classes, (5) REJ canvas overlay present in DOM, (6) REJ detection logic implemented (15m rejection + 1m confirmation with Entry/SL/Target), (7) Canvas drawing function renders overlay correctly. ❌ CRITICAL ISSUE FOUND (separate from REJ): Stock data API failing with 500 errors - 'ValueError: Out of range float values are not JSON compliant' in /api/stock/bars and /api/groww/candles endpoints when loading RELIANCE. This prevents chart from loading candles. REJ button implementation is 100% correct and working. Stock data API needs urgent fix - likely NaN/Inf values in yfinance response causing JSON serialization to fail."
+  - agent: "testing"
+    message: "REJ Button + Stock API Re-Test Complete (2026-07-28). ✅ ALL TESTS PASSING: (1) Stock data API FIXED - RELIANCE.NS chart loads successfully with candlestick data, price around 1278.00, no NaN errors ✓ (2) REJ button found at x=777.98, y=191.00 with data-testid='rej-toggle' ✓ (3) REJ positioned AFTER VP button (VP x=740.98, REJ x=777.98) ✓ (4) REJ button clickable and toggles on/off correctly ✓ (5) REJ button turns CYAN (#06b6d4) when activated - verified class change ✓ (6) 18 canvas elements present (16 visible) including REJ overlay ✓ (7) Chart renders with full candlestick data, Volume Profile, and Footprint panels ✓ All 10 test steps completed successfully. Both REJ button and stock data API are working perfectly. NaN fix has been successfully applied and verified."
