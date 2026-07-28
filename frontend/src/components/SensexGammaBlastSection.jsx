@@ -224,7 +224,10 @@ export default function SensexGammaBlastSection({ onStrikeSelect }) {
                 </div>
               </div>
 
-              {/* Reality Check removed */}
+              {/* Summary note */}
+              <p className="text-[7.5px] text-zinc-600 px-0.5 leading-relaxed">
+                <span className="text-zinc-500 font-medium">Summary:</span> Yeh Sensex Expiry day ke last 50 minutes ka high-volatility option buying setup hai.
+              </p>
             </>
           )}
         </div>
