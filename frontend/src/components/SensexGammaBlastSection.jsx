@@ -15,7 +15,6 @@ export default function SensexGammaBlastSection({ onStrikeSelect }) {
   const [collapsed,   setCollapsed]   = useState(false);
   const [data,        setData]        = useState(null);
   const [loading,     setLoading]     = useState(false);
-  const [rcOpen,      setRcOpen]      = useState(false);   // Reality Check toggle
   const [countdown,   setCountdown]   = useState(0);
   const [lastUpdated, setLastUpdated] = useState(null);
   const timerRef   = useRef(null);
@@ -225,27 +224,7 @@ export default function SensexGammaBlastSection({ onStrikeSelect }) {
                 </div>
               </div>
 
-              {/* ── Reality Check (collapsible) ──────────────────── */}
-              <div className="rounded border border-yellow-500/20 overflow-hidden">
-                <button
-                  className="w-full flex items-center justify-between px-2 py-1.5 text-[8px] text-yellow-500/80 hover:bg-yellow-500/5 transition-colors"
-                  onClick={() => setRcOpen(v => !v)}
-                >
-                  <span className="font-bold uppercase tracking-wider">Reality Check</span>
-                  <span>{rcOpen ? '▲' : '▼'}</span>
-                </button>
-                {rcOpen && (
-                  <div className="px-2 pb-2 text-[8px] text-zinc-500 space-y-1">
-                    <p>✓ Expiry day last 1 hour mein volatility badhti hai — yeh sahi hai.</p>
-                    <p className="text-yellow-500/70">✗ ₹800 capital aur 1:150 RR claim bahut unrealistic hai.</p>
-                    <p className="text-yellow-500/70">✗ Actual mein brokerage, slippage aur gap risk hota hai.</p>
-                    <p>✓ Gamma blast hota hai, lekin har expiry pe itna clean nahi milta.</p>
-                    <p className="text-zinc-600 pt-0.5 border-t border-zinc-800">
-                      Summary: Sensex Expiry day ke last 50 min ka high-volatility option buying setup hai. Trade with caution.
-                    </p>
-                  </div>
-                )}
-              </div>
+              {/* Reality Check removed */}
             </>
           )}
         </div>
