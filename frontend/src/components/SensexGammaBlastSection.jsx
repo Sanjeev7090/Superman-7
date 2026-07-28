@@ -150,65 +150,6 @@ export default function SensexGammaBlastSection({ onStrikeSelect }) {
                 </div>
               </div>
 
-              {/* ── Stats table ─────────────────────────────────── */}
-              <div>
-                <div className="text-[8px] font-bold uppercase tracking-wider text-zinc-500 mb-1 px-0.5">
-                  Movement Stats · Last {data.strategy_stats.sample_days} Expiry Days · {data.strategy_stats.period}
-                </div>
-                <div className="rounded border border-zinc-800 overflow-hidden text-[8px]">
-                  {/* Table head */}
-                  <div className="grid grid-cols-4 bg-zinc-800/60 text-zinc-500 px-2 py-1">
-                    <span>Type</span>
-                    <span>Movement</span>
-                    <span>Frequency</span>
-                    <span className="text-right">1-Lot Profit</span>
-                  </div>
-                  {/* MAX */}
-                  <div className="grid grid-cols-4 px-2 py-1.5 border-t border-zinc-800/60 items-center">
-                    <span className="font-bold text-green-400">MAX</span>
-                    <span className="text-zinc-300">{data.strategy_stats.max_move.range}</span>
-                    <span className="text-zinc-400">{data.strategy_stats.max_move.times}×</span>
-                    <span className="text-right font-mono text-green-400">
-                      ₹{data.strategy_stats.max_move.lot_profit.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                  {/* AVG */}
-                  <div className="grid grid-cols-4 px-2 py-1.5 border-t border-zinc-800/60 items-center">
-                    <span className="font-bold" style={{ color: GOLD }}>AVG</span>
-                    <span className="text-zinc-300">{data.strategy_stats.avg_move.range}</span>
-                    <span className="text-zinc-400">{data.strategy_stats.avg_move.times}×</span>
-                    <span className="text-right font-mono" style={{ color: GOLD }}>
-                      ₹{data.strategy_stats.avg_move.lot_profit.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                  {/* MIN */}
-                  <div className="grid grid-cols-4 px-2 py-1.5 border-t border-zinc-800/60 items-center">
-                    <span className="font-bold text-zinc-400">MIN</span>
-                    <span className="text-zinc-300">{data.strategy_stats.min_move.range}</span>
-                    <span className="text-zinc-400">{data.strategy_stats.min_move.times}×</span>
-                    <span className="text-right font-mono text-zinc-300">
-                      ₹{data.strategy_stats.min_move.lot_profit.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                  {/* Total */}
-                  <div className="flex justify-between px-2 py-1.5 border-t border-zinc-700/60 bg-zinc-800/40">
-                    <span className="text-zinc-500">Total (25 days sample)</span>
-                    <span className="font-bold font-mono text-green-400">
-                      ₹{data.strategy_stats.total_sample_profit.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 mt-1 text-[7.5px] text-zinc-600 px-0.5">
-                  <span>Lot size: {data.strategy_stats.lot_size} units</span>
-                  <span>·</span>
-                  <span>Spot ₹{data.spot.toLocaleString('en-IN')}</span>
-                  <span>·</span>
-                  <span>VIX {data.india_vix_pct}%</span>
-                  <span>·</span>
-                  <span>DTE {data.dte}d</span>
-                </div>
-              </div>
-
               {/* ── Straddle Picks ──────────────────────────────── */}
               <div>
                 <div className="flex items-center justify-between mb-1 px-0.5">
