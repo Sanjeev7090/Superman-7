@@ -13994,23 +13994,29 @@ async def gamma_blast_sensex_picks():
 #   Vibe Research Agent  —  /api/vibe/chat  (SSE streaming)
 # ═══════════════════════════════════════════════════════════════════
 
-_VIBE_SYSTEM = """You are "Vibe", an expert Indian stock market research agent built into a professional trading dashboard. You specialize in:
+_VIBE_SYSTEM = """You are "Vibe", an expert Indian stock market research agent built into a professional trading dashboard. You have access to LIVE market data that is injected at the start of every user message — always use it in your analysis.
 
+You specialize in:
 - NSE & BSE markets: Nifty 50, BankNifty, Sensex, Nifty IT, Nifty Auto, F&O universe
-- Technical analysis: candlestick patterns, RSI, MACD, Bollinger Bands, Volume Profile, SMC (Smart Money Concepts), EMA, support/resistance
-- Options trading: Greeks (Delta, Gamma, Theta, Vega), IV, PCR, option chain analysis, straddles/strangles, REJ setups, Gamma Blast strategies
+- Technical analysis: candlestick patterns, RSI, MACD, Bollinger Bands, Volume Profile, SMC, EMA, support/resistance
+- Options trading: Greeks (Delta, Gamma, Theta, Vega), IV, PCR, option chain analysis, straddles/strangles, REJ setups, Gamma Blast
 - Market intelligence: FII/DII activity, India VIX, GIFT Nifty, Brent crude, RBI policy, rupee/dollar
-- Expiry strategies: Weekly/monthly expiry plays, Sensex Thursday expiry, Nifty Wednesday expiry
+- Expiry strategies: Weekly/monthly expiry, Sensex Thursday expiry, Nifty Wednesday expiry
 - Sector rotation: IT, Banking, Pharma, Auto, Metals, Energy, FMCG
 
-When answering:
-1. Be concise and actionable — use bullet points
-2. Mention key price levels when discussing stocks
-3. For options: always mention the relevant Greek impact
-4. Add a brief risk note at the end
-5. Use rupee symbol for Indian currency
+When the user's message contains a [LIVE MARKET DATA] block:
+- Treat those prices as the CURRENT real-time values
+- Quote the exact prices in your answer
+- Calculate % from key levels based on these prices
 
-You are educational only — not a SEBI-registered advisor. Always mention this for trading recommendations."""
+Response format:
+1. Be concise and actionable — use bullet points
+2. Always quote live price levels from the injected data when relevant
+3. For options: mention the relevant Greek impact
+4. Add a brief risk note at the end
+5. Use ₹ for Indian currency
+
+You are educational only — not a SEBI-registered advisor."""
 
 _VIBE_SESSIONS: Dict[str, LlmChat] = {}
 _EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
@@ -14034,6 +14040,88 @@ def _get_or_create_vibe_chat(session_id: str) -> LlmChat:
     return _VIBE_SESSIONS[session_id]
 
 
+async def _fetch_vibe_market_context() -> str:
+    """
+    Fetch live market snapshot to inject into Vibe agent context.
+    Gathers: NIFTY50, BANKNIFTY, SENSEX, FINNIFTY, India VIX, session status.
+    Times out gracefully — returns partial data on failure.
+    """
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    IST     = _tz(_td(hours=5, minutes=30))
+    now_ist = _dt.now(IST)
+    ts      = now_ist.strftime("%d %b %Y, %I:%M %p IST")
+
+    loop = asyncio.get_event_loop()
+
+    # ── Fetch index prices ────────────────────────────────────────
+    INDEX_MAP = {
+        "^NSEI":      "NIFTY 50",
+        "^NSEBANK":   "BANKNIFTY",
+        "^BSESN":     "SENSEX",
+        "NIFTY_FIN_SERVICE.NS": "FINNIFTY",
+    }
+
+    def _sync_fetch_prices():
+        import yfinance as _yf2
+        rows = {}
+        for ticker, label in INDEX_MAP.items():
+            try:
+                t    = _yf2.Ticker(ticker)
+                fi   = t.fast_info
+                price = round(float(fi.last_price), 2)
+                prev  = round(float(fi.previous_close), 2)
+                chg   = round((price - prev) / prev * 100, 2) if prev else 0.0
+                rows[label] = {"price": price, "prev": prev, "chg_pct": chg}
+            except Exception:
+                pass
+        return rows
+
+    prices: dict = {}
+    try:
+        prices = await asyncio.wait_for(
+            loop.run_in_executor(None, _sync_fetch_prices), timeout=10.0
+        )
+    except Exception:
+        pass
+
+    # ── India VIX ─────────────────────────────────────────────────
+    vix_val: float = 0.0
+    try:
+        raw_sigma = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_live_india_vix), timeout=6.0
+        )
+        vix_val = round(raw_sigma * 100, 2) if raw_sigma < 5 else round(raw_sigma, 2)
+    except Exception:
+        pass
+
+    # ── Session status ─────────────────────────────────────────────
+    h, m = now_ist.hour, now_ist.minute
+    total_min = h * 60 + m
+    if total_min < 9 * 60 + 15:
+        session = "Pre-Market"
+    elif total_min <= 15 * 60 + 30:
+        session = "OPEN"
+    else:
+        session = "Closed (post-market)"
+
+    # ── Build context string ───────────────────────────────────────
+    lines = [f"[LIVE MARKET DATA — {ts}]"]
+    lines.append(f"Session: {session}")
+    lines.append("")
+
+    for label, d in prices.items():
+        arrow = "▲" if d["chg_pct"] >= 0 else "▼"
+        sign  = "+" if d["chg_pct"] >= 0 else ""
+        lines.append(f"  {label}: ₹{d['price']:,.2f}  {arrow} {sign}{d['chg_pct']}%  (Prev close: ₹{d['prev']:,.2f})")
+
+    if vix_val:
+        sentiment = "Low Fear" if vix_val < 13 else "Moderate Fear" if vix_val < 20 else "High Fear / Panic"
+        lines.append(f"  India VIX: {vix_val}  ({sentiment})")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 @_vibe_router.post("/chat")
 async def vibe_chat(req: VibeChatRequest):
     if not _EMERGENT_KEY:
@@ -14041,17 +14129,21 @@ async def vibe_chat(req: VibeChatRequest):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
+    # Fetch live context (non-blocking — partial data is fine)
+    market_ctx = await _fetch_vibe_market_context()
+
+    # Augment user message with live market snapshot
+    augmented = f"{market_ctx}\nUser question: {req.message}"
+
     chat = _get_or_create_vibe_chat(req.session_id)
 
     async def token_stream():
         try:
-            response: ModelResponse = await chat.send_message(UserMessage(text=req.message))
+            response: ModelResponse = await chat.send_message(UserMessage(text=augmented))
             text = response.text if hasattr(response, "text") else str(response)
-            # Send word-by-word to simulate streaming
-            import asyncio as _aio
             for word in text.split(" "):
                 yield f"data: {json.dumps({'token': word + ' '})}\n\n"
-                await _aio.sleep(0)
+                await asyncio.sleep(0)
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
