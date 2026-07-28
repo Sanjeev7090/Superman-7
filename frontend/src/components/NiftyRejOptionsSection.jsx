@@ -78,7 +78,7 @@ function detectREJSignal(bars) {
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
-export default function NiftyRejOptionsSection() {
+export default function NiftyRejOptionsSection({ onStrikeSelect }) {
   const [collapsed, setCollapsed]   = useState(false);
   const [signal,    setSignal]      = useState(null);   // REJ signal from NIFTY bars
   const [pick,      setPick]        = useState(null);   // option pick from API
@@ -161,6 +161,22 @@ export default function NiftyRejOptionsSection() {
   const top  = pick?.top_picks || [];
   const rr   = pick?.rr_info;
   const best = top[0];
+
+  const handleStrikeTap = (t) => {
+    if (!onStrikeSelect || !pick) return;
+    onStrikeSelect({
+      underlying:    pick.symbol || 'NIFTY',
+      strike:        t.strike,
+      type:          t.type,               // 'CE' or 'PE'
+      expiry:        pick.expiry || '',
+      expiry_display: pick.expiry || '',
+      last_price:    t.last_price,
+      change_pct:    0,
+      instrument:    `${pick.symbol || 'NIFTY'} ${t.strike} ${t.type === 'CE' ? 'Call' : 'Put'}`,
+      is_live_derived: true,
+      is_equity:     false,
+    });
+  };
 
   return (
     <div className="border-b border-white/10">
@@ -249,9 +265,6 @@ export default function NiftyRejOptionsSection() {
                   <span style={{ color: accentCol }} className="font-bold">
                     {signal.type} · {signal.status}
                   </span>
-                  <span className="text-zinc-500">
-                    {signal.rejection?.name || '15m Rejection'}
-                  </span>
                 </div>
                 <div className="flex gap-3 mt-1 text-[8px]">
                   <span className="text-zinc-400">Entry <span style={{ color: accentCol }}>₹{signal.entry?.toFixed(1)}</span></span>
@@ -282,7 +295,12 @@ export default function NiftyRejOptionsSection() {
 
                     {/* Best pick */}
                     {best && (
-                      <div className="rounded p-2" style={{ background: `${accentCol}12`, border: `1px solid ${accentCol}30` }}>
+                      <div
+                        className="rounded p-2 cursor-pointer active:scale-[0.98] transition-transform"
+                        style={{ background: `${accentCol}12`, border: `1px solid ${accentCol}30` }}
+                        onClick={() => handleStrikeTap(best)}
+                        title="Tap to load chart"
+                      >
                         <div className="flex items-center justify-between mb-1.5">
                           <span className="text-[11px] font-bold" style={{ color: accentCol }}>
                             ★ {best.strike} {sideLbl}
@@ -334,7 +352,12 @@ export default function NiftyRejOptionsSection() {
                         </div>
                         <div className="space-y-0.5">
                           {top.slice(1).map((t, i) => (
-                            <div key={i} className="flex justify-between text-[8px] text-zinc-500 py-0.5 border-b border-zinc-800/60 last:border-0">
+                            <div
+                              key={i}
+                              className="flex justify-between text-[8px] text-zinc-500 py-0.5 border-b border-zinc-800/60 last:border-0 cursor-pointer hover:bg-white/5 px-1 rounded transition-colors"
+                              onClick={() => handleStrikeTap(t)}
+                              title="Tap to load chart"
+                            >
                               <span className="text-zinc-300 font-mono w-20">{t.strike} {sideLbl}</span>
                               <span className="font-mono">₹{t.last_price}</span>
                               <span className="text-zinc-400">Δ{t.delta}</span>

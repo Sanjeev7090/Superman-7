@@ -805,7 +805,7 @@ const TradingDashboard = () => {
 
             {activeTab === 'market' && (
               <div className="divide-y divide-white/10">
-                <NiftyRejOptionsSection />
+                <NiftyRejOptionsSection onStrikeSelect={handleOptionSelect} />
                 <RegulatoryWatchdogPanel />
                 <SectorTrending onSectorSelect={(sector) => setSectorSheet(sector)} />
                 <TopMoversWidget onStockSelect={(stock) => {
