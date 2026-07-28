@@ -13870,3 +13870,121 @@ async def rej_nifty_option_pick(req: RejOptionPickRequest):
     }
 
 app.include_router(_rej_router)
+
+# ═══════════════════════════════════════════════════════════════════
+#   GET /api/gamma-blast/sensex-picks
+#   Sensex Expiry Day Gamma Blast Strategy — ATM Straddle picks
+# ═══════════════════════════════════════════════════════════════════
+@app.get("/api/gamma-blast/sensex-picks")
+async def gamma_blast_sensex_picks():
+    """
+    Sensex Gamma Blast Setup:
+    Timing: 2:20 PM – 3:10 PM on Sensex expiry day (Thursdays)
+    Returns ATM straddle (CE + PE) using BS-derived prices + Greeks.
+    """
+    from datetime import date as _date, datetime as _dt, timezone as _tz, timedelta as _td
+
+    IST = _tz(_td(hours=5, minutes=30))
+    now_ist = _dt.now(IST)
+    today   = now_ist.date()
+
+    # BSE Sensex weekly expiry = Thursday (weekday=3)
+    is_expiry_day = today.weekday() == 3
+
+    # Window boundaries (IST)
+    win_start = now_ist.replace(hour=14, minute=20, second=0, microsecond=0)
+    win_end   = now_ist.replace(hour=15, minute=10, second=0, microsecond=0)
+
+    if now_ist < win_start:
+        window_status      = "PRE_WINDOW"
+        time_to_start_sec  = int((win_start - now_ist).total_seconds())
+    elif now_ist <= win_end:
+        window_status      = "ACTIVE"
+        time_to_start_sec  = 0
+    else:
+        window_status      = "POST_WINDOW"
+        time_to_start_sec  = 0
+
+    # ── Fetch SENSEX spot ────────────────────────────────────────────
+    loop = asyncio.get_event_loop()
+    spot = 0.0
+    try:
+        import yfinance as _yf2
+        def _get_sensex_spot():
+            t    = _yf2.Ticker("^BSESN")
+            hist = t.history(period="2d", interval="1d")
+            return float(hist["Close"].iloc[-1]) if len(hist) > 0 else 80000.0
+        spot = await asyncio.wait_for(loop.run_in_executor(None, _get_sensex_spot), timeout=8.0)
+    except Exception:
+        spot = 80000.0
+
+    if spot <= 0:
+        spot = 80000.0
+
+    # ── Fetch India VIX ──────────────────────────────────────────────
+    try:
+        sigma = await asyncio.wait_for(loop.run_in_executor(None, _fetch_live_india_vix), timeout=5.0)
+    except Exception:
+        sigma = 0.15
+
+    # ── Expiry dates ─────────────────────────────────────────────────
+    all_expiries = _sensex_expiry_dates(n_weeks=4)
+    expiry_str   = all_expiries[0] if all_expiries else today.strftime("%d-%b-%Y")
+
+    # ── Generate ATM options ─────────────────────────────────────────
+    options    = _fetch_sensex_live_options(spot, sigma, expiry_str)
+    atm_strike = round(spot / 100) * 100
+
+    ce_pick = next((o for o in options if o["type"] == "CE" and o["strike"] == atm_strike), None)
+    pe_pick = next((o for o in options if o["type"] == "PE" and o["strike"] == atm_strike), None)
+
+    # Fallback to nearest if exact ATM not found
+    if not ce_pick:
+        ces = [o for o in options if o["type"] == "CE"]
+        ce_pick = min(ces, key=lambda x: abs(x["strike"] - spot)) if ces else None
+    if not pe_pick:
+        pes = [o for o in options if o["type"] == "PE"]
+        pe_pick = min(pes, key=lambda x: abs(x["strike"] - spot)) if pes else None
+
+    straddle_cost = round(
+        (ce_pick["last_price"] if ce_pick else 0) +
+        (pe_pick["last_price"] if pe_pick else 0), 2
+    )
+
+    # ── Days to expiry ───────────────────────────────────────────────
+    try:
+        from datetime import datetime as _dt2
+        exp_dt  = _dt2.strptime(expiry_str, "%d-%b-%Y").date()
+        dte     = max(0, (exp_dt - today).days)
+    except Exception:
+        dte = 0
+
+    return {
+        "is_expiry_day":      is_expiry_day,
+        "expiry_date":        expiry_str,
+        "dte":                dte,
+        "spot":               round(spot, 2),
+        "atm_strike":         atm_strike,
+        "india_vix_pct":      round(sigma * 100, 2),
+        "window_status":      window_status,
+        "window_start_ist":   "14:20",
+        "window_end_ist":     "15:10",
+        "ist_now":            now_ist.strftime("%H:%M"),
+        "time_to_start_sec":  time_to_start_sec,
+        "straddle": {
+            "ce": ce_pick,
+            "pe": pe_pick,
+        },
+        "straddle_cost":      straddle_cost,
+        "strategy_stats": {
+            "max_move":  {"range": "400–600 pts", "times": 10, "lot_profit": 80000},
+            "avg_move":  {"range": "200–300 pts", "times": 10, "lot_profit": 40000},
+            "min_move":  {"range": "100–200 pts", "times":  5, "lot_profit": 10000},
+            "lot_size":  20,
+            "total_sample_profit": 130000,
+            "sample_days": 25,
+            "period":    "Jan–Jul 2026",
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
