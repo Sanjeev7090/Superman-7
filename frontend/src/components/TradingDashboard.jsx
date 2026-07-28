@@ -48,9 +48,10 @@ import SettingsDrawer from './SettingsDrawer';
 import { Toaster, toast } from 'sonner';
 import CryptoList from './CryptoList';
 import {
-  Bell, ChartLineUp, List, Newspaper, Sun, Moon, X,
-  MagnifyingGlass, UsersThree, Notebook, GearSix, CurrencyBtc, Globe,
+  ChartLineUp, List, Newspaper, Sun, Moon, X,
+  MagnifyingGlass, UsersThree, Notebook, GearSix, CurrencyBtc, Globe, ChatCircleText,
 } from '@phosphor-icons/react';
+import VibeResearchPanel from './VibeResearchPanel';
 import { useTheme } from '../context/ThemeContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -575,6 +576,7 @@ const TradingDashboard = () => {
     { id: 'paper',      label: 'PAPER',   icon: Notebook        },
     { id: 'crypto',     label: 'CRYPTO',  icon: CurrencyBtc     },
     { id: 'market',     label: 'INTEL',   icon: Globe           },
+    { id: 'vibe',       label: 'VIBE',    icon: ChatCircleText  },
   ];
 
   const mobilePanels = [
@@ -674,15 +676,7 @@ const TradingDashboard = () => {
             {theme === 'dark' ? <Sun size={15} weight="bold" /> : <Moon size={15} weight="bold" />}
           </button>
 
-          {/* NOTIFICATIONS / ALERTS — opens Settings drawer at Alerts section */}
-          <button
-            onClick={() => { setShowSettings(true); setSettingsSection('alerts'); }}
-            className="p-1.5 rounded-md border border-slate-200 dark:border-white/10 text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-white transition-all duration-200"
-            title="Alerts"
-            data-testid="notifications-btn"
-          >
-            <Bell size={15} weight="bold" />
-          </button>
+          {/* NOTIFICATIONS / ALERTS — removed */}
         </div>
       </header>
 
@@ -823,6 +817,12 @@ const TradingDashboard = () => {
                   setActiveTab('paper');
                   setMobilePanel('left');
                 }} />
+              </div>
+            )}
+
+            {activeTab === 'vibe' && (
+              <div className="h-full flex flex-col">
+                <VibeResearchPanel />
               </div>
             )}
           </div>

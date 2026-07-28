@@ -21,7 +21,7 @@ import numpy as np
 import random
 from nsepython import nse_optionchain_scrapper, nse_quote_ltp
 from openai import OpenAI, AsyncOpenAI
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ModelResponse
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -13988,3 +13988,80 @@ async def gamma_blast_sensex_picks():
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
+
+# ═══════════════════════════════════════════════════════════════════
+#   Vibe Research Agent  —  /api/vibe/chat  (SSE streaming)
+# ═══════════════════════════════════════════════════════════════════
+
+_VIBE_SYSTEM = """You are "Vibe", an expert Indian stock market research agent built into a professional trading dashboard. You specialize in:
+
+- NSE & BSE markets: Nifty 50, BankNifty, Sensex, Nifty IT, Nifty Auto, F&O universe
+- Technical analysis: candlestick patterns, RSI, MACD, Bollinger Bands, Volume Profile, SMC (Smart Money Concepts), EMA, support/resistance
+- Options trading: Greeks (Delta, Gamma, Theta, Vega), IV, PCR, option chain analysis, straddles/strangles, REJ setups, Gamma Blast strategies
+- Market intelligence: FII/DII activity, India VIX, GIFT Nifty, Brent crude, RBI policy, rupee/dollar
+- Expiry strategies: Weekly/monthly expiry plays, Sensex Thursday expiry, Nifty Wednesday expiry
+- Sector rotation: IT, Banking, Pharma, Auto, Metals, Energy, FMCG
+
+When answering:
+1. Be concise and actionable — use bullet points
+2. Mention key price levels when discussing stocks
+3. For options: always mention the relevant Greek impact
+4. Add a brief risk note at the end
+5. Use rupee symbol for Indian currency
+
+You are educational only — not a SEBI-registered advisor. Always mention this for trading recommendations."""
+
+_VIBE_SESSIONS: Dict[str, LlmChat] = {}
+_EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+
+_vibe_router = APIRouter(prefix="/api/vibe")
+
+
+class VibeChatRequest(BaseModel):
+    session_id: str
+    message: str
+
+
+def _get_or_create_vibe_chat(session_id: str) -> LlmChat:
+    if session_id not in _VIBE_SESSIONS:
+        chat = LlmChat(
+            api_key=_EMERGENT_KEY,
+            session_id=session_id,
+            system_message=_VIBE_SYSTEM,
+        ).with_model("anthropic", "claude-sonnet-4-6")
+        _VIBE_SESSIONS[session_id] = chat
+    return _VIBE_SESSIONS[session_id]
+
+
+@_vibe_router.post("/chat")
+async def vibe_chat(req: VibeChatRequest):
+    if not _EMERGENT_KEY:
+        raise HTTPException(status_code=503, detail="EMERGENT_LLM_KEY not configured")
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    chat = _get_or_create_vibe_chat(req.session_id)
+
+    async def token_stream():
+        try:
+            response: ModelResponse = await chat.send_message(UserMessage(text=req.message))
+            text = response.text if hasattr(response, "text") else str(response)
+            # Send word-by-word to simulate streaming
+            import asyncio as _aio
+            for word in text.split(" "):
+                yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+                await _aio.sleep(0)
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        token_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+app.include_router(_vibe_router)
