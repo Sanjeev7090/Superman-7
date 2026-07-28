@@ -13654,3 +13654,219 @@ async def bs_iv_solver(req: IVSolverRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 app.include_router(_bs_router)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# REJ  Strategy  —  Nifty Option Picker
+#   POST /api/rej/nifty-option-pick
+#   Body: { signal_type: "BUY"|"SELL", entry, sl, target }
+#   Returns: best strike(s) filtered by Greeks + OI
+# ═══════════════════════════════════════════════════════════════════
+from scipy.stats import norm as _rej_norm
+import math as _math
+
+_rej_router = APIRouter(prefix="/api/rej")
+
+
+def _rej_bs_greeks(S: float, K: float, T_years: float,
+                   r: float, sigma: float, option_type: str) -> dict:
+    """Full BS Greeks for a single strike. option_type: 'CE' | 'PE'"""
+    if sigma <= 0 or T_years <= 0 or S <= 0 or K <= 0:
+        return {"delta": 0.0, "gamma": 0.0, "vega": 0.0, "theta": 0.0}
+    try:
+        d1 = (_math.log(S / K) + (r + 0.5 * sigma ** 2) * T_years) / (sigma * _math.sqrt(T_years))
+        d2 = d1 - sigma * _math.sqrt(T_years)
+        pdf_d1 = _rej_norm.pdf(d1)
+        cdf_d1 = _rej_norm.cdf(d1)
+        cdf_d2 = _rej_norm.cdf(d2)
+
+        delta = round(cdf_d1 if option_type == "CE" else (cdf_d1 - 1), 4)
+        gamma = round(pdf_d1 / (S * sigma * _math.sqrt(T_years)), 6)
+        vega  = round(S * pdf_d1 * _math.sqrt(T_years) / 100, 4)
+        if option_type == "CE":
+            theta = round(
+                (-S * pdf_d1 * sigma / (2 * _math.sqrt(T_years))
+                 - r * K * _math.exp(-r * T_years) * cdf_d2) / 365, 4)
+        else:
+            theta = round(
+                (-S * pdf_d1 * sigma / (2 * _math.sqrt(T_years))
+                 + r * K * _math.exp(-r * T_years) * _rej_norm.cdf(-d2)) / 365, 4)
+        return {"delta": delta, "gamma": gamma, "vega": vega, "theta": theta}
+    except Exception:
+        return {"delta": 0.0, "gamma": 0.0, "vega": 0.0, "theta": 0.0}
+
+
+class RejOptionPickRequest(BaseModel):
+    signal_type: str          # "BUY" or "SELL"
+    entry: float
+    sl: float
+    target: float
+    symbol: str = "NIFTY"    # default NIFTY
+
+
+@_rej_router.post("/nifty-option-pick")
+async def rej_nifty_option_pick(req: RejOptionPickRequest):
+    """
+    Fetch NIFTY option chain → compute Greeks → filter by REJ criteria →
+    return top strikes ranked by OI desc, Gamma desc.
+
+    BUY  signal → Call options: Delta ≥ 0.80, Gamma ≥ 0.0005, OI ≥ 1L, Theta > -12
+    SELL signal → Put  options: Delta ≤ -0.80, Gamma ≥ 0.0005, OI ≥ 1L, Theta > -12
+    """
+    sig = req.signal_type.upper()
+    if sig not in ("BUY", "SELL"):
+        raise HTTPException(status_code=400, detail="signal_type must be BUY or SELL")
+
+    sym = req.symbol.upper()
+    loop = asyncio.get_event_loop()
+
+    # ── 1. Fetch option chain from NSE (run in thread) ──────────────
+    try:
+        oi_data = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_nse_option_chain, sym),
+            timeout=15.0
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="NSE option chain timeout")
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"NSE fetch error: {e}")
+
+    if not oi_data:
+        raise HTTPException(status_code=503, detail="NSE returned empty option chain")
+
+    rows, spot, nearest_expiry, all_expiries = _extract_option_rows(oi_data, sym)
+    if not rows or spot <= 0:
+        raise HTTPException(status_code=503, detail="Could not parse option chain")
+
+    # ── 2. Compute days to expiry ────────────────────────────────────
+    T_years = 7 / 365.0   # sensible default
+    chosen_expiry = nearest_expiry
+    if nearest_expiry:
+        try:
+            from datetime import date as _date, datetime as _dt
+            exp_dt = _dt.strptime(nearest_expiry, "%d-%b-%Y").date()
+            days   = (exp_dt - _date.today()).days
+            # On expiry day (T≤1) treat as 1 DTE for Greeks calculation
+            days = max(1, days)
+            T_years = days / 365.0
+        except Exception:
+            pass
+
+    r_rate = 0.065    # RBI repo rate proxy
+
+    # ── 3. Compute Greeks for ALL relevant rows ─────────────────────
+    side_needed = "CE" if sig == "BUY" else "PE"
+    enriched = []
+
+    for row in rows:
+        if row["type"] != side_needed:
+            continue
+        iv_raw = row.get("iv", 0.0)
+        if iv_raw <= 0:
+            iv_raw = 15.0
+        sigma = iv_raw / 100.0
+
+        strike   = float(row["strike"])
+        oi       = float(row.get("oi", 0))
+        last_p   = float(row.get("last_price", 0))
+        greeks   = _rej_bs_greeks(spot, strike, T_years, r_rate, sigma, side_needed)
+
+        enriched.append({
+            "strike":     strike,
+            "type":       side_needed,
+            "expiry":     chosen_expiry or row.get("expiry", ""),
+            "last_price": round(last_p, 2),
+            "oi":         int(oi),
+            "oi_lakh":    round(oi / 100_000, 2),
+            "iv_pct":     round(iv_raw, 2),
+            "delta":      greeks["delta"],
+            "gamma":      greeks["gamma"],
+            "vega":       greeks["vega"],
+            "theta":      greeks["theta"],
+            "instrument": row.get("instrument",
+                          f"{sym} {int(strike)} {'Call' if side_needed == 'CE' else 'Put'}"),
+        })
+
+    # ── 4. Tiered filter — strict → relaxed → best-available ────────
+    def _apply_filter(rows_in, delta_thresh, gamma_thresh, oi_thresh, theta_thresh):
+        out = []
+        for r in rows_in:
+            d, g, th, oi = r["delta"], r["gamma"], r["theta"], r["oi"]
+            if sig == "BUY":
+                if d < delta_thresh:   continue
+            else:
+                if d > -delta_thresh:  continue
+            if g < gamma_thresh:       continue
+            if oi < oi_thresh:         continue
+            if th < -theta_thresh:     continue
+            out.append(r)
+        return out
+
+    tier_label   = "strict"
+    candidates   = _apply_filter(enriched, 0.80, 0.0005, 100_000, 12)
+    filter_used  = {"delta": 0.80, "gamma": 0.0005, "oi": 100_000, "theta": -12}
+
+    if not candidates:
+        # Tier 2: relax Theta (expiry day Theta is always extreme)
+        candidates  = _apply_filter(enriched, 0.80, 0.0005, 100_000, 9999)
+        tier_label  = "relaxed_theta"
+        filter_used = {"delta": 0.80, "gamma": 0.0005, "oi": 100_000, "theta": "relaxed"}
+
+    if not candidates:
+        # Tier 3: relax OI to 20K + Theta relaxed (low-OI expiry week)
+        candidates  = _apply_filter(enriched, 0.80, 0.0005, 20_000, 9999)
+        tier_label  = "relaxed_oi_theta"
+        filter_used = {"delta": 0.80, "gamma": 0.0005, "oi": 20_000, "theta": "relaxed"}
+
+    if not candidates:
+        # Tier 4: relax everything — just Delta ≥ 0.70, some OI, sort by best combo
+        candidates  = _apply_filter(enriched, 0.70, 0.0001, 10_000, 9999)
+        tier_label  = "best_available"
+        filter_used = {"delta": 0.70, "gamma": 0.0001, "oi": 10_000, "theta": "relaxed"}
+
+    if not candidates:
+        # Final: top 3 by OI regardless (raw data, no filter)
+        candidates = sorted(enriched, key=lambda x: -x["oi"])[:3]
+        tier_label = "unfiltered_top_oi"
+        filter_used = {"note": "No candidates passed any filter — showing top OI"}
+
+    # ── 5. Sort: primary OI desc, secondary Gamma desc ──────────────
+    candidates.sort(key=lambda x: (-x["oi"], -x["gamma"]))
+    top = candidates[:5]
+
+    # ── 5. Build SL / Target on selected option (1:2 RR) ────────────
+    rr_info = None
+    if top:
+        best = top[0]
+        opt_entry  = best["last_price"]
+        # SL = REJ candle extreme translated to option loss %
+        # Simple approach: SL = option entry - (|entry-sl| / spot) * opt_entry * 1.5
+        price_risk_pct = abs(req.entry - req.sl) / req.entry if req.entry else 0.02
+        opt_sl     = round(opt_entry * (1 - price_risk_pct * 2), 2)
+        opt_target = round(opt_entry * (1 + price_risk_pct * 4), 2)  # 1:2 on option premium
+        rr_info = {
+            "opt_entry":  opt_entry,
+            "opt_sl":     max(0.1, opt_sl),
+            "opt_target": opt_target,
+            "ul_entry":   round(req.entry, 2),
+            "ul_sl":      round(req.sl, 2),
+            "ul_target":  round(req.target, 2),
+            "rr":         2,
+        }
+
+    return {
+        "signal_type":     sig,
+        "symbol":          sym,
+        "spot":            round(spot, 2),
+        "expiry":          chosen_expiry or "",
+        "option_side":     side_needed,
+        "T_days":          round(T_years * 365, 0),
+        "candidates_count": len(candidates),
+        "top_picks":       top,
+        "rr_info":         rr_info,
+        "tier":            tier_label,
+        "filter_used":     filter_used,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+app.include_router(_rej_router)
