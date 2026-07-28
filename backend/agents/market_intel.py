@@ -809,7 +809,7 @@ def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
                 continue
             root = ET.fromstring(resp.content)
             channel = root.find("channel") or root
-            for item in (channel.findall("item") or [])[:12]:
+            for item in (channel.findall("item") or [])[:25]:
                 title = (item.findtext("title") or "").strip()
                 link  = (item.findtext("link") or "").strip()
                 pub   = (item.findtext("pubDate") or "").strip()
@@ -874,7 +874,7 @@ def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
     unique.sort(key=lambda x: x.get("published", "") or "", reverse=True)
     # Then stable-sort by impact tier (HIGH first)
     unique.sort(key=lambda x: 0 if x.get("impact_level") == "HIGH" else 1)
-    top = unique[:10]
+    top = unique[:20]
 
     # Overall outlook (weight HIGH items more)
     bull_c = sum(2 if i["impact_level"] == "HIGH" else 1
