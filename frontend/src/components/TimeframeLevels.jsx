@@ -118,6 +118,9 @@ const TimeframeLevels = ({ series, chart, bars, containerRef }) => {
 
     ctx.font      = 'bold 7px sans-serif';
     ctx.textAlign = 'center';
+    ctx.imageSmoothingEnabled = false;
+
+    const cx = Math.round((W - PRICE_SCALE_W) / 2);
 
     lvs.forEach(lv => {
       if (!lv.stats) return;
@@ -126,7 +129,7 @@ const TimeframeLevels = ({ series, chart, bars, containerRef }) => {
       const { retests, breakouts, held, pct } = lv.stats;
       const text = `Retests: ${retests} · Breakouts: ${breakouts} · Held: ${held} (${pct}%)`;
       ctx.fillStyle = lv.color;
-      ctx.fillText(text, centerX, yRaw - 3);
+      ctx.fillText(text, cx, Math.round(yRaw) - 3);
     });
 
     ctx.restore();

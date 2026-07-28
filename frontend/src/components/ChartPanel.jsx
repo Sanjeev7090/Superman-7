@@ -1457,6 +1457,9 @@ const ChartPanel = ({
 
     ctx.font      = 'bold 8.5px sans-serif';
     ctx.textAlign = 'center';
+    ctx.imageSmoothingEnabled = false;
+
+    const cx = Math.round((W - PRICE_SCALE_W) / 2);
 
     levels.forEach(lv => {
       if (!lv.stats) return;
@@ -1468,7 +1471,7 @@ const ChartPanel = ({
 
       // Plain text centered on the line, just above it — no background
       ctx.fillStyle = lv.color;
-      ctx.fillText(text, drawableW / 2, yRaw - 4);
+      ctx.fillText(text, cx, Math.round(yRaw) - 4);
     });
 
     ctx.restore();
