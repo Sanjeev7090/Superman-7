@@ -23,6 +23,7 @@ import SectorTrending from './SectorTrending';
 import TopMoversWidget from './TopMoversWidget';
 import SectorRotationPicker from './SectorRotationPicker';
 import MoneycontrolMovers from './MoneycontrolMovers';
+import NiftyRejOptionsSection from './NiftyRejOptionsSection';
 import HybridDashboard from './hybrid/HybridDashboard';
 import GannQSCPanel from './GannQSCPanel';
 import AdvanceDeclineTicker from './AdvanceDeclineTicker';
@@ -804,6 +805,7 @@ const TradingDashboard = () => {
 
             {activeTab === 'market' && (
               <div className="divide-y divide-white/10">
+                <NiftyRejOptionsSection />
                 <RegulatoryWatchdogPanel />
                 <SectorTrending onSectorSelect={(sector) => setSectorSheet(sector)} />
                 <TopMoversWidget onStockSelect={(stock) => {

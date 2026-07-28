@@ -1121,9 +1121,6 @@ const ChartPanel = ({
   const rejCanvasRef = useRef(null);
   const rejAnimRef   = useRef(null);
   const rejDataRef   = useRef(null);
-  // REJ Option Pick — fetched when signal is live
-  const [rejOptionPick, setRejOptionPick]       = useState(null);
-  const [rejOptionLoading, setRejOptionLoading] = useState(false);
   // MTF Market Direction — 1H / 45M / 15M
   const [mtfDirection, setMtfDirection] = useState({ '1H': null, '45M': null, '15M': null });
   const { theme } = useTheme();
@@ -2358,37 +2355,6 @@ const ChartPanel = ({
     rejDataRef.current = detectRejectionConfirmSetup(stockData.bars);
   }, [stockData, rejActive]);
 
-  // ── REJ: fetch Nifty option pick when signal changes ────────────
-  useEffect(() => {
-    if (!rejActive) { setRejOptionPick(null); return; }
-    const signal = rejDataRef.current;
-    if (!signal) { setRejOptionPick(null); return; }
-
-    let cancelled = false;
-    setRejOptionLoading(true);
-    setRejOptionPick(null);
-
-    const BACKEND = process.env.REACT_APP_BACKEND_URL || '';
-    fetch(`${BACKEND}/api/rej/nifty-option-pick`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        signal_type: signal.type,
-        entry:       signal.entry,
-        sl:          signal.sl,
-        target:      signal.target,
-        symbol:      'NIFTY',
-      }),
-    })
-      .then(r => r.json())
-      .then(data => { if (!cancelled) setRejOptionPick(data); })
-      .catch(() => { if (!cancelled) setRejOptionPick(null); })
-      .finally(() => { if (!cancelled) setRejOptionLoading(false); });
-
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rejActive, rejDataRef.current]);
-
   // ── Black Box: draw canvas ──────────────────────────────────────
   const drawBBCanvas = useCallback(() => {
     const canvas = bbCanvasRef.current;
@@ -3490,141 +3456,6 @@ const ChartPanel = ({
             display: rejActive ? 'block' : 'none',
           }}
         />
-
-        {/* REJ Option Pick Panel — floating card bottom-left */}
-        {rejActive && (rejOptionLoading || rejOptionPick) && (
-          <div style={{
-            position: 'absolute', left: 8, bottom: 36,
-            zIndex: 20, pointerEvents: 'none',
-            width: 320, fontFamily: 'monospace',
-          }}>
-            {rejOptionLoading && (
-              <div style={{
-                background: 'rgba(15,23,42,0.92)',
-                border: '1px solid rgba(6,182,212,0.35)',
-                borderRadius: 6, padding: '8px 12px',
-                color: '#94a3b8', fontSize: 11,
-              }}>
-                ⟳ Fetching NIFTY Option Chain + Greeks…
-              </div>
-            )}
-            {!rejOptionLoading && rejOptionPick && (() => {
-              const p  = rejOptionPick;
-              const isBuy = p.signal_type === 'BUY';
-              const accentCol = isBuy ? '#22c55e' : '#ef4444';
-              const sideLbl   = isBuy ? 'CALL' : 'PUT';
-              const top  = p.top_picks || [];
-              const rr   = p.rr_info;
-              const best = top[0];
-              return (
-                <div style={{
-                  background: 'rgba(10,15,30,0.95)',
-                  border: `1px solid ${accentCol}55`,
-                  borderRadius: 6, padding: '8px 10px',
-                  boxShadow: `0 0 12px ${accentCol}22`,
-                }}>
-                  {/* Header */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <span style={{ color: accentCol, fontWeight: 700, fontSize: 11, letterSpacing: 1 }}>
-                      REJ OPTION PICK — {p.signal_type}
-                    </span>
-                    <span style={{ color: '#64748b', fontSize: 9 }}>
-                      {p.symbol} | Exp: {p.expiry || '—'} | Spot: {p.spot}
-                    </span>
-                  </div>
-
-                  {top.length === 0 && (
-                    <div style={{ color: '#f59e0b', fontSize: 10, padding: '4px 0' }}>
-                      ⚠ No {sideLbl} strikes passed the filter (Delta/Gamma/OI/Theta criteria)
-                    </div>
-                  )}
-
-                  {/* Best pick highlighted */}
-                  {best && (
-                    <div style={{
-                      background: `${accentCol}18`,
-                      border: `1px solid ${accentCol}40`,
-                      borderRadius: 4, padding: '6px 8px', marginBottom: 6,
-                    }}>
-                      <div style={{ color: accentCol, fontSize: 12, fontWeight: 700, marginBottom: 3 }}>
-                        ★ {best.strike} {sideLbl}  @  ₹{best.last_price}
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 3, fontSize: 9 }}>
-                        {[
-                          ['Delta', best.delta],
-                          ['Gamma', best.gamma],
-                          ['Vega',  best.vega],
-                          ['Theta', best.theta],
-                        ].map(([lbl, val]) => (
-                          <div key={lbl} style={{ textAlign: 'center' }}>
-                            <div style={{ color: '#64748b' }}>{lbl}</div>
-                            <div style={{ color: '#e2e8f0', fontWeight: 600 }}>{val}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <div style={{ marginTop: 4, fontSize: 9, color: '#94a3b8' }}>
-                        OI: {(best.oi / 100000).toFixed(2)}L  |  IV: {best.iv_pct}%
-                      </div>
-                      {rr && (
-                        <div style={{
-                          marginTop: 5, paddingTop: 5,
-                          borderTop: '1px solid rgba(100,116,139,0.3)',
-                          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 3, fontSize: 9,
-                        }}>
-                          <div style={{ color: accentCol }}>
-                            <div style={{ color: '#64748b' }}>Entry</div>₹{rr.opt_entry}
-                          </div>
-                          <div style={{ color: '#ef4444' }}>
-                            <div style={{ color: '#64748b' }}>SL</div>₹{rr.opt_sl}
-                          </div>
-                          <div style={{ color: '#22c55e' }}>
-                            <div style={{ color: '#64748b' }}>Target</div>₹{rr.opt_target}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Alternate picks (2-5) compact */}
-                  {top.length > 1 && (
-                    <div>
-                      <div style={{ color: '#475569', fontSize: 8, marginBottom: 3, letterSpacing: 0.5 }}>
-                        OTHER QUALIFYING STRIKES
-                      </div>
-                      {top.slice(1).map((t, i) => (
-                        <div key={i} style={{
-                          display: 'flex', justifyContent: 'space-between',
-                          fontSize: 9, color: '#94a3b8', padding: '2px 0',
-                          borderBottom: '1px solid rgba(51,65,85,0.4)',
-                        }}>
-                          <span style={{ color: '#cbd5e1' }}>{t.strike} {sideLbl}</span>
-                          <span>₹{t.last_price}</span>
-                          <span>Δ {t.delta}</span>
-                          <span>γ {t.gamma}</span>
-                          <span>OI {(t.oi / 100000).toFixed(1)}L</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Filter summary footer */}
-                  <div style={{
-                    marginTop: 5, fontSize: 8, color: '#475569',
-                    borderTop: '1px solid rgba(51,65,85,0.3)', paddingTop: 4,
-                  }}>
-                    Filter: {isBuy ? 'Δ≥0.80' : 'Δ≤-0.80'} · γ≥0.0005 · OI≥1L · θ>-12
-                    · {p.candidates_count} candidates · DTE {p.T_days}d
-                    {p.tier && p.tier !== 'strict' && (
-                      <span style={{ color: '#f59e0b', marginLeft: 4 }}>
-                        [{p.tier}]
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        )}
 
         {/* VP Tooltip — price level detail popup */}
         {vpTooltip && (
