@@ -675,15 +675,23 @@ const TradingDashboard = () => {
             {theme === 'dark' ? <Sun size={15} weight="bold" /> : <Moon size={15} weight="bold" />}
           </button>
 
-          {/* VIBE RESEARCH — opens Vibe AI chat in sidebar */}
+          {/* VIBE RESEARCH — one tap open, one tap minimise */}
           <button
-            onClick={() => { setActiveTab('vibe'); setMobilePanel('left'); }}
+            onClick={() => {
+              if (activeTab === 'vibe') {
+                setActiveTab('scan');
+                setMobilePanel('chart');
+              } else {
+                setActiveTab('vibe');
+                setMobilePanel('left');
+              }
+            }}
             className={`p-1.5 rounded-md border transition-all duration-200 ${
               activeTab === 'vibe'
                 ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
                 : 'border-slate-200 dark:border-white/10 text-slate-500 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-white/10 hover:text-slate-800 dark:hover:text-white'
             }`}
-            title="Vibe Research Agent"
+            title={activeTab === 'vibe' ? 'Minimise Vibe' : 'Open Vibe Research'}
             data-testid="vibe-btn"
           >
             <ChatCircleText size={15} weight={activeTab === 'vibe' ? 'fill' : 'bold'} />
