@@ -952,6 +952,114 @@ function computeBlackBox(bars) {
 }
 
 
+// ═══════════════════════════════════════════════════════════════════
+// REJ — 15-Min Rejection + 1-Min Confirmation Strategy
+//   BUY  : 15m Hammer / long lower wick  → 1m strong green confirm
+//   SELL : 15m Shooting Star / long upper wick → 1m strong red confirm
+//   Entry  = close of confirmation candle (or rejection close if PENDING)
+//   SL     = just beyond 15m rejection extreme
+//   Target = minimum 1:2 risk-reward
+// ═══════════════════════════════════════════════════════════════════
+function _rejBody(b) { return Math.abs(b.close - b.open); }
+function _rejRange(b) { return b.high - b.low; }
+function _rejUpperWick(b) { return b.high - Math.max(b.open, b.close); }
+function _rejLowerWick(b) { return Math.min(b.open, b.close) - b.low; }
+function _rejIsBull(b) { return b.close > b.open; }
+function _rejIsBear(b) { return b.close < b.open; }
+
+function detect15mRejection(bars15) {
+  if (!bars15 || bars15.length < 3) return null;
+  const start = Math.max(1, bars15.length - 8);
+  for (let i = bars15.length - 1; i >= start; i--) {
+    const b = bars15[i];
+    const r = _rejRange(b);
+    if (r <= 0) continue;
+    const bod = _rejBody(b);
+    const uw  = _rejUpperWick(b);
+    const lw  = _rejLowerWick(b);
+    const strongWickRatio = 1.5;
+    // BUY: Hammer — long lower wick
+    if (lw >= strongWickRatio * bod && lw >= 0.55 * r && uw <= bod * 1.1) {
+      return { type: 'BUY', bar: b, idx: i, extreme: b.low,
+        rejectionHigh: b.high, rejectionLow: b.low,
+        time: b.timestamp / 1000, name: '15m Hammer / Lower Wick Rejection' };
+    }
+    // SELL: Shooting Star — long upper wick
+    if (uw >= strongWickRatio * bod && uw >= 0.55 * r && lw <= bod * 1.1) {
+      return { type: 'SELL', bar: b, idx: i, extreme: b.high,
+        rejectionHigh: b.high, rejectionLow: b.low,
+        time: b.timestamp / 1000, name: '15m Shooting Star / Upper Wick Rejection' };
+    }
+  }
+  return null;
+}
+
+function _findStrongConfirmInWindow(windowBars, type) {
+  const limit = Math.min(windowBars.length, 20);
+  for (let i = 0; i < limit; i++) {
+    const b = windowBars[i];
+    const r = _rejRange(b);
+    if (r <= 0) continue;
+    const bod = _rejBody(b);
+    const bodyRatio = bod / r;
+    if (bodyRatio < 0.55) continue;
+    if (type === 'BUY') {
+      if (!_rejIsBull(b)) continue;
+      if (_rejUpperWick(b) > bod * 0.6) continue;
+      const prevVol = i > 0 ? windowBars[i - 1].volume || 0 : 0;
+      const volOk = !prevVol || (b.volume || 0) >= prevVol * 0.9;
+      if (!volOk && bodyRatio < 0.7) continue;
+      return { bar: b, time: b.timestamp / 1000, entry: b.close, name: '1m Strong Green Confirmation' };
+    }
+    if (type === 'SELL') {
+      if (!_rejIsBear(b)) continue;
+      if (_rejLowerWick(b) > bod * 0.6) continue;
+      const prevVol = i > 0 ? windowBars[i - 1].volume || 0 : 0;
+      const volOk = !prevVol || (b.volume || 0) >= prevVol * 0.9;
+      if (!volOk && bodyRatio < 0.7) continue;
+      return { bar: b, time: b.timestamp / 1000, entry: b.close, name: '1m Strong Red Confirmation' };
+    }
+  }
+  return null;
+}
+
+function find1mConfirmation(bars1m, rejection) {
+  if (!bars1m || !bars1m.length || !rejection) return null;
+  const rejEndTs = rejection.bar.timestamp + 15 * 60 * 1000;
+  const after = bars1m.filter(b => b.timestamp >= rejEndTs);
+  if (after.length < 1) {
+    const afterStart = bars1m.filter(b => b.timestamp > rejection.bar.timestamp);
+    if (!afterStart.length) return null;
+    return _findStrongConfirmInWindow(afterStart, rejection.type);
+  }
+  return _findStrongConfirmInWindow(after, rejection.type);
+}
+
+function detectRejectionConfirmSetup(bars) {
+  if (!bars || bars.length < 10) return null;
+  const bars15 = resampleBars(bars, 15);
+  const rejection = detect15mRejection(bars15);
+  if (!rejection) return null;
+  const confirm = find1mConfirmation(bars, rejection);
+  if (!confirm) {
+    const entry = rejection.bar.close;
+    const sl = rejection.type === 'BUY' ? rejection.extreme * 0.9995 : rejection.extreme * 1.0005;
+    const riskPts = Math.abs(entry - sl);
+    const target = rejection.type === 'BUY' ? entry + riskPts * 2 : entry - riskPts * 2;
+    return { status: 'PENDING', type: rejection.type, rejection, confirm: null,
+      entry, sl, target, rr: 2, label: `${rejection.type} · 15m Rejection (await 1m confirm)` };
+  }
+  const entry = confirm.entry;
+  const sl = rejection.type === 'BUY' ? rejection.extreme * 0.9995 : rejection.extreme * 1.0005;
+  const riskPts = Math.abs(entry - sl);
+  if (riskPts <= 0) return null;
+  const target = rejection.type === 'BUY' ? entry + riskPts * 2 : entry - riskPts * 2;
+  return { status: 'CONFIRMED', type: rejection.type, rejection, confirm,
+    entry, sl, target, rr: 2,
+    label: rejection.type === 'BUY' ? 'BUY · 15m Rejection + 1m Confirm' : 'SELL · 15m Rejection + 1m Confirm' };
+}
+
+
 const ChartPanel = ({
   stockData, loading, selectedStock, onPivotSelect, pivotPoint, gannFan,
   semiLogScale, setSemiLogScale, timeframe, onTimeframeChange, isCrypto,
@@ -1008,6 +1116,11 @@ const ChartPanel = ({
   const bbCanvasRef = useRef(null);
   const bbAnimRef   = useRef(null);
   const bbDataRef   = useRef(null);
+  // REJ — 15m Rejection + 1m Confirmation
+  const [rejActive, setRejActive] = useState(false);
+  const rejCanvasRef = useRef(null);
+  const rejAnimRef   = useRef(null);
+  const rejDataRef   = useRef(null);
   // MTF Market Direction — 1H / 45M / 15M
   const [mtfDirection, setMtfDirection] = useState({ '1H': null, '45M': null, '15M': null });
   const { theme } = useTheme();
@@ -2236,6 +2349,12 @@ const ChartPanel = ({
     bbDataRef.current = computeBlackBox(stockData.bars);
   }, [stockData, bbActive]);
 
+  // ── REJ: compute signal on data/toggle change ───────────────────
+  useEffect(() => {
+    if (!rejActive || !stockData?.bars?.length) { rejDataRef.current = null; return; }
+    rejDataRef.current = detectRejectionConfirmSetup(stockData.bars);
+  }, [stockData, rejActive]);
+
   // ── Black Box: draw canvas ──────────────────────────────────────
   const drawBBCanvas = useCallback(() => {
     const canvas = bbCanvasRef.current;
@@ -2429,6 +2548,194 @@ const ChartPanel = ({
     bbAnimRef.current = requestAnimationFrame(loop);
     return () => { if (bbAnimRef.current) cancelAnimationFrame(bbAnimRef.current); };
   }, [bbActive, drawBBCanvas]);
+
+  // ── REJ: draw canvas ─────────────────────────────────────────────
+  const drawREJCanvas = useCallback(() => {
+    const canvas  = rejCanvasRef.current;
+    const chart   = chartRef.current;
+    const series  = candlestickSeriesRef.current;
+    const signal  = rejDataRef.current;
+    if (!canvas || !chart || !series) return;
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const W = container.clientWidth;
+    const H = container.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+      canvas.width  = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width  = `${W}px`;
+      canvas.style.height = `${H}px`;
+    }
+
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+
+    if (!signal) {
+      // No signal — show "No REJ setup found" badge top-left
+      ctx.font = 'bold 8px monospace';
+      ctx.fillStyle = 'rgba(148,163,184,0.7)';
+      ctx.fillText('REJ: No setup found', 8, 18);
+      ctx.restore();
+      return;
+    }
+
+    let ts;
+    try { ts = chart.timeScale(); } catch (e) { ctx.restore(); return; }
+    const toX = t => { try { return ts.timeToCoordinate(t); } catch { return null; } };
+    const toY = p => { try { return series.priceToCoordinate(p); } catch { return null; } };
+
+    const PRICE_SCALE_W = 82;
+    const isBuy    = signal.type === 'BUY';
+    const mainCol  = isBuy ? '#22c55e' : '#ef4444';
+    const pendCol  = '#eab308';
+    const statusCol = signal.status === 'CONFIRMED' ? mainCol : pendCol;
+    const rej = signal.rejection;
+
+    // ── Draw 15m rejection candle box ────────────────────────────
+    const rejX = toX(rej.time);
+    const rejYHigh = toY(rej.rejectionHigh);
+    const rejYLow  = toY(rej.rejectionLow);
+    if (rejX != null && rejYHigh != null && rejYLow != null) {
+      const boxTop = Math.min(rejYHigh, rejYLow);
+      const boxH   = Math.max(4, Math.abs(rejYHigh - rejYLow));
+      // Estimated candle width ≈ 12px
+      const candleW = 12;
+      ctx.save();
+      ctx.strokeStyle = `${mainCol}cc`;
+      ctx.fillStyle   = `${mainCol}18`;
+      ctx.lineWidth   = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.fillRect(rejX - candleW, boxTop, candleW * 2, boxH);
+      ctx.strokeRect(rejX - candleW, boxTop, candleW * 2, boxH);
+      ctx.setLineDash([]);
+      // Label inside box
+      ctx.fillStyle = `${mainCol}ee`;
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText(isBuy ? '15m ▼Wick' : '15m ▲Wick', rejX - candleW + 2, boxTop + 10);
+      ctx.restore();
+    }
+
+    // ── Draw 1m confirmation candle highlight ─────────────────────
+    if (signal.confirm) {
+      const confX = toX(signal.confirm.time);
+      const confBar = signal.confirm.bar;
+      if (confX != null && confBar) {
+        const confYH = toY(confBar.high);
+        const confYL = toY(confBar.low);
+        if (confYH != null && confYL != null) {
+          const cTop = Math.min(confYH, confYL);
+          const cH   = Math.max(3, Math.abs(confYH - confYL));
+          ctx.save();
+          ctx.strokeStyle = '#fde68a';
+          ctx.fillStyle   = 'rgba(253,230,138,0.15)';
+          ctx.lineWidth   = 1.5;
+          ctx.fillRect(confX - 5, cTop, 10, cH);
+          ctx.strokeRect(confX - 5, cTop, 10, cH);
+          ctx.fillStyle = '#fde68a';
+          ctx.font = 'bold 7px monospace';
+          ctx.fillText('1m✓', confX - 8, cTop - 3);
+          ctx.restore();
+        }
+      }
+    }
+
+    // ── Helper: draw dashed horizontal line + right-side pill ────
+    const rightLabels = [];
+    const LABEL_H = 13;
+    const claimY = (yRaw) => {
+      if (yRaw == null) return null;
+      let y = yRaw;
+      for (const l of rightLabels) {
+        if (Math.abs(y - l.y) < LABEL_H + 2) y = l.y + LABEL_H + 3;
+      }
+      return y;
+    };
+
+    const drawLevel = (price, lineColor, pillText, pillBg, pillTxt, fromX) => {
+      const yRaw = toY(price);
+      if (yRaw == null || yRaw < 0 || yRaw > H) return;
+      const xStart = fromX != null ? Math.max(0, fromX) : 0;
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.moveTo(xStart, yRaw);
+      ctx.lineTo(W - PRICE_SCALE_W, yRaw);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      const y = claimY(yRaw);
+      if (y != null) rightLabels.push({ y, text: pillText, bg: pillBg, txt: pillTxt, yLine: yRaw });
+    };
+
+    const entryFromX = signal.confirm ? toX(signal.confirm.time) : (rejX != null ? rejX : null);
+
+    // Entry line
+    drawLevel(signal.entry, `${mainCol}cc`,
+      `${isBuy ? '▲' : '▼'} ENTRY ${signal.entry.toFixed(1)}`,
+      mainCol, '#000', entryFromX);
+
+    // Target line
+    drawLevel(signal.target, 'rgba(34,197,94,0.7)',
+      `✦ TGT ${signal.target.toFixed(1)} (1:2)`,
+      'rgba(34,197,94,0.85)', '#fff', entryFromX);
+
+    // SL line
+    drawLevel(signal.sl, 'rgba(239,68,68,0.7)',
+      `✕ SL  ${signal.sl.toFixed(1)}`,
+      'rgba(239,68,68,0.85)', '#fff', entryFromX);
+
+    // ── Render right-side pills (collision-safe) ────────────────
+    ctx.save();
+    ctx.font = 'bold 7.5px monospace';
+    rightLabels.forEach(({ y, text, bg, txt }) => {
+      const tw = ctx.measureText(text).width;
+      const rx = W - PRICE_SCALE_W - tw - 8;
+      const ry = y - 9;
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(rx - 2, ry, tw + 8, LABEL_H, 2);
+      else ctx.rect(rx - 2, ry, tw + 8, LABEL_H);
+      ctx.fill();
+      ctx.fillStyle = txt;
+      ctx.fillText(text, rx + 1, ry + 9.5);
+    });
+    ctx.restore();
+
+    // ── Status badge top-left ────────────────────────────────────
+    ctx.save();
+    ctx.font = 'bold 9px monospace';
+    const badge1 = `REJ: ${signal.type}  ${signal.status}`;
+    const badge2 = signal.status === 'CONFIRMED'
+      ? `Entry ${signal.entry.toFixed(1)}  SL ${signal.sl.toFixed(1)}  TGT ${signal.target.toFixed(1)}`
+      : `${rej.name} — awaiting 1m confirm`;
+    ctx.fillStyle = statusCol;
+    ctx.fillText(badge1, 8, 18);
+    ctx.fillStyle = 'rgba(148,163,184,0.8)';
+    ctx.font = '7.5px monospace';
+    ctx.fillText(badge2, 8, 30);
+    ctx.restore();
+
+    ctx.restore();
+  }, []);
+
+  // ── REJ: animation loop ──────────────────────────────────────────
+  useEffect(() => {
+    if (!rejActive) {
+      if (rejAnimRef.current) cancelAnimationFrame(rejAnimRef.current);
+      const c = rejCanvasRef.current;
+      if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+      return;
+    }
+    const loop = () => { drawREJCanvas(); rejAnimRef.current = requestAnimationFrame(loop); };
+    rejAnimRef.current = requestAnimationFrame(loop);
+    return () => { if (rejAnimRef.current) cancelAnimationFrame(rejAnimRef.current); };
+  }, [rejActive, drawREJCanvas]);
 
   useEffect(() => {
     if (showGannLines && pivotPoint && stockData) {
@@ -2747,6 +3054,19 @@ const ChartPanel = ({
             title="Volume Profile — POC (orange), VAH (purple), VAL (cyan) auto-mark"
           >
             VP
+          </button>
+          {/* REJ — 15m Rejection + 1m Confirmation strategy */}
+          <button
+            onClick={() => setRejActive(v => !v)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
+              rejActive
+                ? 'text-[#06b6d4] border-[#06b6d4]/40 bg-[#06b6d4]/8'
+                : 'text-zinc-500 border-transparent'
+            }`}
+            data-testid="rej-toggle"
+            title="REJ — 15m Rejection + 1m Confirmation: Hammer/Shooting Star wick rejection with confirmation"
+          >
+            REJ
           </button>
           {/* SMC toggle + Multi-Timeframe layers dropdown */}
           <div className="flex items-stretch shrink-0 relative">
@@ -3123,6 +3443,17 @@ const ChartPanel = ({
             zIndex: 5,
             pointerEvents: 'none',
             display: bbActive ? 'block' : 'none',
+          }}
+        />
+
+        {/* REJ Canvas — 15m Rejection + 1m Confirmation overlay */}
+        <canvas
+          ref={rejCanvasRef}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            zIndex: 6,
+            pointerEvents: 'none',
+            display: rejActive ? 'block' : 'none',
           }}
         />
 
