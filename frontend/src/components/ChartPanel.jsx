@@ -407,9 +407,10 @@ function detectTrendlines(bars) {
       { level: 0.786, color: '#4F46E5', label: 'Fib 78.6%' },
     ].forEach(f => {
       const price = swL + fibR * (1 - f.level);
+      const stats = computeSRStats(bars, price, touchTol, price < (swH + swL) / 2);
       result.push({ type: 'fibonacci', label: f.label, color: f.color,
         lineStyle: 1, lineWidth: 1, startTs: firstTs, startPrice: price,
-        endTs: lastTs, endPrice: price, touches: 0 });
+        endTs: lastTs, endPrice: price, touches: 0, stats });
     });
   }
 
@@ -1451,55 +1452,23 @@ const ChartPanel = ({
     ctx.clearRect(0, 0, W, H);
 
     const toY = p => { try { return series.priceToCoordinate(p); } catch { return null; } };
-    const PRICE_SCALE_W = 60;
+    const PRICE_SCALE_W = 62;
+    const drawableW     = W - PRICE_SCALE_W;
+
+    ctx.font      = 'bold 8.5px sans-serif';
+    ctx.textAlign = 'center';
 
     levels.forEach(lv => {
       if (!lv.stats) return;
-      const price = lv.startPrice;
-      const yRaw  = toY(price);
-      if (yRaw == null || yRaw < 8 || yRaw > H - 8) return;
+      const yRaw = toY(lv.startPrice);
+      if (yRaw == null || yRaw < 10 || yRaw > H - 10) return;
 
       const { retests, breakouts, held, pct } = lv.stats;
-      const isSupport = lv.type === 'h_support';
-      const baseColor = isSupport ? '#3B82F6' : '#FF6B00';
+      const text = `Retests: ${retests} · Breakouts: ${breakouts} · Held: ${held} (${pct}%)`;
 
-      // ── Stats pill drawn at LEFT side ──
-      const text   = `R:${retests}  B:${breakouts}  H:${held}  ${pct}%`;
-      ctx.font     = 'bold 7.5px monospace';
-      const tw     = ctx.measureText(text).width;
-      const PX     = 6, PY = 4;
-      const boxW   = tw + PX * 2;
-      const boxH   = 13;
-      const rx     = 4;
-      const ry     = yRaw - boxH / 2;
-
-      // Pill background
-      ctx.fillStyle = `${baseColor}22`;
-      ctx.strokeStyle = `${baseColor}70`;
-      ctx.lineWidth   = 0.7;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(rx, ry, boxW, boxH, 2);
-      else ctx.rect(rx, ry, boxW, boxH);
-      ctx.fill();
-      ctx.stroke();
-
-      // Text
-      ctx.fillStyle = baseColor;
-      ctx.fillText(text, rx + PX, yRaw + 2.5);
-
-      // Level type label on right edge (before price scale)
-      const typeLabel = isSupport ? 'SUP' : 'RES';
-      const tlw  = ctx.measureText(typeLabel).width;
-      const tlRx = W - PRICE_SCALE_W - tlw - 8;
-      ctx.fillStyle   = `${baseColor}30`;
-      ctx.strokeStyle = `${baseColor}60`;
-      ctx.beginPath();
-      if (ctx.roundRect) ctx.roundRect(tlRx - 2, ry, tlw + 8, boxH, 2);
-      else ctx.rect(tlRx - 2, ry, tlw + 8, boxH);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = baseColor;
-      ctx.fillText(typeLabel, tlRx + 1, yRaw + 2.5);
+      // Plain text centered on the line, just above it — no background
+      ctx.fillStyle = lv.color;
+      ctx.fillText(text, drawableW / 2, yRaw - 4);
     });
 
     ctx.restore();
@@ -2310,8 +2279,10 @@ const ChartPanel = ({
         trendLineSeriesRef.current.push(s);
       } catch (e) {}
     });
-    // Store h_support / h_resistance levels (with stats) for SR Stats canvas
-    srStatsDataRef.current = lines.filter(l => l.type === 'h_support' || l.type === 'h_resistance');
+    // Store ALL horizontal lines (with stats) for SR Stats canvas
+    srStatsDataRef.current = lines.filter(l =>
+      (l.type === 'h_support' || l.type === 'h_resistance' || l.type === 'fibonacci') && l.stats
+    );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stockData, trendlinesActive, trendFilter]);
 
