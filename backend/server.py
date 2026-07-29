@@ -14152,25 +14152,32 @@ def _detect_screener_intent(text: str):
     import re as _re
     t = text.lower()
     patterns = [
-        (r'52.?w(eek)?.*(low|bottom|dip|near|close)',          "near_52w_low",     "Near 52-Week Low"),
-        (r'(near|close|almost|touch).*(52|yearly).*(low)',      "near_52w_low",     "Near 52-Week Low"),
-        (r'52.?w(eek)?.*(high|top|peak|break)',                 "near_52w_high",    "Near 52-Week High"),
-        (r'(near|close|almost|touch).*(52|yearly).*(high)',     "near_52w_high",    "Near 52-Week High"),
-        (r'breakout',                                           "breakout",         "Breakout Stocks"),
-        (r'break\s*out',                                        "breakout",         "Breakout Stocks"),
-        (r'rsi.*(oversold|below|low|30|40)',                    "rsi_oversold",     "RSI Oversold (<35)"),
-        (r'oversold',                                           "rsi_oversold",     "RSI Oversold (<35)"),
-        (r'rsi.*(overbought|above|high|70|80)',                 "rsi_overbought",   "RSI Overbought (>70)"),
-        (r'overbought',                                         "rsi_overbought",   "RSI Overbought (>70)"),
-        (r'(top|best).*(gainer|perform|return|up)',             "top_gainers",      "Top Yearly Gainers"),
-        (r'(gainer|gainers)',                                   "top_gainers",      "Top Yearly Gainers"),
-        (r'(top|worst).*(loser|fall|down|crash|decline)',       "top_losers",       "Top Yearly Losers"),
-        (r'(loser|losers|fallen)',                              "top_losers",       "Top Yearly Losers"),
-        (r'(momentum|trending|strong)',                         "momentum",         "Momentum Stocks"),
-        (r'(value|cheap|undervalued|discount)',                 "near_52w_low",     "Near 52-Week Low"),
-        (r'(consolidat|range.?bound|sideways)',                 "consolidation",    "Consolidation / Range-Bound"),
-        (r'(above.*(50|200).*(dma|ema|ma)|ma.*(cross|break))', "above_200dma",     "Above 200-DMA Stocks"),
-        (r'(200.dma|200.day|200 day)',                          "above_200dma",     "Above 200-DMA Stocks"),
+        (r'52.?w(eek)?.*(low|bottom|dip|near|close)',          "near_52w_low",       "Near 52-Week Low"),
+        (r'(near|close|almost|touch).*(52|yearly).*(low)',      "near_52w_low",       "Near 52-Week Low"),
+        (r'52.?w(eek)?.*(high|top|peak|break)',                 "near_52w_high",      "Near 52-Week High"),
+        (r'(near|close|almost|touch).*(52|yearly).*(high)',     "near_52w_high",      "Near 52-Week High"),
+        (r'breakout',                                           "breakout",           "Breakout Stocks"),
+        (r'break\s*out',                                        "breakout",           "Breakout Stocks"),
+        (r'rsi.*(oversold|below|low|30|40)',                    "rsi_oversold",       "RSI Oversold (<35)"),
+        (r'oversold',                                           "rsi_oversold",       "RSI Oversold (<35)"),
+        (r'rsi.*(overbought|above|high|70|80)',                 "rsi_overbought",     "RSI Overbought (>70)"),
+        (r'overbought',                                         "rsi_overbought",     "RSI Overbought (>70)"),
+        (r'(top|best).*(gainer|perform|return|up)',             "top_gainers",        "Top Yearly Gainers"),
+        (r'(gainer|gainers)',                                   "top_gainers",        "Top Yearly Gainers"),
+        (r'(top|worst).*(loser|fall|down|crash|decline)',       "top_losers",         "Top Yearly Losers"),
+        (r'(loser|losers|fallen)',                              "top_losers",         "Top Yearly Losers"),
+        (r'(momentum|trending|strong)',                         "momentum",           "Momentum Stocks"),
+        (r'(value|cheap|undervalued|discount)',                 "near_52w_low",       "Near 52-Week Low"),
+        (r'(consolidat|range.?bound|sideways)',                 "consolidation",      "Consolidation / Range-Bound"),
+        (r'(above.*(50|200).*(dma|ema|ma)|ma.*(cross|break))', "above_200dma",       "Above 200-DMA Stocks"),
+        (r'(200.dma|200.day|200 day)',                          "above_200dma",       "Above 200-DMA Stocks"),
+        # New screeners
+        (r'(volume.*(spike|surge|high|unusual|big)|vol.*(spike|surge)|unusual.*vol)',
+                                                                "volume_spike",       "Volume Spike Stocks"),
+        (r'(vol\s*spike|heavy\s*vol|high\s*vol)',               "volume_spike",       "Volume Spike Stocks"),
+        (r'(earning|result|quarterly|q[1-4]|results\s*season)', "earnings_upcoming",  "Earnings Upcoming (30 days)"),
+        (r'(pcr|put.call|put call|option\s*sentiment|bullish\s*pcr|bearish\s*pcr)',
+                                                                "pcr_filter",         "PCR-Based Market Filter"),
     ]
     for pattern, intent, label in patterns:
         if _re.search(pattern, t):
@@ -14203,7 +14210,13 @@ async def _run_stock_screener(intent: str, label: str) -> str:
     """
     import yfinance as _yf4
     loop = asyncio.get_event_loop()
-    needs_rsi = intent in ("rsi_oversold", "rsi_overbought")
+    needs_rsi     = intent in ("rsi_oversold", "rsi_overbought")
+    needs_cal     = intent == "earnings_upcoming"
+    needs_pcr     = intent == "pcr_filter"
+
+    # ── PCR filter: no stock scan needed, read from cache ─────────
+    if needs_pcr:
+        return await _run_pcr_filter()
 
     def _sync_screen():
         results = []
@@ -14213,14 +14226,18 @@ async def _run_stock_screener(intent: str, label: str) -> str:
             try:
                 t  = _yf4.Ticker(ticker)
                 fi = t.fast_info
-                sym   = ticker.replace(".NS", "")
-                price = round(float(fi.last_price), 2)
-                prev  = round(float(fi.previous_close or price), 2)
-                y_hi  = round(float(fi.year_high), 2)
-                y_lo  = round(float(fi.year_low), 2)
-                chg_y = round(float(fi.year_change or 0) * 100, 1)
-                dma50 = round(float(fi.fifty_day_average or price), 2)
-                dma200= round(float(fi.two_hundred_day_average or price), 2)
+                sym    = ticker.replace(".NS", "")
+                price  = round(float(fi.last_price), 2)
+                prev   = round(float(fi.previous_close or price), 2)
+                y_hi   = round(float(fi.year_high), 2)
+                y_lo   = round(float(fi.year_low), 2)
+                chg_y  = round(float(fi.year_change or 0) * 100, 1)
+                dma50  = round(float(fi.fifty_day_average or price), 2)
+                dma200 = round(float(fi.two_hundred_day_average or price), 2)
+                vol    = int(fi.last_volume or 0)
+                avg_vol10 = int(fi.ten_day_average_volume or 1)
+                avg_vol3m = int(fi.three_month_average_volume or 1)
+                vol_ratio = round(vol / avg_vol10, 2) if avg_vol10 else 1.0
                 dist_hi = round((y_hi - price) / y_hi * 100, 1) if y_hi else 99
                 dist_lo = round((price - y_lo) / price * 100, 1) if y_lo else 99
                 rsi = 50.0
@@ -14228,16 +14245,36 @@ async def _run_stock_screener(intent: str, label: str) -> str:
                     hist = t.history(period="2mo", interval="1d", auto_adjust=True, progress=False)
                     if len(hist) >= 15:
                         rsi = _calc_rsi(list(hist["Close"]))
+                # Earnings calendar
+                days_to_earnings = None
+                earnings_date_str = None
+                if needs_cal:
+                    try:
+                        from datetime import datetime as _dt2
+                        cal = t.calendar
+                        if cal and "Earnings Date" in cal and cal["Earnings Date"]:
+                            ed = cal["Earnings Date"][0]
+                            today = _dt2.now().date()
+                            days  = (ed - today).days
+                            if 0 <= days <= 45:
+                                days_to_earnings = days
+                                earnings_date_str = str(ed)
+                    except Exception:
+                        pass
                 return {
                     "sym": sym, "price": price, "prev": prev,
                     "y_hi": y_hi, "y_lo": y_lo, "chg_y": chg_y,
                     "dist_hi": dist_hi, "dist_lo": dist_lo,
                     "dma50": dma50, "dma200": dma200, "rsi": rsi,
+                    "vol": vol, "avg_vol10": avg_vol10, "avg_vol3m": avg_vol3m,
+                    "vol_ratio": vol_ratio,
+                    "days_to_earnings": days_to_earnings,
+                    "earnings_date": earnings_date_str,
                 }
             except Exception:
                 return None
 
-        workers = 8 if not needs_rsi else 5
+        workers = 8 if not (needs_rsi or needs_cal) else 5
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futures = {ex.submit(_fetch_one, t): t for t in _SCREEN_UNIVERSE}
             for fut in as_completed(futures):
@@ -14246,7 +14283,7 @@ async def _run_stock_screener(intent: str, label: str) -> str:
                     results.append(r)
         return results
 
-    timeout = 20.0 if not needs_rsi else 35.0
+    timeout = 20.0 if not (needs_rsi or needs_cal) else 40.0
     try:
         raw = await asyncio.wait_for(loop.run_in_executor(None, _sync_screen), timeout=timeout)
     except Exception:
@@ -14285,6 +14322,16 @@ async def _run_stock_screener(intent: str, label: str) -> str:
             [r for r in raw if r["price"] > r["dma200"]],
             key=lambda x: ((x["price"] - x["dma200"]) / x["dma200"]), reverse=True,
         )[:12]
+    elif intent == "volume_spike":
+        filtered = sorted(
+            [r for r in raw if r["vol_ratio"] >= 1.8],
+            key=lambda x: x["vol_ratio"], reverse=True,
+        )[:12]
+    elif intent == "earnings_upcoming":
+        filtered = sorted(
+            [r for r in raw if r["days_to_earnings"] is not None],
+            key=lambda x: x["days_to_earnings"],
+        )[:12]
     else:
         filtered = raw[:10]
 
@@ -14311,7 +14358,7 @@ async def _run_stock_screener(intent: str, label: str) -> str:
                 f"  | 52W: ₹{r['y_lo']:,.0f}–₹{r['y_hi']:,.0f}"
             )
         elif intent == "momentum":
-            above50 = round((r["price"] - r["dma50"]) / r["dma50"] * 100, 1)
+            above50  = round((r["price"] - r["dma50"])  / r["dma50"]  * 100, 1)
             above200 = round((r["price"] - r["dma200"]) / r["dma200"] * 100, 1)
             lines.append(
                 f"  {r['sym']}: ₹{r['price']:,.0f}  1Y chg: {r['chg_y']:+.1f}%"
@@ -14323,8 +14370,138 @@ async def _run_stock_screener(intent: str, label: str) -> str:
                 f"  {r['sym']}: ₹{r['price']:,.0f}  +{above200}% above 200DMA (₹{r['dma200']:,.0f})"
                 f"  | 1Y chg: {r['chg_y']:+.1f}%"
             )
+        elif intent == "volume_spike":
+            chg_day = round((r["price"] - r["prev"]) / r["prev"] * 100, 2) if r["prev"] else 0
+            vol_m = round(r["vol"] / 1e5, 2)
+            avg_m = round(r["avg_vol10"] / 1e5, 2)
+            lines.append(
+                f"  {r['sym']}: ₹{r['price']:,.0f}  {chg_day:+.1f}% today"
+                f"  | Vol: {vol_m:.1f}L ({r['vol_ratio']:.1f}x avg {avg_m:.1f}L)  ← SPIKE"
+            )
+        elif intent == "earnings_upcoming":
+            days = r["days_to_earnings"]
+            urgency = "🔴 THIS WEEK" if days <= 7 else "🟡 NEXT 2 WEEKS" if days <= 14 else "⚪ UPCOMING"
+            lines.append(
+                f"  {r['sym']}: ₹{r['price']:,.0f}  {urgency}  Earnings in {days} days ({r['earnings_date']})"
+                f"  | 1Y chg: {r['chg_y']:+.1f}%"
+            )
         else:
             lines.append(f"  {r['sym']}: ₹{r['price']:,.0f}  1Y chg: {r['chg_y']:+.1f}%")
+    lines.append("")
+    return "\n".join(lines)
+
+
+async def _run_pcr_filter() -> str:
+    """
+    Read Nifty PCR from market_intel cache and build a PCR regime context block.
+    No stock scan needed — pure index-level option sentiment.
+    """
+    loop = asyncio.get_event_loop()
+
+    def _sync_pcr():
+        try:
+            from agents.market_intel import _pcr_cache, _PCR_HISTORY
+            cached = _pcr_cache.get("nifty_pcr", {}).get("data", {})
+            pcr_val  = cached.get("pcr", 0.0)
+            signal   = cached.get("signal", "")
+            iv       = cached.get("iv", 0.0)
+            history  = _PCR_HISTORY[-10:]  # last 10 readings
+            return {"pcr": pcr_val, "signal": signal, "iv": iv, "history": history}
+        except Exception:
+            return {}
+
+    data = {}
+    try:
+        data = await asyncio.wait_for(loop.run_in_executor(None, _sync_pcr), timeout=5.0)
+    except Exception:
+        pass
+
+    if not data or not data.get("pcr"):
+        # Fallback: try fetching fresh PCR
+        def _sync_fetch_pcr():
+            try:
+                from agents.market_intel import _fetch_nifty_pcr_sync
+                return _fetch_nifty_pcr_sync()
+            except Exception:
+                return {}
+        try:
+            data = await asyncio.wait_for(loop.run_in_executor(None, _sync_fetch_pcr), timeout=8.0)
+        except Exception:
+            pass
+
+    if not data or not data.get("pcr"):
+        return (
+            "\n[PCR FILTER — Nifty Put-Call Ratio]\n"
+            "PCR data currently unavailable (NSE API blocked in this environment).\n"
+            "Please provide your own PCR value or check NSE India website.\n"
+        )
+
+    pcr   = round(float(data.get("pcr", 0)), 2)
+    signal = data.get("signal", "")
+    iv     = data.get("iv", 0.0)
+
+    # PCR regime classification
+    if pcr < 0.50:
+        regime      = "OVER-BEARISH"
+        regime_desc = "Extreme put unwinding — bounce possible but fragile"
+        color       = "🔴"
+        strategy    = ["Buy ATM/OTM Calls (cautious)", "Sell OTM Puts (premium harvest)", "Avoid fresh shorts"]
+    elif pcr < 0.70:
+        regime      = "BEARISH"
+        regime_desc = "More calls being written — bearish market sentiment"
+        color       = "🟠"
+        strategy    = ["Buy Puts / Bear spreads", "Sell Calls on rallies", "Reduce long exposure"]
+    elif pcr < 0.90:
+        regime      = "NEUTRAL-BEARISH"
+        regime_desc = "Slight bearish bias — cautious positioning"
+        color       = "🟡"
+        strategy    = ["Iron Condor / neutral strategies", "Sell OTM Calls on bounce", "Stay hedged"]
+    elif pcr < 1.20:
+        regime      = "HEALTHY BULLISH"
+        regime_desc = "Balanced put-call ratio — ideal for directional setups"
+        color       = "🟢"
+        strategy    = ["Buy Calls / Bull spreads on dips", "Sell OTM Puts for income", "Hold longs"]
+    elif pcr < 1.50:
+        regime      = "STRONG BULLISH"
+        regime_desc = "Heavy put buying — market has good support floor"
+        color       = "💚"
+        strategy    = ["Buy Calls aggressively", "Deep OTM Put selling (hedge premium)", "Ride uptrend"]
+    else:
+        regime      = "OVER-BULLISH (Reversal Zone)"
+        regime_desc = "Excessive put accumulation — smart money may reverse"
+        color       = "⚠️"
+        strategy    = ["Take partial profits on longs", "Buy OTM Puts as hedge", "Watch for reversal candles"]
+
+    # PCR history trend
+    hist_vals = [h.get("pcr", 0) for h in data.get("history", []) if h.get("pcr")]
+    trend_str = ""
+    if len(hist_vals) >= 3:
+        recent_avg = sum(hist_vals[-3:]) / 3
+        older_avg  = sum(hist_vals[:3]) / 3
+        if recent_avg > older_avg + 0.05:
+            trend_str = "RISING (more put buying → bullish support building)"
+        elif recent_avg < older_avg - 0.05:
+            trend_str = "FALLING (put unwinding → bullish momentum fading)"
+        else:
+            trend_str = "STABLE (sideways sentiment)"
+
+    lines = ["\n[PCR FILTER — Nifty Put-Call Ratio (Live)]"]
+    lines.append(f"  Nifty PCR: {pcr}  {color} {regime}")
+    lines.append(f"  Meaning: {regime_desc}")
+    if iv:
+        lines.append(f"  India VIX proxy IV: {iv:.1f}%")
+    if trend_str:
+        lines.append(f"  PCR Trend: {trend_str}")
+    lines.append("")
+    lines.append("  Recommended Strategies:")
+    for s in strategy:
+        lines.append(f"    • {s}")
+    lines.append("")
+    lines.append("  PCR + Price Action combos:")
+    lines.append("    Price UP + PCR UP  → BULLISH CONFIRMATION (strong buy)")
+    lines.append("    Price UP + PCR DOWN → WEAK RALLY (take partial profits)")
+    lines.append("    Price DOWN + PCR UP → BOUNCE POSSIBLE (buy dips)")
+    lines.append("    Price DOWN + PCR DOWN → BEARISH CONFIRMATION (avoid longs)")
     lines.append("")
     return "\n".join(lines)
 

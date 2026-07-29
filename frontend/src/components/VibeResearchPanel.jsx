@@ -3,11 +3,12 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 const API = process.env.REACT_APP_BACKEND_URL;
 
 const QUICK_PROMPTS = [
-  'Nifty 50 aaj ka outlook kya hai?',
-  'BankNifty options ke liye best strategy batao',
-  'FII/DII activity ka market par kya asar hoga?',
-  'ATM straddle kab khareedna chahiye?',
-  'India VIX high hone pe kya karna chahiye?',
+  'Volume spike stocks aaj kaunse hain?',
+  'Upcoming earnings ke paas wale stocks batao',
+  'PCR ke hisaab se abhi kya strategy banani chahiye?',
+  '52 week low ke paas wale stocks batao',
+  'Breakout stocks dikhao Nifty 50 mein',
+  'Momentum stocks batao jo 200 DMA ke upar hain',
 ];
 
 function getStockPrompts(stockSymbol) {

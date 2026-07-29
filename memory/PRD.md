@@ -600,3 +600,35 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 **Files**: market_intel.py, server.py, MarketIntelPanel.jsx
 **Testing**: 25/25 PASS (iteration_37.json)
+
+
+---
+
+## Update (Jul 2026) — VIBE Research Agent: Live Stock Data + Full Screener Suite
+
+### Individual Stock Data Injection
+- `year_high`/`year_low` attribute fix (yfinance FastInfo correct names)
+- Any stock mentioned in message (RELIANCE, TCS, HDFC etc.) → live price + 52W high/low + day range + market cap injected
+- Currently selected chart stock also auto-injected via `stock_context` frontend prop
+- UI: green dot chip showing "STOCK — price · 52W high/low injected"
+- Dynamic quick prompts change when stock is selected
+
+### Stock Screener (Message-Triggered)
+Backend detects screener keywords → scans 45 Nifty 50 stocks → injects results as context before LLM responds.
+
+**Screeners available:**
+1. `near_52w_low` — stocks within 12% of 52W low
+2. `near_52w_high` — stocks within 5% of 52W high
+3. `breakout` — stocks within 3% of 52W high
+4. `rsi_oversold` — RSI < 35 (uses 2mo history)
+5. `rsi_overbought` — RSI > 70
+6. `top_gainers` / `top_losers` — sorted by 1Y return
+7. `momentum` — price > 50DMA AND > 200DMA AND 1Y > 10%
+8. `consolidation` — tight 1Y range (< 5%)
+9. `above_200dma` — all stocks above 200DMA sorted by % above
+10. `volume_spike` — current vol ≥ 1.8x 10-day avg (NEW)
+11. `earnings_upcoming` — results in next 45 days via yfinance calendar (NEW)
+12. `pcr_filter` — Nifty PCR regime + strategy recommendations from market_intel cache (NEW)
+
+**Files**: `server.py` (screener logic), `VibeResearchPanel.jsx` (prop + UI chip)
+
