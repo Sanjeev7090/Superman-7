@@ -843,7 +843,15 @@ const TradingDashboard = () => {
 
             {activeTab === 'vibe' && (
               <div className="h-full flex flex-col">
-                <VibeResearchPanel selectedStock={selectedStock} />
+                <VibeResearchPanel
+                  selectedStock={selectedStock}
+                  onLoadStock={(sym) => {
+                    // Load stock from VIBE screener into the chart
+                    const ticker = sym.includes('.') ? sym : `${sym}.NS`;
+                    handleStockSelect({ ticker, name: sym, type: 'stock' });
+                    setMobilePanel('chart');
+                  }}
+                />
               </div>
             )}
           </div>

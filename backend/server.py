@@ -14216,7 +14216,8 @@ async def _run_stock_screener(intent: str, label: str) -> str:
 
     # ── PCR filter: no stock scan needed, read from cache ─────────
     if needs_pcr:
-        return await _run_pcr_filter()
+        pcr_text = await _run_pcr_filter()
+        return pcr_text, []   # no loadable stocks for PCR
 
     def _sync_screen():
         results = []
@@ -14336,10 +14337,13 @@ async def _run_stock_screener(intent: str, label: str) -> str:
         filtered = raw[:10]
 
     if not filtered:
-        return f"\n[SCREENER: {label}]\nNo stocks match this filter in the Nifty 50 universe right now.\n"
+        return f"\n[SCREENER: {label}]\nNo stocks match this filter in the Nifty 50 universe right now.\n", []
 
+    stocks_out = []   # structured list for frontend "Load in Chart" chips
     lines = [f"\n[SCREENER RESULTS — {label}]  ({len(filtered)} stocks found in Nifty 50 universe)"]
     for r in filtered[:12]:
+        chg_day = round((r["price"] - r["prev"]) / r["prev"] * 100, 2) if r.get("prev") else 0
+        stocks_out.append({"sym": r["sym"], "price": r["price"], "chg": chg_day})
         if intent in ("rsi_oversold", "rsi_overbought"):
             lines.append(
                 f"  {r['sym']}: ₹{r['price']:,.0f}  RSI={r['rsi']}"
@@ -14371,7 +14375,6 @@ async def _run_stock_screener(intent: str, label: str) -> str:
                 f"  | 1Y chg: {r['chg_y']:+.1f}%"
             )
         elif intent == "volume_spike":
-            chg_day = round((r["price"] - r["prev"]) / r["prev"] * 100, 2) if r["prev"] else 0
             vol_m = round(r["vol"] / 1e5, 2)
             avg_m = round(r["avg_vol10"] / 1e5, 2)
             lines.append(
@@ -14388,7 +14391,7 @@ async def _run_stock_screener(intent: str, label: str) -> str:
         else:
             lines.append(f"  {r['sym']}: ₹{r['price']:,.0f}  1Y chg: {r['chg_y']:+.1f}%")
     lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines), stocks_out
 
 
 async def _run_pcr_filter() -> str:
@@ -14684,8 +14687,16 @@ async def vibe_chat(req: VibeChatRequest):
         tasks.append(_run_stock_screener(screener_intent, screener_label))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    market_ctx     = results[0] if not isinstance(results[0], Exception) else "[LIVE MARKET DATA]\nUnavailable\n"
-    screener_block = results[1] if len(results) > 1 and not isinstance(results[1], Exception) else ""
+    market_ctx = results[0] if not isinstance(results[0], Exception) else "[LIVE MARKET DATA]\nUnavailable\n"
+
+    screener_block  = ""
+    screener_stocks = []      # structured list for "Load in Chart" chips
+    if len(results) > 1 and not isinstance(results[1], Exception):
+        sr = results[1]
+        if isinstance(sr, tuple):
+            screener_block, screener_stocks = sr
+        else:
+            screener_block = sr   # PCR/legacy fallback
 
     # ── 4. Build augmented message ───────────────────────────────────────────
     augmented = f"{market_ctx}{screener_block}\nUser question: {req.message}"
@@ -14694,6 +14705,15 @@ async def vibe_chat(req: VibeChatRequest):
 
     async def token_stream():
         try:
+            # Emit structured screener stocks first (for "Load in Chart" chips)
+            if screener_stocks:
+                meta = {
+                    "type": "screener_stocks",
+                    "label": screener_label or "",
+                    "stocks": screener_stocks,
+                }
+                yield f"data: {json.dumps(meta)}\n\n"
+
             response: ModelResponse = await chat.send_message(UserMessage(text=augmented))
             text = response.text if hasattr(response, "text") else str(response)
             for word in text.split(" "):

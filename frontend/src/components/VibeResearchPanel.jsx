@@ -37,13 +37,14 @@ function MarkdownText({ text }) {
   return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export default function VibeResearchPanel({ selectedStock = null }) {
-  const [sessions,    setSessions]    = useState([]);      // [{id, title, messages}]
-  const [activeSess,  setActiveSess]  = useState(null);
-  const [messages,    setMessages]    = useState([]);
-  const [input,       setInput]       = useState('');
-  const [streaming,   setStreaming]   = useState(false);
-  const [streamBuf,   setStreamBuf]   = useState('');
+export default function VibeResearchPanel({ selectedStock = null, onLoadStock = null }) {
+  const [sessions,      setSessions]      = useState([]);
+  const [activeSess,    setActiveSess]    = useState(null);
+  const [messages,      setMessages]      = useState([]);
+  const [input,         setInput]         = useState('');
+  const [streaming,     setStreaming]     = useState(false);
+  const [streamBuf,     setStreamBuf]     = useState('');
+  const [screenerChips, setScreenerChips] = useState(null); // {label, stocks[]}
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
   const abortRef  = useRef(null);
@@ -80,6 +81,7 @@ export default function VibeResearchPanel({ selectedStock = null }) {
     setMessages(updated);
     setStreaming(true);
     setStreamBuf('');
+    setScreenerChips(null);  // clear previous chips on new question
 
     // Update session title from first message
     if (messages.length === 0) {
@@ -124,7 +126,10 @@ export default function VibeResearchPanel({ selectedStock = null }) {
             if (raw === '[DONE]') break;
             try {
               const chunk = JSON.parse(raw);
-              if (chunk.token) {
+              if (chunk.type === 'screener_stocks') {
+                // Structured screener data for "Load in Chart" chips
+                setScreenerChips({ label: chunk.label, stocks: chunk.stocks });
+              } else if (chunk.token) {
                 full += chunk.token;
                 setStreamBuf(full);
               }
@@ -288,6 +293,31 @@ export default function VibeResearchPanel({ selectedStock = null }) {
                 ? <><MarkdownText text={streamBuf} /><span className="animate-pulse text-amber-400">▋</span></>
                 : <span className="flex gap-1 items-center text-zinc-500"><span className="animate-bounce">•</span><span className="animate-bounce" style={{animationDelay:'0.15s'}}>•</span><span className="animate-bounce" style={{animationDelay:'0.3s'}}>•</span></span>
               }
+            </div>
+          </div>
+        )}
+
+        {/* ── "Load in Chart" chips after screener response ── */}
+        {!streaming && screenerChips && screenerChips.stocks?.length > 0 && onLoadStock && (
+          <div className="ml-6 mt-1 mb-1">
+            <p className="text-[7.5px] text-zinc-600 mb-1.5">
+              Chart mein load karo →
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {screenerChips.stocks.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => onLoadStock(s.sym)}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-700 hover:border-amber-500/60 bg-zinc-900 hover:bg-amber-500/10 transition-all group"
+                  title={`Load ${s.sym} in chart`}
+                >
+                  <span className="text-[8px] font-bold text-zinc-300 group-hover:text-amber-400">{s.sym}</span>
+                  <span className={`text-[7px] ${s.chg >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {s.chg >= 0 ? '+' : ''}{s.chg?.toFixed(1)}%
+                  </span>
+                  <span className="text-[7px] text-zinc-600 group-hover:text-amber-500">↗</span>
+                </button>
+              ))}
             </div>
           </div>
         )}
