@@ -10,6 +10,17 @@ const QUICK_PROMPTS = [
   'India VIX high hone pe kya karna chahiye?',
 ];
 
+function getStockPrompts(stockSymbol) {
+  const s = stockSymbol?.toUpperCase() || 'STOCK';
+  return [
+    `${s} ka current price 52-week high/low se kitna door hai?`,
+    `${s} ke liye entry aur stop-loss level kya hona chahiye?`,
+    `${s} aaj bullish hai ya bearish? Technical analysis batao`,
+    `${s} ka support aur resistance level kya hai?`,
+    `${s} mein kya koi breakout potential hai?`,
+  ];
+}
+
 function MarkdownText({ text }) {
   const html = text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -25,7 +36,7 @@ function MarkdownText({ text }) {
   return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export default function VibeResearchPanel() {
+export default function VibeResearchPanel({ selectedStock = null }) {
   const [sessions,    setSessions]    = useState([]);      // [{id, title, messages}]
   const [activeSess,  setActiveSess]  = useState(null);
   const [messages,    setMessages]    = useState([]);
@@ -85,7 +96,11 @@ export default function VibeResearchPanel() {
       const resp = await fetch(`${API}/api/vibe/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: activeSess, message: userText }),
+        body: JSON.stringify({
+          session_id: activeSess,
+          message: userText,
+          stock_context: selectedStock?.symbol || selectedStock?.ticker || null,
+        }),
         signal: ctrl.signal,
       });
 
@@ -170,6 +185,20 @@ export default function VibeResearchPanel() {
         </button>
       </div>
 
+      {/* ── Selected stock context chip ─────────────────── */}
+      {selectedStock && (
+        <div className="px-3 py-1.5 border-b border-white/10 shrink-0 bg-zinc-900/60">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+            <span className="text-[8px] text-zinc-400">Live context:</span>
+            <span className="text-[8px] font-bold text-amber-400">
+              {selectedStock.symbol || selectedStock.ticker || selectedStock}
+            </span>
+            <span className="text-[7px] text-zinc-600">price · 52W high/low injected</span>
+          </div>
+        </div>
+      )}
+
       {/* ── Sessions list (if > 1) ─────────────────────── */}
       {sessions.length > 1 && (
         <div className="flex gap-1 px-2 py-1.5 border-b border-white/10 overflow-x-auto shrink-0 scrollbar-none">
@@ -203,7 +232,10 @@ export default function VibeResearchPanel() {
               <p className="text-[10px] text-zinc-500">NSE · BSE · Options · F&amp;O · Market Intel</p>
             </div>
             <div className="flex flex-col gap-1.5 w-full">
-              {QUICK_PROMPTS.map((p, i) => (
+              {(selectedStock
+                ? getStockPrompts(selectedStock?.symbol || selectedStock?.ticker || selectedStock)
+                : QUICK_PROMPTS
+              ).map((p, i) => (
                 <button
                   key={i}
                   onClick={() => sendMessage(p)}

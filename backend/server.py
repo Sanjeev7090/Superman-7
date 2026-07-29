@@ -14027,6 +14027,306 @@ _vibe_router = APIRouter(prefix="/api/vibe")
 class VibeChatRequest(BaseModel):
     session_id: str
     message: str
+    stock_context: Optional[str] = None   # currently selected stock symbol from frontend
+
+
+# ── Nifty 50 + popular F&O stock keyword map ──────────────────────────────────
+# Maps every common name/alias → yfinance .NS ticker
+_VIBE_STOCK_MAP: Dict[str, str] = {
+    # Nifty 50 heavyweights
+    "RELIANCE": "RELIANCE.NS", "RIL": "RELIANCE.NS",
+    "TCS": "TCS.NS", "TATA CONSULTANCY": "TCS.NS",
+    "HDFCBANK": "HDFCBANK.NS", "HDFC BANK": "HDFCBANK.NS", "HDFC": "HDFCBANK.NS",
+    "ICICIBANK": "ICICIBANK.NS", "ICICI BANK": "ICICIBANK.NS", "ICICI": "ICICIBANK.NS",
+    "INFY": "INFY.NS", "INFOSYS": "INFY.NS",
+    "HINDUNILVR": "HINDUNILVR.NS", "HUL": "HINDUNILVR.NS", "HINDUSTAN UNILEVER": "HINDUNILVR.NS",
+    "ITC": "ITC.NS",
+    "SBIN": "SBIN.NS", "SBI": "SBIN.NS", "STATE BANK": "SBIN.NS",
+    "BHARTIARTL": "BHARTIARTL.NS", "AIRTEL": "BHARTIARTL.NS", "BHARTI": "BHARTIARTL.NS",
+    "KOTAKBANK": "KOTAKBANK.NS", "KOTAK": "KOTAKBANK.NS", "KOTAK BANK": "KOTAKBANK.NS",
+    "LT": "LT.NS", "L&T": "LT.NS", "LARSEN": "LT.NS",
+    "AXISBANK": "AXISBANK.NS", "AXIS": "AXISBANK.NS", "AXIS BANK": "AXISBANK.NS",
+    "WIPRO": "WIPRO.NS",
+    "MARUTI": "MARUTI.NS", "MARUTI SUZUKI": "MARUTI.NS",
+    "ASIANPAINT": "ASIANPAINT.NS", "ASIAN PAINT": "ASIANPAINT.NS", "ASIAN PAINTS": "ASIANPAINT.NS",
+    "TITAN": "TITAN.NS",
+    "NESTLEIND": "NESTLEIND.NS", "NESTLE": "NESTLEIND.NS",
+    "ULTRACEMCO": "ULTRACEMCO.NS", "ULTRATECH": "ULTRACEMCO.NS", "ULTRATECH CEMENT": "ULTRACEMCO.NS",
+    "BAJFINANCE": "BAJFINANCE.NS", "BAF": "BAJFINANCE.NS", "BAJAJ FINANCE": "BAJFINANCE.NS",
+    "BAJAJFINSV": "BAJAJFINSV.NS", "BAJAJ FINSERV": "BAJAJFINSV.NS",
+    "POWERGRID": "POWERGRID.NS", "POWER GRID": "POWERGRID.NS",
+    "NTPC": "NTPC.NS",
+    "ONGC": "ONGC.NS",
+    "TECHM": "TECHM.NS", "TECH MAHINDRA": "TECHM.NS",
+    "HCLTECH": "HCLTECH.NS", "HCL": "HCLTECH.NS", "HCL TECH": "HCLTECH.NS",
+    "SUNPHARMA": "SUNPHARMA.NS", "SUN PHARMA": "SUNPHARMA.NS",
+    "DRREDDY": "DRREDDY.NS", "DR REDDY": "DRREDDY.NS", "DRL": "DRREDDY.NS",
+    "CIPLA": "CIPLA.NS",
+    "DIVISLAB": "DIVISLAB.NS", "DIVI": "DIVISLAB.NS", "DIVI'S": "DIVISLAB.NS",
+    "APOLLOHOSP": "APOLLOHOSP.NS", "APOLLO": "APOLLOHOSP.NS", "APOLLO HOSPITALS": "APOLLOHOSP.NS",
+    "EICHERMOT": "EICHERMOT.NS", "EICHER": "EICHERMOT.NS", "ROYAL ENFIELD": "EICHERMOT.NS",
+    "TATAMOTORS": "TATAMOTORS.NS", "TATA MOTORS": "TATAMOTORS.NS",
+    "TATASTEEL": "TATASTEEL.NS", "TATA STEEL": "TATASTEEL.NS",
+    "JSWSTEEL": "JSWSTEEL.NS", "JSW": "JSWSTEEL.NS", "JSW STEEL": "JSWSTEEL.NS",
+    "HINDALCO": "HINDALCO.NS",
+    "COALINDIA": "COALINDIA.NS", "COAL INDIA": "COALINDIA.NS",
+    "INDUSINDBK": "INDUSINDBK.NS", "INDUSIND": "INDUSINDBK.NS", "INDUSIND BANK": "INDUSINDBK.NS",
+    "M&M": "M&M.NS", "MAHINDRA": "M&M.NS", "M AND M": "M&M.NS",
+    "HEROMOTOCO": "HEROMOTOCO.NS", "HERO": "HEROMOTOCO.NS", "HERO MOTO": "HEROMOTOCO.NS",
+    "BPCL": "BPCL.NS",
+    "GRASIM": "GRASIM.NS",
+    "ADANIPORTS": "ADANIPORTS.NS", "ADANI PORTS": "ADANIPORTS.NS",
+    "ADANIENT": "ADANIENT.NS", "ADANI ENT": "ADANIENT.NS", "ADANI ENTERPRISES": "ADANIENT.NS",
+    "ADANIGREEN": "ADANIGREEN.NS", "ADANI GREEN": "ADANIGREEN.NS",
+    "ADANIPOWER": "ADANIPOWER.NS", "ADANI POWER": "ADANIPOWER.NS",
+    "TATACONSUM": "TATACONSUM.NS", "TATA CONSUMER": "TATACONSUM.NS",
+    "SBILIFE": "SBILIFE.NS", "SBI LIFE": "SBILIFE.NS",
+    "HDFCLIFE": "HDFCLIFE.NS", "HDFC LIFE": "HDFCLIFE.NS",
+    "ICICIPRULI": "ICICIPRULI.NS", "ICICI PRU": "ICICIPRULI.NS",
+    # Popular F&O midcaps
+    "ZOMATO": "ZOMATO.NS",
+    "PAYTM": "PAYTM.NS", "ONE97": "PAYTM.NS",
+    "NYKAA": "NYKAA.NS", "FSN": "NYKAA.NS",
+    "DMART": "DMART.NS", "AVENUE SUPERMARTS": "DMART.NS",
+    "PIDILITIND": "PIDILITIND.NS", "PIDILITE": "PIDILITIND.NS",
+    "SIEMENS": "SIEMENS.NS",
+    "ABB": "ABB.NS",
+    "HAVELLS": "HAVELLS.NS",
+    "VOLTAS": "VOLTAS.NS",
+    "BANKBARODA": "BANKBARODA.NS", "BOB": "BANKBARODA.NS", "BANK OF BARODA": "BANKBARODA.NS",
+    "PNB": "PNB.NS", "PUNJAB NATIONAL": "PNB.NS",
+    "CANBK": "CANBK.NS", "CANARA": "CANBK.NS", "CANARA BANK": "CANBK.NS",
+    "FEDERALBNK": "FEDERALBNK.NS", "FEDERAL BANK": "FEDERALBNK.NS",
+    "IDFCFIRSTB": "IDFCFIRSTB.NS", "IDFC FIRST": "IDFCFIRSTB.NS",
+    "BANDHANBNK": "BANDHANBNK.NS", "BANDHAN": "BANDHANBNK.NS",
+    "JUBLFOOD": "JUBLFOOD.NS", "JUBILANT": "JUBLFOOD.NS",
+    "MUTHOOTFIN": "MUTHOOTFIN.NS", "MUTHOOT": "MUTHOOTFIN.NS",
+    "CHOLAFIN": "CHOLAFIN.NS", "CHOLA": "CHOLAFIN.NS",
+    "MOTHERSON": "MOTHERSON.NS",
+    "BALKRISIND": "BALKRISIND.NS", "BKT": "BALKRISIND.NS",
+    "GMRINFRA": "GMRINFRA.NS", "GMR": "GMRINFRA.NS",
+    "IPCALAB": "IPCALAB.NS", "IPCA": "IPCALAB.NS",
+    "AUROPHARMA": "AUROPHARMA.NS", "AUROBINDO": "AUROPHARMA.NS",
+    "LUPIN": "LUPIN.NS",
+    "TORNTPHARM": "TORNTPHARM.NS", "TORRENT PHARMA": "TORNTPHARM.NS",
+    "LICI": "LICI.NS", "LIC": "LICI.NS",
+}
+
+
+def _detect_stocks_in_message(text: str) -> list:
+    """
+    Scan message for known stock names/tickers.
+    Returns list of unique .NS yfinance tickers (max 5).
+    """
+    import re as _re
+    text_upper = text.upper()
+    found: Dict[str, bool] = {}
+    for keyword, ticker in _VIBE_STOCK_MAP.items():
+        pattern = r'\b' + _re.escape(keyword) + r'\b'
+        if _re.search(pattern, text_upper):
+            found[ticker] = True
+        if len(found) >= 5:
+            break
+    return list(found.keys())
+
+
+# ── Nifty 50 screening universe (45 liquid stocks) ────────────────────────────
+_SCREEN_UNIVERSE = [
+    "RELIANCE.NS","TCS.NS","HDFCBANK.NS","ICICIBANK.NS","INFY.NS",
+    "HINDUNILVR.NS","ITC.NS","SBIN.NS","BHARTIARTL.NS","KOTAKBANK.NS",
+    "LT.NS","AXISBANK.NS","WIPRO.NS","MARUTI.NS","ASIANPAINT.NS",
+    "TITAN.NS","NESTLEIND.NS","ULTRACEMCO.NS","BAJFINANCE.NS","BAJAJFINSV.NS",
+    "POWERGRID.NS","NTPC.NS","ONGC.NS","TECHM.NS","HCLTECH.NS",
+    "SUNPHARMA.NS","DRREDDY.NS","CIPLA.NS","DIVISLAB.NS","APOLLOHOSP.NS",
+    "EICHERMOT.NS","TATASTEEL.NS","JSWSTEEL.NS","HINDALCO.NS","COALINDIA.NS",
+    "INDUSINDBK.NS","M&M.NS","HEROMOTOCO.NS","BPCL.NS","GRASIM.NS",
+    "ADANIPORTS.NS","ADANIENT.NS","TATACONSUM.NS","ZOMATO.NS","DMART.NS",
+]
+
+
+def _detect_screener_intent(text: str):
+    """
+    Detect if user is asking for a stock screener (not a specific stock).
+    Returns (intent_key, label) or (None, None).
+    """
+    import re as _re
+    t = text.lower()
+    patterns = [
+        (r'52.?w(eek)?.*(low|bottom|dip|near|close)',          "near_52w_low",     "Near 52-Week Low"),
+        (r'(near|close|almost|touch).*(52|yearly).*(low)',      "near_52w_low",     "Near 52-Week Low"),
+        (r'52.?w(eek)?.*(high|top|peak|break)',                 "near_52w_high",    "Near 52-Week High"),
+        (r'(near|close|almost|touch).*(52|yearly).*(high)',     "near_52w_high",    "Near 52-Week High"),
+        (r'breakout',                                           "breakout",         "Breakout Stocks"),
+        (r'break\s*out',                                        "breakout",         "Breakout Stocks"),
+        (r'rsi.*(oversold|below|low|30|40)',                    "rsi_oversold",     "RSI Oversold (<35)"),
+        (r'oversold',                                           "rsi_oversold",     "RSI Oversold (<35)"),
+        (r'rsi.*(overbought|above|high|70|80)',                 "rsi_overbought",   "RSI Overbought (>70)"),
+        (r'overbought',                                         "rsi_overbought",   "RSI Overbought (>70)"),
+        (r'(top|best).*(gainer|perform|return|up)',             "top_gainers",      "Top Yearly Gainers"),
+        (r'(gainer|gainers)',                                   "top_gainers",      "Top Yearly Gainers"),
+        (r'(top|worst).*(loser|fall|down|crash|decline)',       "top_losers",       "Top Yearly Losers"),
+        (r'(loser|losers|fallen)',                              "top_losers",       "Top Yearly Losers"),
+        (r'(momentum|trending|strong)',                         "momentum",         "Momentum Stocks"),
+        (r'(value|cheap|undervalued|discount)',                 "near_52w_low",     "Near 52-Week Low"),
+        (r'(consolidat|range.?bound|sideways)',                 "consolidation",    "Consolidation / Range-Bound"),
+        (r'(above.*(50|200).*(dma|ema|ma)|ma.*(cross|break))', "above_200dma",     "Above 200-DMA Stocks"),
+        (r'(200.dma|200.day|200 day)',                          "above_200dma",     "Above 200-DMA Stocks"),
+    ]
+    for pattern, intent, label in patterns:
+        if _re.search(pattern, t):
+            return intent, label
+    return None, None
+
+
+def _calc_rsi(closes, period: int = 14) -> float:
+    """Return last RSI value from a list/series of closing prices."""
+    if len(closes) < period + 1:
+        return 50.0
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains  = [max(d, 0) for d in deltas]
+    losses = [abs(min(d, 0)) for d in deltas]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return round(100 - 100 / (1 + rs), 1)
+
+
+async def _run_stock_screener(intent: str, label: str) -> str:
+    """
+    Screen _SCREEN_UNIVERSE for stocks matching the intent.
+    Returns formatted text block for VIBE context injection.
+    """
+    import yfinance as _yf4
+    loop = asyncio.get_event_loop()
+    needs_rsi = intent in ("rsi_oversold", "rsi_overbought")
+
+    def _sync_screen():
+        results = []
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _fetch_one(ticker):
+            try:
+                t  = _yf4.Ticker(ticker)
+                fi = t.fast_info
+                sym   = ticker.replace(".NS", "")
+                price = round(float(fi.last_price), 2)
+                prev  = round(float(fi.previous_close or price), 2)
+                y_hi  = round(float(fi.year_high), 2)
+                y_lo  = round(float(fi.year_low), 2)
+                chg_y = round(float(fi.year_change or 0) * 100, 1)
+                dma50 = round(float(fi.fifty_day_average or price), 2)
+                dma200= round(float(fi.two_hundred_day_average or price), 2)
+                dist_hi = round((y_hi - price) / y_hi * 100, 1) if y_hi else 99
+                dist_lo = round((price - y_lo) / price * 100, 1) if y_lo else 99
+                rsi = 50.0
+                if needs_rsi:
+                    hist = t.history(period="2mo", interval="1d", auto_adjust=True, progress=False)
+                    if len(hist) >= 15:
+                        rsi = _calc_rsi(list(hist["Close"]))
+                return {
+                    "sym": sym, "price": price, "prev": prev,
+                    "y_hi": y_hi, "y_lo": y_lo, "chg_y": chg_y,
+                    "dist_hi": dist_hi, "dist_lo": dist_lo,
+                    "dma50": dma50, "dma200": dma200, "rsi": rsi,
+                }
+            except Exception:
+                return None
+
+        workers = 8 if not needs_rsi else 5
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(_fetch_one, t): t for t in _SCREEN_UNIVERSE}
+            for fut in as_completed(futures):
+                r = fut.result()
+                if r:
+                    results.append(r)
+        return results
+
+    timeout = 20.0 if not needs_rsi else 35.0
+    try:
+        raw = await asyncio.wait_for(loop.run_in_executor(None, _sync_screen), timeout=timeout)
+    except Exception:
+        raw = []
+
+    if not raw:
+        return f"\n[SCREENER: {label}]\nData unavailable right now.\n"
+
+    # ── Apply filter ──────────────────────────────────────────────
+    if intent == "near_52w_low":
+        filtered = sorted([r for r in raw if r["dist_lo"] <= 12], key=lambda x: x["dist_lo"])
+    elif intent == "near_52w_high":
+        filtered = sorted([r for r in raw if r["dist_hi"] <= 5], key=lambda x: x["dist_hi"])
+    elif intent == "breakout":
+        filtered = sorted([r for r in raw if r["dist_hi"] <= 3], key=lambda x: x["dist_hi"])
+    elif intent == "rsi_oversold":
+        filtered = sorted([r for r in raw if r["rsi"] < 35], key=lambda x: x["rsi"])
+    elif intent == "rsi_overbought":
+        filtered = sorted([r for r in raw if r["rsi"] > 70], key=lambda x: x["rsi"], reverse=True)
+    elif intent == "top_gainers":
+        filtered = sorted(raw, key=lambda x: x["chg_y"], reverse=True)[:10]
+    elif intent == "top_losers":
+        filtered = sorted(raw, key=lambda x: x["chg_y"])[:10]
+    elif intent == "momentum":
+        filtered = sorted(
+            [r for r in raw if r["price"] > r["dma50"] and r["price"] > r["dma200"] and r["chg_y"] > 10],
+            key=lambda x: x["chg_y"], reverse=True,
+        )
+    elif intent == "consolidation":
+        filtered = sorted(
+            [r for r in raw if abs(r["chg_y"]) < 5 and r["dist_hi"] < 25 and r["dist_lo"] < 25],
+            key=lambda x: abs(x["chg_y"]),
+        )
+    elif intent == "above_200dma":
+        filtered = sorted(
+            [r for r in raw if r["price"] > r["dma200"]],
+            key=lambda x: ((x["price"] - x["dma200"]) / x["dma200"]), reverse=True,
+        )[:12]
+    else:
+        filtered = raw[:10]
+
+    if not filtered:
+        return f"\n[SCREENER: {label}]\nNo stocks match this filter in the Nifty 50 universe right now.\n"
+
+    lines = [f"\n[SCREENER RESULTS — {label}]  ({len(filtered)} stocks found in Nifty 50 universe)"]
+    for r in filtered[:12]:
+        if intent in ("rsi_oversold", "rsi_overbought"):
+            lines.append(
+                f"  {r['sym']}: ₹{r['price']:,.0f}  RSI={r['rsi']}"
+                f"  | 52W: ₹{r['y_lo']:,.0f}–₹{r['y_hi']:,.0f}"
+                f"  | 1Y chg: {r['chg_y']:+.1f}%"
+            )
+        elif intent in ("near_52w_low", "near_52w_high", "breakout"):
+            lines.append(
+                f"  {r['sym']}: ₹{r['price']:,.0f}"
+                f"  | {r['dist_lo']:.1f}% above 52W-Low  /  {r['dist_hi']:.1f}% below 52W-High"
+                f"  | 1Y chg: {r['chg_y']:+.1f}%"
+            )
+        elif intent in ("top_gainers", "top_losers"):
+            lines.append(
+                f"  {r['sym']}: ₹{r['price']:,.0f}  1Y chg: {r['chg_y']:+.1f}%"
+                f"  | 52W: ₹{r['y_lo']:,.0f}–₹{r['y_hi']:,.0f}"
+            )
+        elif intent == "momentum":
+            above50 = round((r["price"] - r["dma50"]) / r["dma50"] * 100, 1)
+            above200 = round((r["price"] - r["dma200"]) / r["dma200"] * 100, 1)
+            lines.append(
+                f"  {r['sym']}: ₹{r['price']:,.0f}  1Y chg: {r['chg_y']:+.1f}%"
+                f"  | +{above50}% vs 50DMA  | +{above200}% vs 200DMA"
+            )
+        elif intent == "above_200dma":
+            above200 = round((r["price"] - r["dma200"]) / r["dma200"] * 100, 1)
+            lines.append(
+                f"  {r['sym']}: ₹{r['price']:,.0f}  +{above200}% above 200DMA (₹{r['dma200']:,.0f})"
+                f"  | 1Y chg: {r['chg_y']:+.1f}%"
+            )
+        else:
+            lines.append(f"  {r['sym']}: ₹{r['price']:,.0f}  1Y chg: {r['chg_y']:+.1f}%")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _get_or_create_vibe_chat(session_id: str) -> LlmChat:
@@ -14040,10 +14340,11 @@ def _get_or_create_vibe_chat(session_id: str) -> LlmChat:
     return _VIBE_SESSIONS[session_id]
 
 
-async def _fetch_vibe_market_context() -> str:
+async def _fetch_vibe_market_context(extra_stock_tickers: list = None) -> str:
     """
     Fetch live market snapshot to inject into Vibe agent context.
     Gathers: NIFTY50, BANKNIFTY, SENSEX, FINNIFTY, India VIX, session status.
+    Also fetches individual stock data if extra_stock_tickers provided.
     Times out gracefully — returns partial data on failure.
     """
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
@@ -14094,6 +14395,45 @@ async def _fetch_vibe_market_context() -> str:
     except Exception:
         pass
 
+    # ── Individual stock snapshots ─────────────────────────────────
+    stock_rows: dict = {}
+    if extra_stock_tickers:
+        def _sync_fetch_stocks(tickers: list):
+            import yfinance as _yf3
+            result = {}
+            for ticker in tickers[:5]:   # max 5 stocks
+                try:
+                    t  = _yf3.Ticker(ticker)
+                    fi = t.fast_info
+                    price   = round(float(fi.last_price), 2)
+                    prev    = round(float(fi.previous_close), 2)
+                    chg     = round((price - prev) / prev * 100, 2) if prev else 0.0
+                    w52_hi  = round(float(fi.year_high), 2)
+                    w52_lo  = round(float(fi.year_low), 2)
+                    day_hi  = round(float(fi.day_high or price), 2)
+                    day_lo  = round(float(fi.day_low or price), 2)
+                    mcap    = fi.market_cap
+                    symbol  = ticker.replace(".NS", "").replace(".BO", "")
+                    dist_hi = round((w52_hi - price) / w52_hi * 100, 1) if w52_hi else 0
+                    dist_lo = round((price - w52_lo) / price * 100, 1) if w52_lo else 0
+                    result[symbol] = {
+                        "price": price, "prev": prev, "chg_pct": chg,
+                        "day_high": day_hi, "day_low": day_lo,
+                        "w52_high": w52_hi, "w52_low": w52_lo,
+                        "dist_from_52h": dist_hi, "dist_from_52l": dist_lo,
+                        "mcap_cr": round(mcap / 1e7, 0) if mcap else None,
+                    }
+                except Exception:
+                    pass
+            return result
+        try:
+            stock_rows = await asyncio.wait_for(
+                loop.run_in_executor(None, _sync_fetch_stocks, extra_stock_tickers),
+                timeout=12.0,
+            )
+        except Exception:
+            pass
+
     # ── Session status ─────────────────────────────────────────────
     h, m = now_ist.hour, now_ist.minute
     total_min = h * 60 + m
@@ -14118,6 +14458,21 @@ async def _fetch_vibe_market_context() -> str:
         sentiment = "Low Fear" if vix_val < 13 else "Moderate Fear" if vix_val < 20 else "High Fear / Panic"
         lines.append(f"  India VIX: {vix_val}  ({sentiment})")
 
+    if stock_rows:
+        lines.append("")
+        lines.append("[INDIVIDUAL STOCK DATA]")
+        for sym, d in stock_rows.items():
+            arrow = "▲" if d["chg_pct"] >= 0 else "▼"
+            sign  = "+" if d["chg_pct"] >= 0 else ""
+            mcap_str = f"  MCap: ₹{d['mcap_cr']:,.0f}Cr" if d["mcap_cr"] else ""
+            lines.append(
+                f"  {sym}: ₹{d['price']:,.2f}  {arrow} {sign}{d['chg_pct']}%"
+                f"  | Day: ₹{d['day_low']:,.2f} – ₹{d['day_high']:,.2f}"
+                f"  | 52W: ₹{d['w52_low']:,.2f} – ₹{d['w52_high']:,.2f}"
+                f"  ({d['dist_from_52h']}% below 52W-High  /  {d['dist_from_52l']}% above 52W-Low)"
+                f"{mcap_str}"
+            )
+
     lines.append("")
     return "\n".join(lines)
 
@@ -14129,11 +14484,34 @@ async def vibe_chat(req: VibeChatRequest):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
-    # Fetch live context (non-blocking — partial data is fine)
-    market_ctx = await _fetch_vibe_market_context()
+    # ── 1. Screener intent detection (runs in parallel with market ctx) ──────
+    screener_intent, screener_label = _detect_screener_intent(req.message)
 
-    # Augment user message with live market snapshot
-    augmented = f"{market_ctx}\nUser question: {req.message}"
+    # ── 2. Collect individual stock tickers to enrich context ───────────────
+    detected = _detect_stocks_in_message(req.message)
+    if req.stock_context:
+        sc = req.stock_context.strip().upper()
+        if not sc.endswith(".NS") and not sc.endswith(".BO"):
+            sc_ticker = _VIBE_STOCK_MAP.get(sc, sc + ".NS")
+        else:
+            sc_ticker = sc
+        if sc_ticker not in detected:
+            detected.insert(0, sc_ticker)
+    extra_tickers = detected[:5]
+
+    # ── 3. Fetch market context + screener results concurrently ─────────────
+    tasks = [
+        _fetch_vibe_market_context(extra_stock_tickers=extra_tickers if extra_tickers else None),
+    ]
+    if screener_intent:
+        tasks.append(_run_stock_screener(screener_intent, screener_label))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    market_ctx     = results[0] if not isinstance(results[0], Exception) else "[LIVE MARKET DATA]\nUnavailable\n"
+    screener_block = results[1] if len(results) > 1 and not isinstance(results[1], Exception) else ""
+
+    # ── 4. Build augmented message ───────────────────────────────────────────
+    augmented = f"{market_ctx}{screener_block}\nUser question: {req.message}"
 
     chat = _get_or_create_vibe_chat(req.session_id)
 

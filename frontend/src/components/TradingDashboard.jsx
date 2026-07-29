@@ -843,7 +843,7 @@ const TradingDashboard = () => {
 
             {activeTab === 'vibe' && (
               <div className="h-full flex flex-col">
-                <VibeResearchPanel />
+                <VibeResearchPanel selectedStock={selectedStock} />
               </div>
             )}
           </div>
