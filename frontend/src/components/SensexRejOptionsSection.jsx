@@ -286,6 +286,14 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
   const best      = top[0] || null;
   const rr        = pick?.rr_info || null;
 
+  // ── Strict gate: show pick only if flow score ≥ 3 (all 4 or at most 1 missing) ──
+  const flowScore   = isBuy ? (flowData?.call_buy?.score ?? 0) : (flowData?.put_buy?.score ?? 0);
+  const flowPasses  = flowScore >= 3;
+  const failedCount = 4 - flowScore;
+  const failedItems = isBuy
+    ? Object.values(flowData?.call_buy?.criteria || {}).filter(c => !c.pass).map(c => c.label)
+    : Object.values(flowData?.put_buy?.criteria  || {}).filter(c => !c.pass).map(c => c.label);
+
   return (
     <div className="border-t border-zinc-800/60">
       {/* Header */}
@@ -392,8 +400,37 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
                 </div>
               </div>
 
-              {/* Option pick card */}
-              {pick && (
+              {/* ── Strict gate: show pick only if flow score ≥ 3 ── */}
+              {flowData && !flowPasses && (
+                <div className="rounded-lg px-3 py-2.5 space-y-1.5"
+                  style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.20)' }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-black text-red-400 uppercase tracking-wider">
+                      Flow Criteria Fail — {flowScore}/4 pass
+                    </span>
+                    <span className="text-[7px] px-1.5 py-0.5 rounded font-bold"
+                      style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.30)' }}>
+                      {failedCount} parameter{failedCount > 1 ? 's' : ''} missing
+                    </span>
+                  </div>
+                  <div className="text-[8px] text-zinc-400 leading-snug">
+                    Pick tab show hoga jab <span className="text-white font-bold">minimum 3/4 criteria</span> pass ho (strict 4/4 ya 1 parameter kam).
+                  </div>
+                  {failedItems.length > 0 && (
+                    <div className="space-y-0.5">
+                      {failedItems.map((lbl, i) => (
+                        <div key={i} className="flex items-center gap-1.5 text-[7.5px]">
+                          <span className="text-red-400 font-bold">✗</span>
+                          <span className="text-zinc-500">{lbl}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Option pick card — only when flow ≥ 3/4 */}
+              {flowPasses && pick && (
                 <div className="rounded border" style={{ borderColor: `${accentCol}33` }}>
                   <div className="flex items-center justify-between px-2 py-1.5 border-b" style={{ borderColor: `${accentCol}22` }}>
                     <div className="flex items-center gap-1.5">
@@ -403,6 +440,10 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
                       <span className="text-[7px] px-1 rounded text-zinc-500"
                         style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
                         ATM ±200 pts
+                      </span>
+                      <span className="text-[7px] font-bold px-1.5 py-0.5 rounded"
+                        style={{ background: 'rgba(34,197,94,0.10)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}>
+                        {flowScore}/4 ✓
                       </span>
                     </div>
                     <span className="text-[8px] text-zinc-500">
