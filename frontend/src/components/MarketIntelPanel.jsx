@@ -729,25 +729,99 @@ function CrudeSupplyCard({ brent, brentChgPct, usdinr, usdinrChgPct, geoRisk, C,
       {/* ── Expanded content ──────────────────────────────────────────────── */}
       {expanded && (
         <>
-          {/* Trading Rules */}
+          {/* Current Live Status */}
+          <div className="px-4 py-3" style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="text-[8px] uppercase tracking-wider font-bold" style={{ color: C.textMuted }}>
+                Current Live Status
+              </div>
+              <span className="text-[7px] px-1.5 py-0.5 rounded-full font-bold"
+                style={{ color: '#94a3b8', background: 'rgba(148,163,184,0.1)', border: '1px solid rgba(148,163,184,0.2)' }}>
+                Latest Available
+              </span>
+            </div>
+            {/* Header row */}
+            <div className="grid text-[7px] uppercase tracking-wider px-2 mb-1"
+              style={{ gridTemplateColumns: '1.8fr 2fr 1.2fr', color: C.textMuted }}>
+              <span>Indicator</span><span>Latest Data</span><span>Status</span>
+            </div>
+            <div className="space-y-1">
+              {[
+                {
+                  indicator: 'India Crude Inventory',
+                  data:       '~104 million barrels (end of June)',
+                  status:     'Near 1-yr High (Rising)',
+                  sColor:     '#f97316',
+                  dot:        '#f97316',
+                },
+                {
+                  indicator: 'US EIA Crude Inventories',
+                  data:       '−7.167 mb (week ended 24 Jul)',
+                  status:     'Falling (Draw)',
+                  sColor:     '#ef4444',
+                  dot:        '#ef4444',
+                },
+                {
+                  indicator: 'Brent Crude Price',
+                  data:       `~$87.9 – $90${brent ? ` (live $${brent?.toFixed(1)})` : ''}`,
+                  status:     'Elevated',
+                  sColor:     '#f97316',
+                  dot:        '#f97316',
+                },
+                {
+                  indicator: 'Trend (India vs US)',
+                  data:       'India stocks ↑ · US stocks ↓',
+                  status:     'Cautious',
+                  sColor:     '#f59e0b',
+                  dot:        '#f59e0b',
+                },
+              ].map((row, i) => (
+                <div key={i} className="grid items-center rounded-lg px-2 py-1.5 text-[8px]"
+                  style={{
+                    gridTemplateColumns: '1.8fr 2fr 1.2fr',
+                    background: i % 2 === 0
+                      ? (isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)')
+                      : 'transparent',
+                    border: `1px solid ${C.borderSubtle}`,
+                  }}>
+                  <span className="font-medium" style={{ color: C.textPrimary }}>{row.indicator}</span>
+                  <span style={{ color: C.textSecond }}>{row.data}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: row.dot }} />
+                    <span className="font-bold text-[7.5px]" style={{ color: row.sColor }}>{row.status}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Trading Logic table */}
           <div className="px-4 py-3" style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
             <div className="text-[8px] uppercase tracking-wider font-bold mb-2" style={{ color: C.textMuted }}>
-              Trading Logic (Nifty ke liye)
+              Trading Logic (Nifty 50 ke liye)
             </div>
-            <div className="space-y-1.5">
+            {/* Column headers */}
+            <div className="grid text-[7px] uppercase tracking-wider px-2 mb-1"
+              style={{ gridTemplateColumns: '1.6fr 1.3fr 1.3fr 1.4fr', color: C.textMuted }}>
+              <span>Situation</span><span>Crude Effect</span><span>Nifty Bias</span><span>Action</span>
+            </div>
+            <div className="space-y-1">
               {[
-                { num: '1', rule: 'Crude Inventory Rising (Supply ↑)', detail: 'Crude soft → Nifty ke liye supportive → Long / Call Buy bias', color: '#22c55e' },
-                { num: '2', rule: 'Crude Inventory Falling (Supply ↓)', detail: 'Crude strong → Nifty pe pressure → Short / Put Buy ya hedge', color: '#ef4444' },
-                { num: '3', rule: 'Extra Confirmation — teeno align karo', detail: 'Brent/WTI trend + USDINR direction + Global risk sentiment — sabko dekho, tabhi strong signal', color: '#f59e0b' },
-              ].map(r => (
-                <div key={r.num} className="flex items-start gap-2 rounded-lg px-2.5 py-1.5"
-                  style={{ background: `${r.color}08`, border: `1px solid ${r.color}25` }}>
-                  <span className="w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-black shrink-0"
-                    style={{ background: r.color, color: '#000' }}>{r.num}</span>
-                  <div>
-                    <div className="text-[9px] font-bold" style={{ color: r.color }}>{r.rule}</div>
-                    <div className="text-[8px] mt-0.5" style={{ color: C.textSecond }}>{r.detail}</div>
-                  </div>
+                { sit: 'Inventory Rising (Supply ↑)', crude: 'Crude soft',    nifty: 'Supportive / Bullish', action: 'Long / Call Buy',      bg: '#22c55e', ac: '#22c55e' },
+                { sit: 'Inventory Falling (Supply ↓)', crude: 'Crude strong', nifty: 'Pressure / Bearish',  action: 'Short / Put / Hedge',  bg: '#ef4444', ac: '#ef4444' },
+                { sit: 'Sudden Big Draw',               crude: 'Sharp upside', nifty: 'Strong pressure',    action: 'Cautious · Reduce',    bg: '#f97316', ac: '#f97316' },
+                { sit: 'Sudden Big Build',              crude: 'Sharp downside', nifty: 'Relief rally',     action: 'Long bias',             bg: '#22c55e', ac: '#4ade80' },
+              ].map((row, i) => (
+                <div key={i} className="grid items-center rounded-lg px-2 py-1.5 text-[8px]"
+                  style={{
+                    gridTemplateColumns: '1.6fr 1.3fr 1.3fr 1.4fr',
+                    background: `${row.bg}08`,
+                    border: `1px solid ${row.bg}22`,
+                  }}>
+                  <span className="font-medium" style={{ color: C.textPrimary }}>{row.sit}</span>
+                  <span style={{ color: '#f97316' }}>{row.crude}</span>
+                  <span style={{ color: C.textSecond }}>{row.nifty}</span>
+                  <span className="font-bold" style={{ color: row.ac }}>{row.action}</span>
                 </div>
               ))}
             </div>
