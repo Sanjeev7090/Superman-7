@@ -100,6 +100,7 @@ const TradingDashboard = () => {
   const [parityTradeSignal, setParityTradeSignal] = useState(null); // Trade signal from Parity Scanner
   const [showHybridBrain, setShowHybridBrain] = useState(false); // Hybrid Super Brain
   const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
+  const [strategyMarkers, setStrategyMarkers] = useState([]); // Strategy overlay markers from Vibe Research
   const { theme, toggleTheme } = useTheme();
   const wsRef = useRef(null);
   const rlPollRef = useRef(null);
@@ -855,6 +856,8 @@ const TradingDashboard = () => {
               <div className="h-full flex flex-col">
                 <VibeResearchPanel
                   selectedStock={selectedStock}
+                  chartBars={stockData?.bars || []}
+                  onStrategyMarkers={setStrategyMarkers}
                   onLoadStock={(sym) => {
                     // Load stock from VIBE screener into the chart
                     const ticker = sym.includes('.') ? sym : `${sym}.NS`;
@@ -884,6 +887,7 @@ const TradingDashboard = () => {
                 }
               }}
               onOpenOptionChain={(payload) => setShowOptionChain(payload)}
+              externalMarkers={strategyMarkers}
             />
           </div>
           {/* Key Indicators — Order Flow, Kronos Forecast, GannQSC, Square of 9 */}

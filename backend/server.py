@@ -15280,6 +15280,179 @@ async def vibe_chat(req: VibeChatRequest):
     )
 
 
+
+# ── Strategy Builder endpoints ──────────────────────────────────────────────
+
+_STRATEGY_CODEGEN_SYSTEM = """You are an expert Python algorithmic trading code generator.
+
+Generate ONLY executable Python code for the requested trading strategy. No markdown fences, no explanations — pure Python only.
+
+STRICT RULES:
+1. Input: `bars` — list of dicts with keys: open, high, low, close, volume, timestamp (milliseconds since epoch)
+2. Output: populate `signals` list with: {'timestamp': int_ms, 'type': 'BUY' or 'SELL', 'label': 'short_label_max_20_chars'}
+3. NO imports allowed — use only built-in Python: abs, min, max, len, range, enumerate, zip, sorted, sum, round, float, int, list, dict, str, bool
+4. Code runs in sandboxed exec() — no os, sys, subprocess, open, eval, or any I/O
+5. Always start with: signals = []
+6. Compute indicators manually (e.g. simple moving average as sum/len)
+7. Generate BUY and SELL signals at the appropriate bars
+8. Return ONLY raw Python code, nothing else — no ``` fences, no comments explaining what you're doing
+
+EXAMPLE:
+signals = []
+closes = [b['close'] for b in bars]
+window = 14
+for i in range(window, len(bars)):
+    avg = sum(closes[i-window:i]) / window
+    if closes[i] > avg and closes[i-1] <= avg:
+        signals.append({'timestamp': bars[i]['timestamp'], 'type': 'BUY', 'label': 'MA Cross'})
+    elif closes[i] < avg and closes[i-1] >= avg:
+        signals.append({'timestamp': bars[i]['timestamp'], 'type': 'SELL', 'label': 'MA Cross'})"""
+
+
+class StrategyBuildRequest(BaseModel):
+    prompt: str
+    ticker: Optional[str] = None
+
+
+class StrategyExecuteRequest(BaseModel):
+    code: str
+    bars: List[dict]
+
+
+@_vibe_router.post("/strategy-build")
+async def vibe_strategy_build(req: StrategyBuildRequest):
+    if not _EMERGENT_KEY:
+        raise HTTPException(status_code=503, detail="EMERGENT_LLM_KEY not configured")
+    if not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+
+    import uuid as _uuid
+    session_id = f"sb_{_uuid.uuid4().hex}"
+    chat = LlmChat(
+        api_key=_EMERGENT_KEY,
+        session_id=session_id,
+        system_message=_STRATEGY_CODEGEN_SYSTEM,
+    ).with_model("anthropic", "claude-sonnet-4-6")
+
+    ticker_ctx = f" for {req.ticker}" if req.ticker else ""
+    prompt = f"Strategy{ticker_ctx}: {req.prompt.strip()}"
+
+    try:
+        response: ModelResponse = await chat.send_message(UserMessage(text=prompt))
+        code = response.text if hasattr(response, "text") else str(response)
+        code = code.strip()
+        # Strip markdown fences in case LLM added them
+        if "```python" in code:
+            code = code.split("```python", 1)[1]
+        if "```" in code:
+            code = code.split("```")[0]
+        code = code.strip()
+        return {"code": code, "prompt": req.prompt}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
+
+
+@_vibe_router.post("/strategy-execute")
+async def vibe_strategy_execute(req: StrategyExecuteRequest):
+    if not req.code.strip():
+        raise HTTPException(status_code=400, detail="Code cannot be empty")
+    if not req.bars:
+        raise HTTPException(status_code=400, detail="Bars data required")
+    if len(req.bars) > 5000:
+        raise HTTPException(status_code=400, detail="Too many bars (max 5000)")
+
+    # Sanitize bars — only known numeric keys allowed
+    safe_bars = []
+    for b in req.bars:
+        try:
+            safe_bars.append({
+                'open':      float(b.get('open',  0)),
+                'high':      float(b.get('high',  0)),
+                'low':       float(b.get('low',   0)),
+                'close':     float(b.get('close', 0)),
+                'volume':    float(b.get('volume', 0)),
+                'timestamp': int(b.get('timestamp', 0)),
+            })
+        except (ValueError, TypeError):
+            continue
+
+    if not safe_bars:
+        raise HTTPException(status_code=400, detail="No valid bars after sanitization")
+
+    # Block dangerous keywords/patterns
+    _BLOCKED = [
+        'import ', '__import__', 'exec(', 'eval(', 'open(', 'os.',
+        'sys.', 'subprocess', '__builtins__', 'globals()', 'locals()',
+        '__class__', '__dict__', 'getattr(', 'setattr(', 'delattr(',
+        'compile(', 'breakpoint(', '__subclasses__',
+    ]
+    code_lower = req.code.lower()
+    for kw in _BLOCKED:
+        if kw.lower() in code_lower:
+            raise HTTPException(status_code=400, detail=f"Blocked keyword in code: '{kw}'")
+
+    import builtins as _builtins
+    _SAFE_NAMES = [
+        'abs', 'all', 'any', 'bool', 'dict', 'enumerate', 'filter',
+        'float', 'int', 'isinstance', 'len', 'list', 'map', 'max',
+        'min', 'range', 'round', 'set', 'sorted', 'str', 'sum',
+        'tuple', 'type', 'zip', 'print', 'repr',
+    ]
+    safe_builtins = {n: getattr(_builtins, n) for n in _SAFE_NAMES if hasattr(_builtins, n)}
+    restricted_globals = {'__builtins__': safe_builtins}
+    restricted_locals  = {'bars': safe_bars, 'signals': []}
+
+    try:
+        loop = asyncio.get_event_loop()
+        def _run():
+            exec(req.code, restricted_globals, restricted_locals)  # noqa: S102
+        await asyncio.wait_for(loop.run_in_executor(None, _run), timeout=10.0)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=408, detail="Strategy execution timed out (max 10s)")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Execution error: {str(e)}")
+
+    raw_signals = restricted_locals.get('signals', [])
+    if not isinstance(raw_signals, list):
+        raise HTTPException(status_code=422, detail="'signals' must be a list")
+
+    # Convert to lightweight-charts marker format
+    markers = []
+    for sig in raw_signals:
+        if not isinstance(sig, dict):
+            continue
+        sig_type = str(sig.get('type', '')).upper()
+        if sig_type not in ('BUY', 'SELL'):
+            continue
+        ts = sig.get('timestamp')
+        if ts is None:
+            continue
+        try:
+            ts_sec = int(ts) // 1000
+        except (ValueError, TypeError):
+            continue
+        label = str(sig.get('label', sig_type))[:30]
+        markers.append({
+            'time':     ts_sec,
+            'position': 'belowBar' if sig_type == 'BUY' else 'aboveBar',
+            'color':    '#10B981' if sig_type == 'BUY' else '#EF4444',
+            'shape':    'arrowUp' if sig_type == 'BUY' else 'arrowDown',
+            'text':     label,
+        })
+
+    # lightweight-charts requires markers sorted by time
+    markers.sort(key=lambda m: m['time'])
+    buy_count  = sum(1 for m in markers if m['shape'] == 'arrowUp')
+    sell_count = len(markers) - buy_count
+
+    return {
+        'markers':    markers,
+        'count':      len(markers),
+        'buy_count':  buy_count,
+        'sell_count': sell_count,
+    }
+
+
 app.include_router(_vibe_router)
 
 

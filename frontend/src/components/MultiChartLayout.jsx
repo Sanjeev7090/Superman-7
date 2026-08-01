@@ -198,7 +198,7 @@ const CRYPTO_TF_MAP = {
   '6M':   { interval: 1440, days: 180 },
 };
 
-function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
+function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain, externalMarkers }) {
   const isCrypto = slot.selectedStock?.type === 'CRYPTO';
 
   const fetchData = useCallback(async (ticker, tf, dsOverride) => {
@@ -364,6 +364,7 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
             strategyData={slot.strategyData}
             tradeSignal={null}
             onOpenOptionChain={onOpenOptionChain}
+            strategyMarkers={externalMarkers}
           />
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-slate-300 dark:text-zinc-700 gap-2 select-none">
@@ -408,6 +409,7 @@ export default function MultiChartLayout({
   initialDataSource,
   onPrimaryStockChange,   // callback when slot-1 stock changes (updates left sidebar)
   onOpenOptionChain,      // callback to open OptionChainModal from any slot
+  externalMarkers,        // strategy markers from Vibe Research (applied to slot-1 only)
 }) {
   // Persist layout preference
   const [layout, setLayout] = useState(() => {
@@ -570,6 +572,7 @@ export default function MultiChartLayout({
             onUpdate={updateSlot}
             isCompact={layout > 1}
             onOpenOptionChain={onOpenOptionChain}
+            externalMarkers={slot.id === 1 ? (externalMarkers || []) : []}
           />
         ))}
       </div>

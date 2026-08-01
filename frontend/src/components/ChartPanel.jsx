@@ -1097,7 +1097,7 @@ const ChartPanel = ({
   stockData, loading, selectedStock, onPivotSelect, pivotPoint, gannFan,
   semiLogScale, setSemiLogScale, timeframe, onTimeframeChange, isCrypto,
   dataSource, onDataSourceChange, activeStrategy, strategyData, tradeSignal,
-  onOpenOptionChain,
+  onOpenOptionChain, strategyMarkers,
 }) => {
   const chartContainerRef = useRef();
   const chartRef = useRef(null);
@@ -1158,6 +1158,9 @@ const ChartPanel = ({
   const srStatsCanvasRef = useRef(null);
   const srStatsAnimRef   = useRef(null);
   const srStatsDataRef   = useRef([]);
+  // Strategy markers + EMA markers merge refs
+  const emaMarkerRef             = useRef([]);
+  const strategyMarkersLocalRef  = useRef([]);
   // MTF Market Direction — 1H / 45M / 15M
   const [mtfDirection, setMtfDirection] = useState({ '1H': null, '45M': null, '15M': null });
   const { theme } = useTheme();
@@ -2230,19 +2233,18 @@ const ChartPanel = ({
     const sig = detectEmaCross(bars, ema9, ema21, 5);
     setEmaSignal(sig);
 
-    // Drop a marker on the candlestick series at the cross bar (only the latest)
-    if (sig && candlestickSeriesRef.current) {
-      try {
-        candlestickSeriesRef.current.setMarkers([{
-          time: sig.time,
-          position: sig.type === 'BUY' ? 'belowBar' : 'aboveBar',
-          color: sig.type === 'BUY' ? '#10B981' : '#EF4444',
-          shape: sig.type === 'BUY' ? 'arrowUp' : 'arrowDown',
-          text: sig.type === 'BUY' ? 'BUY 9/21' : 'SELL 9/21',
-        }]);
-      } catch (e) { /* ignore */ }
-    } else if (candlestickSeriesRef.current) {
-      try { candlestickSeriesRef.current.setMarkers([]); } catch (e) { /* ignore */ }
+    // Update EMA marker ref and re-merge with strategy markers
+    emaMarkerRef.current = sig ? [{
+      time: sig.time,
+      position: sig.type === 'BUY' ? 'belowBar' : 'aboveBar',
+      color: sig.type === 'BUY' ? '#10B981' : '#EF4444',
+      shape: sig.type === 'BUY' ? 'arrowUp' : 'arrowDown',
+      text: sig.type === 'BUY' ? 'BUY 9/21' : 'SELL 9/21',
+    }] : [];
+    if (candlestickSeriesRef.current) {
+      const merged = [...emaMarkerRef.current, ...strategyMarkersLocalRef.current]
+        .sort((a, b) => a.time - b.time);
+      try { candlestickSeriesRef.current.setMarkers(merged); } catch (e) { /* ignore */ }
     }
   }, [stockData]);
 
@@ -2253,6 +2255,16 @@ const ChartPanel = ({
       if (ema21SeriesRef.current) ema21SeriesRef.current.applyOptions({ visible: emaActive });
     } catch (e) { /* series may be disposed */ }
   }, [emaActive]);
+
+  // ── Strategy Markers from Vibe Research ────────────────────────
+  // Merge with EMA markers and apply to candlestick series
+  useEffect(() => {
+    strategyMarkersLocalRef.current = strategyMarkers || [];
+    if (!candlestickSeriesRef.current) return;
+    const merged = [...emaMarkerRef.current, ...strategyMarkersLocalRef.current]
+      .sort((a, b) => a.time - b.time);
+    try { candlestickSeriesRef.current.setMarkers(merged); } catch (e) { /* ignore */ }
+  }, [strategyMarkers]);
 
   // ── Auto Trendlines — draw / clear on toggle, filter, or stock change ─
   useEffect(() => {
