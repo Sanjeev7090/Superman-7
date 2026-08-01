@@ -195,30 +195,127 @@ export function CrudeSupplyCard({ brent, brentChgPct, usdinr, usdinrChgPct, geoR
             </div>
           )}
         </div>
+
+        {/* ── Last Signal Order ───────────────────────────────── */}
+        {scoreHistory.length > 0 && (() => {
+          const last = scoreHistory[scoreHistory.length - 1];
+          const lColor = last.score <= -2 ? '#ef4444' : last.score === -1 ? '#f97316' : last.score === 0 ? '#94a3b8' : '#22c55e';
+          return (
+            <div className="mt-2 rounded-lg px-3 py-2 flex items-center justify-between gap-2"
+              style={{ background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.03)', border: `1px solid ${C.borderSubtle}` }}>
+              <div>
+                <div className="text-[7px] uppercase tracking-widest font-bold mb-0.5" style={{ color: C.textMuted }}>Last Signal</div>
+                <div className="text-[9px] font-black uppercase" style={{ color: lColor }}>{last.verdict}</div>
+                <div className="text-[7px] mt-0.5" style={{ color: C.textMuted }}>
+                  {new Date(last.ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 text-right">
+                <div>
+                  <div className="text-[7px]" style={{ color: C.textMuted }}>Brent</div>
+                  <div className="text-[10px] font-black font-mono" style={{ color: C.textPrimary }}>${last.brent?.toFixed(1)}</div>
+                </div>
+                <div>
+                  <div className="text-[7px]" style={{ color: C.textMuted }}>Score</div>
+                  <div className="text-[18px] font-black font-mono leading-none" style={{ color: lColor }}>
+                    {last.score > 0 ? `+${last.score}` : last.score}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {expanded && (
         <div className="px-4 py-3">
           <div className="text-[8px] uppercase tracking-wider font-bold mb-2" style={{ color: C.textMuted }}>
-            Live Data
-            {eia && !eia.available && <span className="ml-2 text-[7px] font-normal" style={{ color: '#94a3b8' }}>fallback</span>}
+            Micro Details
+            {eia && !eia.available && <span className="ml-2 text-[7px] font-normal" style={{ color: '#94a3b8' }}>fallback data</span>}
           </div>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
+            {/* EIA US Inventory */}
+            <div className="rounded-lg px-2.5 py-2"
+              style={{ background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)', border: `1px solid ${C.borderSubtle}` }}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[7.5px] font-black uppercase tracking-wider" style={{ color: C.textMuted }}>US EIA Crude Inventory (FRED)</span>
+                <span className="text-[7px] px-1.5 py-0.5 rounded-full font-bold"
+                  style={{ background: eiaSignal.color + '18', color: eiaSignal.color }}>{eia?.us_kind || '—'}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: 'Previous', value: eia ? `${eia.us_prev_mb?.toFixed(1)} mb` : '—', color: C.textSecond },
+                  { label: 'Current',  value: eia ? `${eia.us_curr_mb?.toFixed(1)} mb` : '—', color: C.textPrimary },
+                  { label: 'Change',   value: eia ? `${eia.us_change_mb > 0 ? '+' : ''}${eia.us_change_mb?.toFixed(3)} mb` : '—', color: eiaSignal.color },
+                ].map(r => (
+                  <div key={r.label} className="text-center">
+                    <div className="text-[6.5px] uppercase tracking-wider mb-0.5" style={{ color: C.textMuted }}>{r.label}</div>
+                    <div className="text-[9.5px] font-black font-mono" style={{ color: r.color }}>{r.value}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[7px] mt-1.5" style={{ color: C.textMuted }}>
+                Week of {eia?.us_date || '—'} · Data: EIA.gov / FRED
+              </div>
+            </div>
+
+            {/* India Supply */}
+            <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5"
+              style={{ background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)', border: `1px solid ${C.borderSubtle}` }}>
+              <div>
+                <div className="text-[7.5px] font-black uppercase tracking-wider" style={{ color: C.textMuted }}>India Crude Supply (PPAC)</div>
+                <div className="text-[7px] mt-0.5" style={{ color: C.textMuted }}>Data as of: {eia?.india_date || '—'}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] font-black font-mono" style={{ color: '#f97316' }}>~{eia?.india_mb} mb</div>
+                <div className="text-[7.5px] font-bold" style={{ color: '#f97316' }}>{eia?.india_status || '—'}</div>
+              </div>
+            </div>
+
+            {/* Brent + USD/INR */}
             {[
-              { label: 'US EIA (FRED)',     value: eia ? `${eia.us_change_mb > 0 ? '+' : ''}${eia.us_change_mb?.toFixed(3)} mb  (${eia.us_kind})` : '—', sub: eia ? `Week of ${eia.us_date} · Stocks ${eia.us_curr_mb?.toFixed(1)} mb` : '…', color: eiaSignal.color },
-              { label: 'India (PPAC est.)', value: eia ? `~${eia.india_mb} mb · ${eia.india_status}` : '—', sub: eia ? `Data: ${eia.india_date}` : '', color: '#f97316' },
-              { label: 'Brent Crude',       value: brent ? `$${brent.toFixed(2)}  (${brentChgPct >= 0 ? '+' : ''}${brentChgPct?.toFixed(2)}% today)` : '—', sub: brent >= 90 ? 'Above $90 — elevated zone' : brent >= 85 ? 'Caution zone $85–90' : 'Manageable zone', color: crudeSignal.color },
-              { label: 'USD/INR',           value: usdinr ? `₹${usdinr.toFixed(2)}  (${usdinrChgPct >= 0 ? '+' : ''}${usdinrChgPct?.toFixed(2)}%)` : '—', sub: usdinrSignal.detail, color: usdinrSignal.color },
+              { label: 'Brent Crude (ICE)', value: brent ? `$${brent.toFixed(2)}` : '—', chg: brentChgPct, sub: brent >= 90 ? 'Above $90 — elevated zone → Nifty pressure' : brent >= 85 ? 'Caution $85–90' : 'Manageable zone', color: crudeSignal.color },
+              { label: 'USD/INR (Forex)',   value: usdinr ? `₹${usdinr.toFixed(2)}` : '—', chg: usdinrChgPct, sub: usdinrSignal.detail, color: usdinrSignal.color },
             ].map((row, i) => (
               <div key={i} className="flex items-center justify-between rounded-lg px-2.5 py-1.5"
                 style={{ background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)', border: `1px solid ${C.borderSubtle}` }}>
-                <span className="text-[8px]" style={{ color: C.textMuted }}>{row.label}</span>
+                <div>
+                  <div className="text-[7.5px] font-black uppercase tracking-wider" style={{ color: C.textMuted }}>{row.label}</div>
+                  <div className="text-[7px] mt-0.5" style={{ color: C.textMuted }}>{row.sub}</div>
+                </div>
                 <div className="text-right">
-                  <div className="text-[8.5px] font-bold" style={{ color: row.color }}>{row.value}</div>
-                  {row.sub && <div className="text-[7px]" style={{ color: C.textMuted }}>{row.sub}</div>}
+                  <div className="text-[11px] font-black font-mono" style={{ color: row.color }}>{row.value}</div>
+                  <div className="text-[8px] font-bold font-mono" style={{ color: row.color }}>
+                    {row.chg >= 0 ? '+' : ''}{row.chg?.toFixed(2)}%
+                  </div>
                 </div>
               </div>
             ))}
+
+            {/* Score history full list */}
+            {scoreHistory.length > 0 && (
+              <div className="rounded-lg px-2.5 py-2"
+                style={{ background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)', border: `1px solid ${C.borderSubtle}` }}>
+                <div className="text-[7.5px] font-black uppercase tracking-wider mb-1.5" style={{ color: C.textMuted }}>Signal History</div>
+                <div className="space-y-1">
+                  {[...scoreHistory].reverse().slice(0, 5).map((h, i) => {
+                    const hc = h.score <= -2 ? '#ef4444' : h.score === -1 ? '#f97316' : h.score === 0 ? '#94a3b8' : '#22c55e';
+                    return (
+                      <div key={i} className="flex items-center justify-between">
+                        <span className="text-[7px]" style={{ color: C.textMuted }}>
+                          {new Date(h.ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
+                        </span>
+                        <span className="text-[7.5px] font-bold" style={{ color: hc }}>{h.verdict}</span>
+                        <span className="text-[8px] font-black font-mono w-6 text-right" style={{ color: hc }}>
+                          {h.score > 0 ? `+${h.score}` : h.score}
+                        </span>
+                        <span className="text-[7px] font-mono" style={{ color: C.textMuted }}>${h.brent?.toFixed(1)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
