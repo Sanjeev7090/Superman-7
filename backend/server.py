@@ -13765,7 +13765,6 @@ app.include_router(_bs_router)
 #   Returns: best strike(s) filtered by Greeks + OI
 # ═══════════════════════════════════════════════════════════════════
 from scipy.stats import norm as _rej_norm
-import math as _math
 
 _rej_router = APIRouter(prefix="/api/rej")
 
@@ -15312,4 +15311,33 @@ async def vibe_chat(req: VibeChatRequest):
     # ── 4. Build augmented message ───────────────────────────────────────────
     augmented = f"{market_ctx}{screener_block}\nUser question: {req.message}"
 
-    chat = _get
+    chat = _get_or_create_vibe_chat(req.session_id)
+
+    async def token_stream():
+        try:
+            if screener_stocks:
+                meta = {
+                    "type": "screener_stocks",
+                    "label": screener_label or "",
+                    "stocks": screener_stocks,
+                }
+                yield f"data: {json.dumps(meta)}\n\n"
+
+            response: ModelResponse = await chat.send_message(UserMessage(text=augmented))
+            text = response.text if hasattr(response, "text") else str(response)
+            for word in text.split(" "):
+                yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+                await asyncio.sleep(0)
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        token_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+app.include_router(_vibe_router)

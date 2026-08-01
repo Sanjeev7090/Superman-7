@@ -9,7 +9,7 @@ import time
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://trading-canvas-live.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://market-breadth-live.preview.emergentagent.com").rstrip("/")
 ENDPOINT = f"{BASE_URL}/api/stock-finder/scan"
 
 
