@@ -8,7 +8,8 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
 
 ## User Preferences
 - **Language:** Hinglish/Hindi responses
-- **NO screenshots during dev**
+- **NO screenshots** — kabhi mat lena
+- **NO testing agent** — kabhi mat chalana
 - **India-first logic** — all signals mapped to Nifty 50 impact
 
 ---
