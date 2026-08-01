@@ -14182,10 +14182,308 @@ async def rej_option_flow():
     }
 
 
+# ─── SENSEX REJ helpers ────────────────────────────────────────────────────────
+def _sensex_spot_and_change() -> dict:
+    try:
+        import yfinance as _yf
+        t = _yf.Ticker("^BSESN")
+        hist = t.history(period="3d")
+        if len(hist) >= 2:
+            prev_close = float(hist["Close"].iloc[-2])
+            curr       = float(hist["Close"].iloc[-1])
+            return {"spot": curr, "prev_close": prev_close,
+                    "change_pct": round((curr - prev_close) / prev_close * 100, 2)}
+        elif len(hist) >= 1:
+            curr = float(hist["Close"].iloc[-1])
+            return {"spot": curr, "prev_close": curr, "change_pct": 0.0}
+    except Exception:
+        pass
+    return {"spot": 82000.0, "prev_close": 82000.0, "change_pct": 0.0}
+
+
+def _india_vix_change_pct() -> float:
+    try:
+        import yfinance as _yf
+        t = _yf.Ticker("^INDIAVIX")
+        hist = t.history(period="3d")
+        if len(hist) >= 2:
+            prev = float(hist["Close"].iloc[-2])
+            curr = float(hist["Close"].iloc[-1])
+            return round((curr - prev) / prev * 100, 2) if prev > 0 else 0.0
+    except Exception:
+        pass
+    return 0.0
+
+
+@_rej_router.get("/sensex-option-flow")
+async def rej_sensex_option_flow():
+    """
+    SENSEX Option Flow — STRICT filters (Sensex lower liquidity).
+    Uses BS-derived options + VIX/Spot proxies (BSE live OI unavailable via NSE API).
+    Strict rules: CE/PE vol ≥ 1.3×, spot move ≥ 0.5%, BOTH C3 conditions, ATM ±200 pts.
+    """
+    loop = asyncio.get_event_loop()
+    try:
+        spot_data      = await asyncio.wait_for(loop.run_in_executor(None, _sensex_spot_and_change), timeout=12.0)
+        sigma          = await asyncio.wait_for(loop.run_in_executor(None, _fetch_live_india_vix), timeout=8.0)
+        vix_change_pct = await asyncio.wait_for(loop.run_in_executor(None, _india_vix_change_pct), timeout=8.0)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SENSEX data error: {e}")
+
+    spot        = spot_data["spot"]
+    spot_change = spot_data["change_pct"]
+    avg_iv      = float(round(sigma * 100, 2))
+    iv_status   = "Rising" if avg_iv > 16 else "Stable" if avg_iv >= 11 else "Falling"
+    r_rate      = 0.065
+
+    expiries = _sensex_expiry_dates(n_weeks=4)
+    nearest_expiry = expiries[0] if expiries else None
+    if not nearest_expiry:
+        raise HTTPException(status_code=503, detail="No SENSEX expiries found")
+
+    options = await loop.run_in_executor(None, _fetch_sensex_live_options, spot, sigma, nearest_expiry)
+    if not options:
+        raise HTTPException(status_code=503, detail="SENSEX option generation failed")
+
+    T_years = 7 / 365.0
+    try:
+        from datetime import date as _date, datetime as _dt2
+        exp_dt  = _dt2.strptime(nearest_expiry, "%d-%b-%Y").date()
+        T_years = max(1, (_date.today() - exp_dt).days * -1) / 365.0
+    except Exception:
+        pass
+
+    # ── Strict ATM window: ±200 pts (ATM + 1-2 OTM only) ───────────
+    ATM_BAND = 200
+    ce_all      = [o for o in options if o["type"] == "CE"]
+    pe_all      = [o for o in options if o["type"] == "PE"]
+    atm_ce      = [o for o in ce_all if abs(o["strike"] - spot) <= ATM_BAND]
+    atm_pe      = [o for o in pe_all if abs(o["strike"] - spot) <= ATM_BAND]
+    total_ce_vol = float(sum(o.get("volume", 0) for o in ce_all))
+    total_pe_vol = float(sum(o.get("volume", 0) for o in pe_all))
+    atm_ce_vol   = float(sum(o.get("volume", 0) for o in atm_ce))
+    atm_pe_vol   = float(sum(o.get("volume", 0) for o in atm_pe))
+
+    def _vanna_s(S, K, T, r, sig):
+        if sig <= 0 or T <= 0 or S <= 0 or K <= 0:
+            return 0.0
+        try:
+            d1 = (_math.log(S/K) + (r + 0.5*sig**2)*T) / (sig * _math.sqrt(T))
+            d2 = d1 - sig * _math.sqrt(T)
+            return float(round(-_rej_norm.pdf(d1) * d2 / sig, 6))
+        except Exception:
+            return 0.0
+
+    def _avg_v(lst):
+        vals = [_vanna_s(spot, o["strike"], T_years, r_rate, o.get("iv", avg_iv) / 100.0) for o in lst]
+        return float(round(sum(vals) / len(vals), 6)) if vals else 0.0
+
+    avg_vanna_ce = _avg_v(atm_ce)
+    avg_vanna_pe = _avg_v(atm_pe)
+
+    # ════════════════════════════════════════════════════════════════
+    # CALL BUY — STRICT criteria
+    # ════════════════════════════════════════════════════════════════
+
+    # C1: Future ↑ + OI proxy ≥ +1.5L + CE vol ≥ 1.3× PE vol
+    #     (OI +1.5L proxy = spot move ≥ 0.5% = high conviction move)
+    c1_spot_up     = spot_change > 0
+    c1_oi_proxy    = spot_change >= 0.5           # proxy for Future OI ≥ +1.5L
+    c1_vol_ok      = total_ce_vol >= total_pe_vol * 1.3   # strict: CE ≥ 1.3× PE
+    call_c1        = c1_spot_up and c1_oi_proxy and c1_vol_ok
+    c1d = (f"Spot +{spot_change}% {'≥0.5% ✓' if c1_oi_proxy else '<0.5% ✗'} (OI proxy) | "
+           f"CE {int(total_ce_vol//1000)}K {'≥1.3x' if c1_vol_ok else '<1.3x'} PE {int(total_pe_vol//1000)}K")
+
+    # C2: IV Rising / Stable
+    call_c2 = avg_iv >= 11
+    c2d     = f"VIX {avg_iv}% — {iv_status}"
+
+    # C3: BOTH Put Writing AND Call Unwind must pass (strict AND, not OR)
+    pw  = vix_change_pct <= -0.3        # VIX falling ≥ 0.3% = put writers active
+    cu  = spot_change >= 0.3            # Spot ↑ ≥ 0.3% = call writers covering
+    call_c3  = pw and cu               # BOTH required (strict)
+    c3d_c = (f"VIX {'+' if vix_change_pct >= 0 else ''}{vix_change_pct}% "
+             f"{'(Put Writing ✓)' if pw else '(Put Writing ✗ — need ≤-0.3%)'} | "
+             f"Spot +{spot_change}% {'(Call Unwind ✓)' if cu else '(Call Unwind ✗ — need ≥+0.3%)'}")
+
+    # C4: High Positive Vanna
+    call_c4   = avg_vanna_ce > 0
+    c4d_c     = f"ATM CE Vanna {'+' if avg_vanna_ce >= 0 else ''}{avg_vanna_ce:.4f}"
+
+    call_score  = int(sum([call_c1, call_c2, call_c3, call_c4]))
+    call_signal = "STRONG" if call_score >= 3 else "PARTIAL" if call_score == 2 else "WEAK"
+
+    # ════════════════════════════════════════════════════════════════
+    # PUT BUY — STRICT criteria
+    # ════════════════════════════════════════════════════════════════
+
+    # C1: Future ↓ + OI proxy ≥ +1.5L + PE vol ≥ 1.3× CE vol
+    p1_spot_dn  = spot_change < 0
+    p1_oi_proxy = spot_change <= -0.5             # proxy for Future OI ≥ +1.5L
+    p1_vol_ok   = total_pe_vol >= total_ce_vol * 1.3   # strict: PE ≥ 1.3× CE
+    put_c1      = p1_spot_dn and p1_oi_proxy and p1_vol_ok
+    p1d = (f"Spot {spot_change}% {'≤-0.5% ✓' if p1_oi_proxy else '>-0.5% ✗'} (OI proxy) | "
+           f"PE {int(total_pe_vol//1000)}K {'≥1.3x' if p1_vol_ok else '<1.3x'} CE {int(total_ce_vol//1000)}K")
+
+    # C2: IV Rising (stricter for put buy)
+    put_c2 = avg_iv > 14
+    p2d    = f"VIX {avg_iv}% — {iv_status}"
+
+    # C3: BOTH Call Writing AND Put Unwind must pass (strict AND)
+    cw  = vix_change_pct >= 0.3        # VIX rising ≥ 0.3% = call writers active
+    pu  = spot_change <= -0.3          # Spot ↓ ≥ 0.3% = put writers unwinding
+    put_c3  = cw and pu               # BOTH required (strict)
+    c3d_p = (f"VIX {'+' if vix_change_pct >= 0 else ''}{vix_change_pct}% "
+             f"{'(Call Writing ✓)' if cw else '(Call Writing ✗ — need ≥+0.3%)'} | "
+             f"Spot {spot_change}% {'(Put Unwind ✓)' if pu else '(Put Unwind ✗ — need ≤-0.3%)'}")
+
+    # C4: High Negative Vanna
+    put_c4 = avg_vanna_pe < 0
+    c4d_p  = f"ATM PE Vanna {'+' if avg_vanna_pe >= 0 else ''}{avg_vanna_pe:.4f}"
+
+    put_score  = int(sum([put_c1, put_c2, put_c3, put_c4]))
+    put_signal = "STRONG" if put_score >= 3 else "PARTIAL" if put_score == 2 else "WEAK"
+
+    # ── Strict recommendation: needs score ≥ 3 ──────────────────────
+    if call_score >= 3 and call_score > put_score:
+        recommended = "CALL_BUY"
+    elif put_score >= 3 and put_score > call_score:
+        recommended = "PUT_BUY"
+    else:
+        recommended = "NEUTRAL"
+
+    return {
+        "spot": float(round(spot, 2)), "spot_change": float(spot_change),
+        "expiry": str(nearest_expiry), "T_days": int(round(T_years * 365)),
+        "avg_iv": float(avg_iv), "iv_status": str(iv_status),
+        "vix_change_pct": float(vix_change_pct),
+        "total_ce_vol": int(float(total_ce_vol)), "total_pe_vol": int(float(total_pe_vol)),
+        "avg_vanna_ce": float(avg_vanna_ce), "avg_vanna_pe": float(avg_vanna_pe),
+        "recommended": str(recommended),
+        "strict_mode": True,          # flag for frontend badge
+        "is_derived":  True,
+        "call_buy": {"score": call_score, "signal": call_signal, "criteria": {
+            "future_oi_vol":           {"pass": bool(call_c1), "label": "Future ↑ · OI+1.5L · CE≥1.3×PE", "detail": str(c1d)},
+            "iv_ok":                   {"pass": bool(call_c2), "label": "IV Rising / Stable",               "detail": str(c2d)},
+            "put_writing_call_unwind": {"pass": bool(call_c3), "label": "Put Writing AND Call Unwind",       "detail": str(c3d_c)},
+            "vanna":                   {"pass": bool(call_c4), "label": "High Positive Vanna",               "detail": str(c4d_c), "value": float(avg_vanna_ce)},
+        }},
+        "put_buy": {"score": put_score, "signal": put_signal, "criteria": {
+            "future_oi_vol":           {"pass": bool(put_c1), "label": "Future ↓ · OI+1.5L · PE≥1.3×CE",  "detail": str(p1d)},
+            "iv_ok":                   {"pass": bool(put_c2), "label": "IV Rising",                          "detail": str(p2d)},
+            "call_writing_put_unwind": {"pass": bool(put_c3), "label": "Call Writing AND Put Unwind",        "detail": str(c3d_p)},
+            "vanna":                   {"pass": bool(put_c4), "label": "High Negative Vanna",                "detail": str(c4d_p), "value": float(avg_vanna_pe)},
+        }},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+class SensexRejPickRequest(BaseModel):
+    signal_type: str
+    entry:       float
+    sl:          float
+    target:      float
+
+
+@_rej_router.post("/sensex-option-pick")
+async def rej_sensex_option_pick(req: SensexRejPickRequest):
+    """SENSEX REJ Option Pick — BS-derived, same Greek filter as NIFTY."""
+    sig = req.signal_type.upper()
+    if sig not in ("BUY", "SELL"):
+        raise HTTPException(status_code=400, detail="signal_type must be BUY or SELL")
+    loop = asyncio.get_event_loop()
+    try:
+        spot_data = await asyncio.wait_for(loop.run_in_executor(None, _sensex_spot_and_change), timeout=12.0)
+        sigma     = await asyncio.wait_for(loop.run_in_executor(None, _fetch_live_india_vix), timeout=8.0)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"SENSEX data error: {e}")
+
+    spot = spot_data["spot"];  r_rate = 0.065
+    expiries = _sensex_expiry_dates(n_weeks=4)
+    nearest_expiry = expiries[0] if expiries else None
+    if not nearest_expiry:
+        raise HTTPException(status_code=503, detail="No SENSEX expiry found")
+
+    options = await loop.run_in_executor(None, _fetch_sensex_live_options, spot, sigma, nearest_expiry)
+    if not options:
+        raise HTTPException(status_code=503, detail="SENSEX option generation failed")
+
+    T_years = 7 / 365.0
+    try:
+        from datetime import date as _date, datetime as _dt2
+        exp_dt  = _dt2.strptime(nearest_expiry, "%d-%b-%Y").date()
+        T_years = max(1, (_date.today() - exp_dt).days * -1) / 365.0
+    except Exception:
+        pass
+
+    side_needed = "CE" if sig == "BUY" else "PE"
+    # ── STRICT: ATM ±200 pts only (focus on 1-2 OTM for Sensex liquidity) ──
+    ATM_PICK_BAND = 200
+    enriched = []
+    for opt in options:
+        if opt["type"] != side_needed:
+            continue
+        if abs(opt["strike"] - spot) > ATM_PICK_BAND:
+            continue   # skip far OTM — Sensex liquidity drops sharply
+        iv_raw = opt.get("iv", 0.0) or (sigma * 100)
+        gs = _rej_bs_greeks(spot, opt["strike"], T_years, r_rate, iv_raw / 100.0, side_needed)
+        enriched.append({
+            "strike": float(opt["strike"]), "type": side_needed, "expiry": nearest_expiry,
+            "last_price": round(float(opt["last_price"]), 2),
+            "oi": int(opt.get("oi", 0)), "oi_lakh": round(float(opt.get("oi", 0)) / 100_000, 2),
+            "iv_pct": round(float(iv_raw), 2),
+            "delta": gs["delta"], "gamma": gs["gamma"], "vega": gs["vega"], "theta": gs["theta"],
+            "instrument": f"SENSEX {int(opt['strike'])} {'Call' if side_needed == 'CE' else 'Put'}",
+            "is_live_derived": True,
+        })
+
+    def _flt(ri, dt, gt, oi_t, tt):
+        out = []
+        for r in ri:
+            d, g, th, oi = r["delta"], r["gamma"], r["theta"], r["oi"]
+            if sig == "BUY":
+                if d < dt:  continue
+            else:
+                if d > -dt: continue
+            if g < gt or oi < oi_t or th < -tt: continue
+            out.append(r)
+        return out
+
+    tier = "strict"
+    cands = _flt(enriched, 0.80, 0.0005, 5_000, 12)
+    if not cands: cands = _flt(enriched, 0.80, 0.0005, 5_000, 9999); tier = "relaxed_theta"
+    if not cands: cands = _flt(enriched, 0.80, 0.0001, 1_000, 9999); tier = "relaxed_all"
+    if not cands: cands = _flt(enriched, 0.70, 0.0001, 0,     9999); tier = "best_available"
+    if not cands: cands = sorted(enriched, key=lambda x: -x["oi"])[:5]; tier = "top_oi"
+
+    cands.sort(key=lambda x: (-x["oi"], -x["gamma"]))
+    top = cands[:5]
+
+    rr_info = None
+    if top:
+        best = top[0]; opt_entry = best["last_price"]
+        pct_risk = abs(req.entry - req.sl) / req.entry if req.entry else 0.01
+        rr_info = {
+            "opt_entry": opt_entry,
+            "opt_sl":    max(0.1, round(opt_entry * (1 - pct_risk * 2), 2)),
+            "opt_target": round(opt_entry * (1 + pct_risk * 4), 2),
+            "ul_entry": round(req.entry, 2), "ul_sl": round(req.sl, 2), "ul_target": round(req.target, 2),
+            "rr": 2,
+        }
+
+    return {
+        "signal_type": sig, "symbol": "SENSEX", "spot": round(spot, 2),
+        "expiry": nearest_expiry, "T_days": int(round(T_years * 365)),
+        "top_picks": top, "rr_info": rr_info, "candidates_count": len(enriched),
+        "tier": tier, "is_live_derived": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# Register all REJ routes (must be AFTER all @_rej_router decorators)
 app.include_router(_rej_router)
 
-# ═══════════════════════════════════════════════════════════════════
-#   GET /api/gamma-blast/sensex-picks
+
 #   Sensex Expiry Day Gamma Blast Strategy — ATM Straddle picks
 # ═══════════════════════════════════════════════════════════════════
 @app.get("/api/gamma-blast/sensex-picks")
