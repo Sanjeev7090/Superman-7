@@ -519,6 +519,12 @@ function GeoRiskCard({ geoRisk, C, isDark }) {
 
 
 
+const SECTOR_ICONS_LABEL = {
+  bank: 'BANK', it: 'IT', auto: 'AUTO', pharma: 'PHARMA', fmcg: 'FMCG',
+  metal: 'METAL', realty: 'REALTY', energy: 'ENERGY', infra: 'INFRA',
+  media: 'MEDIA', psubank: 'PSU BK', midcap: 'MIDCAP',
+};
+
 function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
   const [expanded, setExpanded] = useState(false);
   if (!sb || sb.total === 0) return null;
