@@ -1002,8 +1002,7 @@ function _rejIsBear(b) { return b.close < b.open; }
 
 function detect15mRejection(bars15) {
   if (!bars15 || bars15.length < 3) return null;
-  // Wider lookback (15 bars) to surface older setups still in play
-  const start = Math.max(1, bars15.length - 15);
+  const start = Math.max(1, bars15.length - 8);
   for (let i = bars15.length - 1; i >= start; i--) {
     const b = bars15[i];
     const r = _rejRange(b);
@@ -1011,18 +1010,15 @@ function detect15mRejection(bars15) {
     const bod = _rejBody(b);
     const uw  = _rejUpperWick(b);
     const lw  = _rejLowerWick(b);
-    // Relaxed: wick only needs to be 1.2× body (was 1.5×)
-    const strongWickRatio = 1.2;
+    const strongWickRatio = 1.5;
     // BUY: Hammer — long lower wick
-    // Relaxed: wick ≥ 40% of range (was 55%), opposite wick ≤ 1.8× body (was 1.1×)
-    if (lw >= strongWickRatio * bod && lw >= 0.40 * r && uw <= bod * 1.8) {
+    if (lw >= strongWickRatio * bod && lw >= 0.55 * r && uw <= bod * 1.1) {
       return { type: 'BUY', bar: b, idx: i, extreme: b.low,
         rejectionHigh: b.high, rejectionLow: b.low,
         time: b.timestamp / 1000, name: '15m Hammer / Lower Wick Rejection' };
     }
     // SELL: Shooting Star — long upper wick
-    // Relaxed: wick ≥ 40% of range (was 55%), opposite wick ≤ 1.8× body (was 1.1×)
-    if (uw >= strongWickRatio * bod && uw >= 0.40 * r && lw <= bod * 1.8) {
+    if (uw >= strongWickRatio * bod && uw >= 0.55 * r && lw <= bod * 1.1) {
       return { type: 'SELL', bar: b, idx: i, extreme: b.high,
         rejectionHigh: b.high, rejectionLow: b.low,
         time: b.timestamp / 1000, name: '15m Shooting Star / Upper Wick Rejection' };
@@ -1039,26 +1035,21 @@ function _findStrongConfirmInWindow(windowBars, type) {
     if (r <= 0) continue;
     const bod = _rejBody(b);
     const bodyRatio = bod / r;
-    // Relaxed: body only needs to cover 40% of range (was 55%)
-    if (bodyRatio < 0.40) continue;
+    if (bodyRatio < 0.55) continue;
     if (type === 'BUY') {
       if (!_rejIsBull(b)) continue;
-      // Relaxed: allow upper wick up to 100% of body (was 60%)
-      if (_rejUpperWick(b) > bod * 1.0) continue;
+      if (_rejUpperWick(b) > bod * 0.6) continue;
       const prevVol = i > 0 ? windowBars[i - 1].volume || 0 : 0;
       const volOk = !prevVol || (b.volume || 0) >= prevVol * 0.9;
-      // Relaxed: fallback body-ratio threshold 55% (was 70%)
-      if (!volOk && bodyRatio < 0.55) continue;
+      if (!volOk && bodyRatio < 0.7) continue;
       return { bar: b, time: b.timestamp / 1000, entry: b.close, name: '1m Strong Green Confirmation' };
     }
     if (type === 'SELL') {
       if (!_rejIsBear(b)) continue;
-      // Relaxed: allow lower wick up to 100% of body (was 60%)
-      if (_rejLowerWick(b) > bod * 1.0) continue;
+      if (_rejLowerWick(b) > bod * 0.6) continue;
       const prevVol = i > 0 ? windowBars[i - 1].volume || 0 : 0;
       const volOk = !prevVol || (b.volume || 0) >= prevVol * 0.9;
-      // Relaxed: fallback body-ratio threshold 55% (was 70%)
-      if (!volOk && bodyRatio < 0.55) continue;
+      if (!volOk && bodyRatio < 0.7) continue;
       return { bar: b, time: b.timestamp / 1000, entry: b.close, name: '1m Strong Red Confirmation' };
     }
   }
