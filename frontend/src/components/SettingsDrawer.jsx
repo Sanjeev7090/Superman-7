@@ -1,60 +1,20 @@
 import React, { useState } from 'react';
 import Watchlist from './Watchlist';
-import PortfolioTracker from './PortfolioTracker';
 import AlertSystem from './AlertSystem';
 import RLAgentPanel from './RLAgentPanel';
 import RoboDashboard from './robo/RoboAdvisorDashboard';
 import EnsembleCockpitPanel from './EnsembleCockpitPanel';
 import MonteCarloPanel from './robo/MonteCarloPanel';
 import PECETracker from './PECETracker';
-import PortfolioOptimizerPanel from './PortfolioOptimizerPanel';
-import AdvancedRiskPanel from './AdvancedRiskPanel';
-import SentimentPanel from './SentimentPanel';
-import ObservabilityPanel from './ObservabilityPanel';
 import { X, Robot, MagicWand } from '@phosphor-icons/react';
 import BlackScholesPanel from './BlackScholesPanel';
 
-// ── Quant sub-panel (Portfolio Optimizer / Risk / Sentiment / Observability) ──
-function QuantPanel({ selectedStock }) {
-  const [sub, setSub] = useState('portfolio');
-  const SUBS = [
-    { id: 'portfolio', label: 'Portfolio' },
-    { id: 'risk', label: 'Risk' },
-    { id: 'sentiment', label: 'Sentiment' },
-    { id: 'observability', label: 'Observ.' },
-  ];
-  return (
-    <div>
-      <div className="flex gap-0 border-b border-white/10 bg-white/[0.02] sticky top-0 z-10">
-        {SUBS.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setSub(s.id)}
-            className={`px-3 py-2 text-[11px] font-bold uppercase tracking-wider border-b-2 transition-colors whitespace-nowrap ${
-              sub === s.id ? 'border-[#007AFF] text-[#007AFF]' : 'border-transparent text-zinc-500 hover:text-white'
-            }`}
-            data-testid={`quant-sub-${s.id}`}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-      {sub === 'portfolio' && <PortfolioOptimizerPanel />}
-      {sub === 'risk' && <AdvancedRiskPanel />}
-      {sub === 'sentiment' && <SentimentPanel selectedStock={selectedStock} />}
-      {sub === 'observability' && <ObservabilityPanel selectedStock={selectedStock} />}
-    </div>
-  );
-}
-
 const SECTIONS = [
   { id: 'watchlist', label: 'Watchlist' },
-  { id: 'portfolio', label: 'Portfolio' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'rlagent', label: 'RL Agent' },
   { id: 'ensemble', label: 'AI Assemble' },
   { id: 'pece', label: 'PE-CE OI' },
-  { id: 'quant', label: 'Quant' },
   { id: 'tools', label: 'Tools' },
   { id: 'bscalc', label: 'B-S Calc' },
 ];
@@ -152,7 +112,6 @@ const SettingsDrawer = ({
           </div>
 
           {section === 'watchlist' && <Watchlist onStockSelect={onStockSelect} selectedStock={selectedStock} />}
-          {section === 'portfolio' && <PortfolioTracker selectedStock={selectedStock} />}
           {section === 'alerts' && <AlertSystem selectedStock={selectedStock} />}
 
           {section === 'ensemble' && (
@@ -163,7 +122,6 @@ const SettingsDrawer = ({
           )}
 
           {section === 'pece' && <PECETracker />}
-          {section === 'quant' && <QuantPanel selectedStock={selectedStock} />}
 
           {section === 'tools' && (
             <div className="p-4 grid grid-cols-2 gap-3">
