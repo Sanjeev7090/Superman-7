@@ -284,6 +284,7 @@ class PaperOrderRequest(BaseModel):
     target: float
     strategy: str = "MANUAL"
     source: str = "MANUAL"  # MANUAL or AUTO
+    option_meta: Optional[dict] = None  # {underlying, strike, option_type, expiry, lot_size, lots}
 
 class PaperCloseRequest(BaseModel):
     exit_price: float
@@ -1610,6 +1611,16 @@ _NSE_SPOT_TICKERS = {
     "FINNIFTY":   "NIFTYFIN.NS",
     "MIDCPNIFTY": "NIFTYMIDCAP150.NS",
     "NIFTYNXT50": "^NSMIDCP",
+}
+
+# NSE/BSE Index lot sizes (as of 2025)
+_INDEX_LOT_SIZES = {
+    "NIFTY": 75,
+    "BANKNIFTY": 30,
+    "SENSEX": 10,
+    "FINNIFTY": 65,
+    "MIDCPNIFTY": 120,
+    "NIFTYNXT50": 25,
 }
 
 
@@ -9064,6 +9075,7 @@ async def place_paper_order(req: PaperOrderRequest):
         "status": "OPEN",
         "strategy": req.strategy,
         "source": req.source,
+        "option_meta": req.option_meta,       # None for equity, dict for options
         "entry_time": datetime.now(timezone.utc).isoformat(),
         "exit_time": None,
         "exit_price": None,
@@ -9087,6 +9099,20 @@ async def get_paper_positions():
     positions = await db.paper_trades.find({"status": "OPEN"}, {"_id": 0}).to_list(100)
     for pos in positions:
         margin = pos.get("margin_used") or pos.get("invested_amount", 1)
+        # Option positions: use current_price set by auto-monitor (not yfinance)
+        if pos.get("option_meta"):
+            cp = pos.get("current_price", pos.get("entry_price", 0))
+            ep = pos.get("entry_price", cp)
+            qty = pos.get("quantity", 1)
+            if pos["direction"] == "BUY":
+                pnl = (cp - ep) * qty
+            else:
+                pnl = (ep - cp) * qty
+            pos["current_price"] = cp
+            pos["pnl"] = round(pnl, 2)
+            pos["pnl_pct"] = round(pnl / margin * 100, 2) if margin > 0 else 0.0
+            continue
+        # Equity positions: use yfinance
         try:
             ticker_obj = yf.Ticker(pos["symbol"])
             hist = ticker_obj.history(period="1d")
@@ -9188,6 +9214,251 @@ async def reset_paper_portfolio():
     await db.paper_portfolio.delete_many({"portfolio_id": "default"})
     portfolio = await _ensure_paper_portfolio()
     return {"message": "Portfolio reset to ₹50,000", "portfolio": portfolio}
+
+
+# ─── Options Paper Trade Chain ─────────────────────────────────────────────
+
+@api_router.get("/paper-trade/options/chain/{symbol}")
+async def get_options_chain_for_paper_trade(
+    symbol: str,
+    expiry: Optional[str] = Query(None),
+    atm_range: int = Query(15, ge=5, le=30),
+):
+    """Get ATM-centered option chain for paper trade placement.
+    Returns strikes grouped: [{strike, distance, ce: {ltp, oi, vol}, pe: {ltp, oi, vol}}]
+    """
+    sym = symbol.upper()
+    lot_size = _INDEX_LOT_SIZES.get(sym, 50)
+
+    cache_key = f"chain_paper_{sym}_{expiry or 'auto'}"
+    cached = None
+    if cache_key in cache_storage:
+        cached_data, cached_time = cache_storage[cache_key]
+        if (datetime.now() - cached_time).seconds < 5:   # 5s cache — fresh prices for 2s monitor
+            cached = cached_data
+
+    if cached is None:
+        underlying_price = 0.0
+        nearest_expiry = None
+        all_expiries: list = []
+        options_flat: list = []
+
+        if sym == "SENSEX":
+            import yfinance as _yf
+            try:
+                t = _yf.Ticker("^BSESN")
+                hist = t.history(period="2d", interval="1d")
+                spot = float(hist["Close"].iloc[-1]) if len(hist) > 0 else 80000.0
+            except Exception:
+                spot = 80000.0
+            sigma = _fetch_live_india_vix()
+            all_expiries = _sensex_expiry_dates(n_weeks=4)
+            expiry_str = expiry if expiry in all_expiries else (all_expiries[0] if all_expiries else "")
+            options_flat = _fetch_sensex_live_options(spot, sigma, expiry_str)
+            underlying_price = spot
+            nearest_expiry = expiry_str
+        else:
+            oi_data: dict = {}
+            try:
+                import asyncio as _asyncio
+                oi_data = await _asyncio.wait_for(
+                    _asyncio.to_thread(_fetch_nse_option_chain, sym, expiry),
+                    timeout=8.0,
+                )
+            except Exception as _ce:
+                logging.warning(f"NSE option chain for paper {sym}: {_ce}")
+
+            if oi_data and oi_data.get("records", {}).get("data"):
+                options_flat, underlying_price, nearest_expiry, all_expiries = _extract_option_rows(oi_data, sym, nearest_only=True)
+            else:
+                yf_ticker = _NSE_SPOT_TICKERS.get(sym, "^NSEI")
+                import yfinance as _yf
+                try:
+                    t = _yf.Ticker(yf_ticker)
+                    hist = t.history(period="2d", interval="1d")
+                    spot = float(hist["Close"].iloc[-1]) if len(hist) > 0 else 24000.0
+                except Exception:
+                    spot = 24000.0
+                sigma = _fetch_live_india_vix()
+                all_expiries = _nse_index_expiry_dates(n_weeks=4)
+                expiry_str = expiry if expiry in all_expiries else (all_expiries[0] if all_expiries else "")
+                options_flat = _fetch_nse_index_derived_options(sym, spot, sigma, expiry_str)
+                underlying_price = spot
+                nearest_expiry = expiry_str
+
+        cached = {
+            "symbol": sym,
+            "underlying_price": underlying_price,
+            "nearest_expiry": nearest_expiry,
+            "all_expiries": all_expiries,
+            "options_flat": options_flat,
+            "lot_size": lot_size,
+        }
+        cache_storage[cache_key] = (cached, datetime.now())
+
+    underlying = cached["underlying_price"]
+    options_flat = cached.get("options_flat", [])
+
+    # Filter by expiry if specified
+    if expiry:
+        filtered = [o for o in options_flat if o.get("expiry") == expiry or o.get("expiry_display") == expiry]
+        if not filtered:
+            filtered = options_flat
+    else:
+        filtered = options_flat
+
+    # Group by strike
+    strike_map: dict = {}
+    for opt in filtered:
+        s = opt["strike"]
+        if s not in strike_map:
+            strike_map[s] = {"strike": s, "ce": None, "pe": None}
+        row = {
+            "ltp": round(opt.get("last_price", 0), 2),
+            "oi": int(opt.get("oi", 0)),
+            "volume": int(opt.get("volume", 0)),
+            "iv": round(opt.get("iv", 0), 1),
+            "change_pct": round(opt.get("change_pct", 0), 2),
+        }
+        if opt["type"] == "CE":
+            strike_map[s]["ce"] = row
+        elif opt["type"] == "PE":
+            strike_map[s]["pe"] = row
+
+    all_strikes = sorted(strike_map.keys())
+    if underlying > 0 and all_strikes:
+        atm_strike = min(all_strikes, key=lambda x: abs(x - underlying))
+        atm_idx = all_strikes.index(atm_strike)
+        start = max(0, atm_idx - atm_range)
+        end = min(len(all_strikes), atm_idx + atm_range + 1)
+        selected = all_strikes[start:end]
+    else:
+        selected = all_strikes[:30]
+
+    result_strikes = []
+    for s in selected:
+        row = dict(strike_map[s])
+        row["distance_from_atm"] = round(s - underlying, 0) if underlying else 0
+        row["is_atm"] = abs(row["distance_from_atm"]) <= 150
+        result_strikes.append(row)
+
+    return {
+        "symbol": cached["symbol"],
+        "underlying_price": round(underlying, 2),
+        "nearest_expiry": cached["nearest_expiry"],
+        "all_expiries": cached["all_expiries"],
+        "lot_size": cached["lot_size"],
+        "strikes": result_strikes,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ─── Options Auto-Monitor (SL / Target) ───────────────────────────────────
+
+async def _options_paper_trade_monitor():
+    """Background task: poll option LTPs every 2s and auto-close SL/Target hit positions."""
+    import asyncio as _asyncio
+    while True:
+        try:
+            await _asyncio.sleep(2)
+            open_opts = await db.paper_trades.find(
+                {"status": "OPEN", "option_meta": {"$exists": True, "$ne": None}},
+                {"_id": 0}
+            ).to_list(100)
+            if not open_opts:
+                continue
+
+            # Group by underlying+expiry for batch fetching
+            groups: dict = {}
+            for pos in open_opts:
+                meta = pos.get("option_meta") or {}
+                if not meta.get("underlying"):
+                    continue
+                key = f"{meta['underlying']}_{meta.get('expiry', '')}"
+                if key not in groups:
+                    groups[key] = {"underlying": meta["underlying"], "expiry": meta.get("expiry"), "positions": []}
+                groups[key]["positions"].append(pos)
+
+            for key, grp in groups.items():
+                try:
+                    chain_resp = await get_options_chain_for_paper_trade(
+                        grp["underlying"], expiry=grp["expiry"], atm_range=25
+                    )
+                    strikes_data = chain_resp.get("strikes", [])
+
+                    ltp_map: dict = {}
+                    for sk in strikes_data:
+                        strike = sk["strike"]
+                        if sk.get("ce") and (sk["ce"].get("ltp") or 0) > 0:
+                            ltp_map[(strike, "CE")] = sk["ce"]["ltp"]
+                        if sk.get("pe") and (sk["pe"].get("ltp") or 0) > 0:
+                            ltp_map[(strike, "PE")] = sk["pe"]["ltp"]
+
+                    for pos in grp["positions"]:
+                        meta = pos.get("option_meta") or {}
+                        strike = meta.get("strike")
+                        otype = meta.get("option_type")
+                        ltp = ltp_map.get((strike, otype))
+                        if not ltp or ltp <= 0:
+                            continue
+
+                        sl = pos.get("stop_loss", 0)
+                        target = pos.get("target", 0)
+                        direction = pos.get("direction", "BUY")
+                        qty = pos.get("quantity", 1)
+                        margin = pos.get("margin_used") or pos.get("invested_amount", 1)
+
+                        sl_hit = (direction == "BUY" and sl > 0 and ltp <= sl) or \
+                                 (direction == "SELL" and sl > 0 and ltp >= sl)
+                        tgt_hit = (direction == "BUY" and target > 0 and ltp >= target) or \
+                                  (direction == "SELL" and target > 0 and ltp <= target)
+
+                        if sl_hit or tgt_hit:
+                            reason = "SL_HIT" if sl_hit else "TARGET_HIT"
+                            if direction == "BUY":
+                                pnl = (ltp - pos["entry_price"]) * qty
+                            else:
+                                pnl = (pos["entry_price"] - ltp) * qty
+                            pnl_pct = round(pnl / margin * 100, 2) if margin > 0 else 0.0
+                            await db.paper_trades.update_one(
+                                {"trade_id": pos["trade_id"]},
+                                {"$set": {
+                                    "status": reason,
+                                    "exit_price": round(ltp, 2),
+                                    "exit_time": datetime.now(timezone.utc).isoformat(),
+                                    "pnl": round(pnl, 2),
+                                    "pnl_pct": pnl_pct,
+                                    "current_price": ltp,
+                                }}
+                            )
+                            portfolio = await _ensure_paper_portfolio()
+                            returned = margin + pnl
+                            await db.paper_portfolio.update_one(
+                                {"portfolio_id": "default"},
+                                {"$set": {
+                                    "current_balance": round(portfolio["current_balance"] + returned, 2),
+                                    "realized_pnl": round(portfolio.get("realized_pnl", 0.0) + pnl, 2),
+                                    "total_trades": portfolio.get("total_trades", 0) + 1,
+                                    "winning_trades": portfolio.get("winning_trades", 0) + (1 if pnl > 0 else 0),
+                                    "losing_trades": portfolio.get("losing_trades", 0) + (1 if pnl <= 0 else 0),
+                                }}
+                            )
+                            logging.info(f"[OptionsMonitor] AUTO-CLOSED {pos['symbol']} @ ₹{ltp} → {reason} | P&L: ₹{pnl:.0f}")
+                        else:
+                            # Update live LTP + unrealized P&L
+                            if direction == "BUY":
+                                upnl = (ltp - pos["entry_price"]) * qty
+                            else:
+                                upnl = (pos["entry_price"] - ltp) * qty
+                            upnl_pct = round(upnl / margin * 100, 2) if margin > 0 else 0.0
+                            await db.paper_trades.update_one(
+                                {"trade_id": pos["trade_id"]},
+                                {"$set": {"current_price": ltp, "pnl": round(upnl, 2), "pnl_pct": upnl_pct}}
+                            )
+                except Exception as _e:
+                    logging.error(f"[OptionsMonitor] Error for {key}: {_e}")
+        except Exception as _le:
+            logging.error(f"[OptionsMonitor] Loop error: {_le}")
 
 
 # ======================= ALERTS =======================
@@ -13322,6 +13593,9 @@ async def startup_binance_ws():
         except Exception as _me:
             logging.warning(f"Market Intel warm-up failed: {_me}")
     asyncio.create_task(_warm_market_intel())
+    # Start Options Paper Trade auto-monitor (SL/Target auto-execute)
+    asyncio.create_task(_options_paper_trade_monitor())
+    logging.info("Options Paper Trade auto-monitor started")
 
 
 # ── NSE Tick WebSocket ────────────────────────────────────────────────────────

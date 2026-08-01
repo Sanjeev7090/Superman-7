@@ -5,6 +5,7 @@ import {
   ChartBar, FloppyDisk, Warning, CheckCircle, Info
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
+import OptionsPaperTradeModal from './OptionsPaperTradeModal';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -42,6 +43,15 @@ const PositionRow = ({ pos, onClose }) => {
           </span>
           {pos.source === 'AUTO' && (
             <span className="text-[7px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 font-bold">AUTO</span>
+          )}
+          {pos.option_meta && (
+            <span className={`text-[7px] px-1.5 py-0.5 rounded font-bold border ${
+              pos.option_meta.option_type === 'CE'
+                ? 'bg-[#00E676]/15 text-[#00E676] border-[#00E676]/20'
+                : 'bg-[#FF3B30]/15 text-[#FF3B30] border-[#FF3B30]/20'
+            }`}>
+              {pos.option_meta.option_type} OPT
+            </span>
           )}
           <span className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400 font-bold border border-yellow-500/20">5x</span>
         </div>
@@ -190,6 +200,7 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
   const [history, setHistory] = useState([]);
   const [tab, setTab] = useState('positions'); // positions | history | order
   const [closeModal, setCloseModal] = useState(null);
+  const [showOptionsModal, setShowOptionsModal] = useState(false);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
   const [resetting, setResetting] = useState(false);
 
@@ -320,6 +331,12 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
           onCancel={() => setCloseModal(null)}
         />
       )}
+      {showOptionsModal && (
+        <OptionsPaperTradeModal
+          onClose={() => setShowOptionsModal(false)}
+          onOrderPlaced={() => { setShowOptionsModal(false); fetchAll(); }}
+        />
+      )}
 
       <div className="flex flex-col h-full" data-testid="paper-trading-panel">
         {/* Portfolio Summary */}
@@ -417,7 +434,7 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
           {[
             { id: 'positions', label: `Positions (${positions.length})` },
             { id: 'history', label: `History (${history.length})` },
-            { id: 'order', label: '+ New Order' },
+            { id: 'order', label: '+ Stock' },
           ].map(t => (
             <button
               key={t.id}
@@ -430,6 +447,14 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
               {t.label}
             </button>
           ))}
+          {/* OPTIONS button */}
+          <button
+            onClick={() => setShowOptionsModal(true)}
+            className="px-3 py-2 text-[9px] font-bold uppercase tracking-wider text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/5 transition-colors border-l border-white/10 whitespace-nowrap"
+            data-testid="paper-tab-options"
+          >
+            ⚡ OPTIONS
+          </button>
         </div>
 
         {/* Tab Content */}
@@ -442,7 +467,7 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
                 <div className="text-center py-8">
                   <ChartBar size={28} className="text-zinc-700 mx-auto mb-2" />
                   <p className="text-[10px] text-zinc-500">Koi open position nahi</p>
-                  <p className="text-[8px] text-zinc-600 mt-1">Scanner signal pe "Trade" button dabao ya manually order lagao</p>
+                  <p className="text-[8px] text-zinc-600 mt-1">Scanner signal pe Trade button dabao ya manually order lagao</p>
                 </div>
               ) : (
                 positions.map(pos => (
