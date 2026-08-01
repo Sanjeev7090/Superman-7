@@ -8872,6 +8872,108 @@ async def get_sectors_trending():
     return {"sectors": results, "cached": False}
 
 
+@api_router.get("/sectors/breadth")
+async def get_sector_breadth():
+    """
+    Sector Breadth for 12 Nifty sectors.
+    Returns up/down count, expected Nifty move range, bias, action, and power-sector status.
+    Reuses _sector_cache (5-min TTL shared with /sectors/trending).
+    """
+    global _sector_cache
+    now = datetime.now(timezone.utc).timestamp()
+
+    # Reuse cache or fetch fresh
+    if not (_sector_cache.get("ts", 0) + _SECTOR_CACHE_TTL > now and _sector_cache.get("data")):
+        results = []
+        for sector in _SECTOR_MAP:
+            try:
+                obj = yf.Ticker(sector["ticker"])
+                hist = obj.history(period="2d")
+                if hist.empty or len(hist) < 2:
+                    hist = obj.history(period="5d")
+                if hist.empty or len(hist) < 2:
+                    continue
+                prev_close = float(hist["Close"].iloc[-2])
+                curr_close = float(hist["Close"].iloc[-1])
+                if prev_close <= 0:
+                    continue
+                change_pct = round((curr_close - prev_close) / prev_close * 100, 2)
+                results.append({
+                    "name": sector["name"],
+                    "ticker": sector["ticker"],
+                    "icon": sector["icon"],
+                    "change_pct": change_pct,
+                    "current": round(curr_close, 2),
+                })
+            except Exception:
+                continue
+        _sector_cache = {"ts": now, "data": results}
+
+    sectors = _sector_cache.get("data", [])
+    up_sectors   = [s for s in sectors if s["change_pct"] > 0]
+    down_sectors = [s for s in sectors if s["change_pct"] < 0]
+    total    = len(sectors)
+    up_count = len(up_sectors)
+    down_count = len(down_sectors)
+
+    # ── Determine bias using user-specified rules ──────────────────────
+    if up_count >= down_count:
+        # Bullish side
+        if up_count >= 8:
+            bias = "Strong Bullish"; move = "+170 to +260 pts"
+            action = "Aggressive Long / Call Buy"; color = "#22c55e"
+        elif up_count >= 6:
+            bias = "Mild Bullish"; move = "+80 to +150 pts"
+            action = "Selective Long"; color = "#86efac"
+        elif up_count >= 4:
+            bias = "Neutral-Mild"; move = "+30 to +80 pts"
+            action = "Range / Selective"; color = "#fbbf24"
+        else:
+            bias = "Weak Bullish"; move = "+10 to +40 pts"
+            action = "Normal Trading"; color = "#94a3b8"
+    else:
+        # Bearish side
+        if down_count >= 8:
+            bias = "Strong Bearish"; move = "-180 to -280 pts"
+            action = "Avoid Long / Consider Short"; color = "#ef4444"
+        elif down_count >= 6:
+            bias = "Mild Bearish"; move = "-90 to -160 pts"
+            action = "Cautious / Reduce Longs"; color = "#fca5a5"
+        elif down_count >= 4:
+            bias = "Neutral-Mild"; move = "-40 to -90 pts"
+            action = "Range / Selective"; color = "#fbbf24"
+        else:
+            bias = "Weak Bearish"; move = "-10 to -40 pts"
+            action = "Normal Trading"; color = "#94a3b8"
+
+    # ── Power sectors (Bank + IT + Auto carry highest weight) ─────────
+    POWER_ICONS = {"bank", "it", "auto"}
+    power_sectors = [s for s in sectors if s["icon"] in POWER_ICONS]
+    power_green = sum(1 for s in power_sectors if s["change_pct"] > 0)
+    power_red   = sum(1 for s in power_sectors if s["change_pct"] < 0)
+    power_aligned = power_green == 3 or power_red == 3  # all 3 same side
+
+    # ── High-probability big-move flag (8+ sectors same direction) ────
+    high_prob = up_count >= 8 or down_count >= 8
+
+    return {
+        "up_count": up_count,
+        "down_count": down_count,
+        "total": total,
+        "bias": bias,
+        "move": move,
+        "action": action,
+        "color": color,
+        "high_prob": high_prob,
+        "power_sectors": power_sectors,
+        "power_green": power_green,
+        "power_red": power_red,
+        "power_aligned": power_aligned,
+        "sectors": sectors,
+        "cached": _sector_cache.get("ts", 0) + _SECTOR_CACHE_TTL > now,
+    }
+
+
 # ======================= PAPER TRADING =======================
 
 async def _ensure_paper_portfolio():
@@ -14701,34 +14803,4 @@ async def vibe_chat(req: VibeChatRequest):
     # ── 4. Build augmented message ───────────────────────────────────────────
     augmented = f"{market_ctx}{screener_block}\nUser question: {req.message}"
 
-    chat = _get_or_create_vibe_chat(req.session_id)
-
-    async def token_stream():
-        try:
-            # Emit structured screener stocks first (for "Load in Chart" chips)
-            if screener_stocks:
-                meta = {
-                    "type": "screener_stocks",
-                    "label": screener_label or "",
-                    "stocks": screener_stocks,
-                }
-                yield f"data: {json.dumps(meta)}\n\n"
-
-            response: ModelResponse = await chat.send_message(UserMessage(text=augmented))
-            text = response.text if hasattr(response, "text") else str(response)
-            for word in text.split(" "):
-                yield f"data: {json.dumps({'token': word + ' '})}\n\n"
-                await asyncio.sleep(0)
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        finally:
-            yield "data: [DONE]\n\n"
-
-    return StreamingResponse(
-        token_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-app.include_router(_vibe_router)
+    chat = _get
