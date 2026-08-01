@@ -13971,6 +13971,217 @@ async def rej_nifty_option_pick(req: RejOptionPickRequest):
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
+# ═══════════════════════════════════════════════════════════════════
+#   GET /api/rej/option-flow
+#   Evaluates 4 institutional criteria for NIFTY Call Buy / Put Buy
+# ═══════════════════════════════════════════════════════════════════
+@_rej_router.get("/option-flow")
+async def rej_option_flow():
+    """
+    Fetch NIFTY option chain and evaluate 4 criteria for Call Buy / Put Buy:
+      1. Future ↑/↓ + OI ↑ + Volume ↑
+      2. IV Rising / Stable  (call) | IV Rising (put)
+      3. Put Writing + Call Unwinding  (call buy)
+         Call Writing + Put Unwinding  (put buy)
+      4. High Positive Vanna (call buy) | High Negative Vanna abs (put buy)
+    """
+    sym = "NIFTY"
+    loop = asyncio.get_event_loop()
+
+    # ── 1. Fetch option chain ─────────────────────────────────────────
+    try:
+        oi_data = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_nse_option_chain, sym),
+            timeout=15.0
+        )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"NSE fetch error: {e}")
+
+    if not oi_data:
+        raise HTTPException(status_code=503, detail="NSE returned empty data")
+
+    rows, spot, nearest_expiry, _ = _extract_option_rows(oi_data, sym)
+    if not rows or spot <= 0:
+        raise HTTPException(status_code=503, detail="Could not parse option chain")
+
+    # ── 2. DTE ───────────────────────────────────────────────────────
+    T_years = 7 / 365.0
+    if nearest_expiry:
+        try:
+            from datetime import date as _date, datetime as _dt2
+            exp_dt = _dt2.strptime(nearest_expiry, "%d-%b-%Y").date()
+            T_years = max(1, (_date.today() - exp_dt).days * -1) / 365.0
+        except Exception:
+            pass
+    r_rate = 0.065
+
+    # ── 3. Split CE / PE and ATM window ──────────────────────────────
+    ATM_BAND = 250  # ±250 from spot
+    ce_all  = [r for r in rows if r["type"] == "CE"]
+    pe_all  = [r for r in rows if r["type"] == "PE"]
+    atm_ce  = [r for r in ce_all if abs(r["strike"] - spot) <= ATM_BAND]
+    atm_pe  = [r for r in pe_all if abs(r["strike"] - spot) <= ATM_BAND]
+
+    # ── 4. Volume totals ──────────────────────────────────────────────
+    total_ce_vol = sum(r["volume"] for r in ce_all)
+    total_pe_vol = sum(r["volume"] for r in pe_all)
+
+    # ── 5. OI change — extracted from raw NSE Shape-A data ───────────
+    total_ce_oi_chg = 0.0
+    total_pe_oi_chg = 0.0
+    atm_ce_oi_chg   = 0.0
+    atm_pe_oi_chg   = 0.0
+    records = (oi_data.get("records") or {}) if isinstance(oi_data, dict) else {}
+    for row in (records.get("data") or []):
+        try:
+            strike = float(row.get("strikePrice") or 0)
+            for side in ("CE", "PE"):
+                leg = row.get(side) or {}
+                chg = float(leg.get("changeinOpenInterest") or 0)
+                is_atm = abs(strike - spot) <= ATM_BAND
+                if side == "CE":
+                    total_ce_oi_chg += chg
+                    if is_atm: atm_ce_oi_chg += chg
+                else:
+                    total_pe_oi_chg += chg
+                    if is_atm: atm_pe_oi_chg += chg
+        except Exception:
+            continue
+
+    # ── 6. ATM IV ────────────────────────────────────────────────────
+    def _avg_iv(lst):
+        vals = [r["iv"] for r in lst if r["iv"] > 0]
+        return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+    atm_ce_iv = _avg_iv(atm_ce)
+    atm_pe_iv = _avg_iv(atm_pe)
+    avg_iv    = round((atm_ce_iv + atm_pe_iv) / 2, 2) if (atm_ce_iv and atm_pe_iv) else max(atm_ce_iv, atm_pe_iv) or 14.0
+    iv_status = "Rising" if avg_iv > 16 else "Stable" if avg_iv >= 11 else "Falling"
+
+    # ── 7. Vanna ─────────────────────────────────────────────────────
+    def _vanna(S, K, T, r, sig):
+        if sig <= 0 or T <= 0 or S <= 0 or K <= 0:
+            return 0.0
+        try:
+            d1 = (_math.log(S/K) + (r + 0.5*sig**2)*T) / (sig * _math.sqrt(T))
+            d2 = d1 - sig * _math.sqrt(T)
+            return round(-_rej_norm.pdf(d1) * d2 / sig, 6)
+        except Exception:
+            return 0.0
+
+    def _avg_vanna(lst, side):
+        vals = []
+        for r in lst:
+            iv_raw = r["iv"] if r["iv"] > 0 else avg_iv
+            vals.append(_vanna(spot, r["strike"], T_years, r_rate, iv_raw / 100.0))
+        return round(sum(vals) / len(vals), 6) if vals else 0.0
+
+    avg_vanna_ce = _avg_vanna(atm_ce, "CE")
+    avg_vanna_pe = _avg_vanna(atm_pe, "PE")
+
+    # ── 8. Evaluate criteria ──────────────────────────────────────────
+    # -- CALL BUY --
+    # Criterion 1: Future ↑ + OI ↑ + Vol ↑
+    c1_future_up  = total_ce_vol >= total_pe_vol * 0.9   # CE vol comparable or higher
+    c1_oi_up      = atm_ce_oi_chg >= 0 and (total_pe_oi_chg > 0 or total_ce_oi_chg >= 0)
+    c1_vol_up     = total_ce_vol >= total_pe_vol * 0.85
+    call_c1       = c1_future_up and c1_vol_up
+    c1_detail     = (f"CE {int(total_ce_vol//1000)}K {'≥' if c1_future_up else '<'} PE {int(total_pe_vol//1000)}K vol | "
+                     f"OI Δ {'+' if atm_ce_oi_chg >= 0 else ''}{int(atm_ce_oi_chg)}")
+
+    # Criterion 2: IV Rising / Stable
+    call_c2   = avg_iv >= 11
+    c2_detail = f"ATM IV {avg_iv}% — {iv_status}"
+
+    # Criterion 3: Put Writing + Call Unwinding
+    put_writing    = total_pe_oi_chg > 0        # shorts adding to puts (bullish)
+    call_unwind    = total_ce_oi_chg < 0        # call writers covering (bullish)
+    call_c3        = put_writing or call_unwind
+    c3_detail_call = (f"PE OI {'+' if total_pe_oi_chg >= 0 else ''}{int(total_pe_oi_chg)} "
+                      f"{'(Put Writing ✓)' if put_writing else '(No Writing)'} | "
+                      f"CE OI {'+' if total_ce_oi_chg >= 0 else ''}{int(total_ce_oi_chg)} "
+                      f"{'(Call Unwind ✓)' if call_unwind else '(Building)'}")
+
+    # Criterion 4: High Positive Vanna
+    call_c4   = avg_vanna_ce > 0
+    c4_detail_call = f"CE Vanna {'+' if avg_vanna_ce >= 0 else ''}{avg_vanna_ce:.4f}"
+
+    call_score  = sum([call_c1, call_c2, call_c3, call_c4])
+    call_signal = "STRONG" if call_score >= 3 else "PARTIAL" if call_score == 2 else "WEAK"
+
+    # -- PUT BUY --
+    # Criterion 1: Future ↓ + OI ↑ + Vol ↑
+    p1_future_dn  = total_pe_vol >= total_ce_vol * 0.9
+    p1_oi_up      = atm_pe_oi_chg >= 0
+    p1_vol_up     = total_pe_vol >= total_ce_vol * 0.85
+    put_c1        = p1_future_dn and p1_vol_up
+    p1_detail     = (f"PE {int(total_pe_vol//1000)}K {'≥' if p1_future_dn else '<'} CE {int(total_ce_vol//1000)}K vol | "
+                     f"OI Δ {'+' if atm_pe_oi_chg >= 0 else ''}{int(atm_pe_oi_chg)}")
+
+    # Criterion 2: IV Rising
+    put_c2    = avg_iv > 14
+    p2_detail = f"ATM IV {avg_iv}% — {iv_status}"
+
+    # Criterion 3: Call Writing + Put Unwinding
+    call_writing  = total_ce_oi_chg > 0       # call writers adding (bearish)
+    put_unwind    = total_pe_oi_chg < 0        # put writers covering (bearish unwind)
+    put_c3        = call_writing or put_unwind
+    c3_detail_put = (f"CE OI {'+' if total_ce_oi_chg >= 0 else ''}{int(total_ce_oi_chg)} "
+                     f"{'(Call Writing ✓)' if call_writing else '(No Writing)'} | "
+                     f"PE OI {'+' if total_pe_oi_chg >= 0 else ''}{int(total_pe_oi_chg)} "
+                     f"{'(Put Unwind ✓)' if put_unwind else '(Building)'}")
+
+    # Criterion 4: High Negative Vanna (abs value)
+    put_c4   = avg_vanna_pe < 0
+    c4_detail_put = f"PE Vanna {'+' if avg_vanna_pe >= 0 else ''}{avg_vanna_pe:.4f}"
+
+    put_score  = sum([put_c1, put_c2, put_c3, put_c4])
+    put_signal = "STRONG" if put_score >= 3 else "PARTIAL" if put_score == 2 else "WEAK"
+
+    # ── 9. Overall recommendation ─────────────────────────────────────
+    if call_score > put_score and call_score >= 2:
+        recommended = "CALL_BUY"
+    elif put_score > call_score and put_score >= 2:
+        recommended = "PUT_BUY"
+    else:
+        recommended = "NEUTRAL"
+
+    return {
+        "spot":             float(round(spot, 2)),
+        "expiry":           str(nearest_expiry or ""),
+        "T_days":           int(round(T_years * 365)),
+        "avg_iv":           float(avg_iv),
+        "iv_status":        str(iv_status),
+        "total_ce_vol":     int(float(total_ce_vol)),
+        "total_pe_vol":     int(float(total_pe_vol)),
+        "avg_vanna_ce":     float(avg_vanna_ce),
+        "avg_vanna_pe":     float(avg_vanna_pe),
+        "recommended":      str(recommended),
+        "call_buy": {
+            "score":  int(call_score),
+            "signal": str(call_signal),
+            "criteria": {
+                "future_oi_vol":           {"pass": bool(call_c1), "label": "Future ↑ · OI ↑ · Vol ↑",       "detail": str(c1_detail)},
+                "iv_ok":                   {"pass": bool(call_c2), "label": "IV Rising / Stable",              "detail": str(c2_detail)},
+                "put_writing_call_unwind": {"pass": bool(call_c3), "label": "Put Writing + Call Unwind",       "detail": str(c3_detail_call)},
+                "vanna":                   {"pass": bool(call_c4), "label": "High Positive Vanna",             "detail": str(c4_detail_call), "value": float(avg_vanna_ce)},
+            },
+        },
+        "put_buy": {
+            "score":  int(put_score),
+            "signal": str(put_signal),
+            "criteria": {
+                "future_oi_vol":            {"pass": bool(put_c1), "label": "Future ↓ · OI ↑ · Vol ↑",       "detail": str(p1_detail)},
+                "iv_ok":                    {"pass": bool(put_c2), "label": "IV Rising",                       "detail": str(p2_detail)},
+                "call_writing_put_unwind":  {"pass": bool(put_c3), "label": "Call Writing + Put Unwind",       "detail": str(c3_detail_put)},
+                "vanna":                    {"pass": bool(put_c4), "label": "High Negative Vanna",             "detail": str(c4_detail_put), "value": float(avg_vanna_pe)},
+            },
+        },
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 app.include_router(_rej_router)
 
 # ═══════════════════════════════════════════════════════════════════

@@ -77,11 +77,98 @@ function detectREJSignal(bars) {
   return { status: 'CONFIRMED', type: rej.type, rejection: rej, confirm, entry, sl, target: rej.type === 'BUY' ? entry + risk * 2 : entry - risk * 2, rr: 2 };
 }
 
+// ── Flow Criteria checklist component ────────────────────────────────────────
+const SIG_COL = s => s === 'STRONG' ? '#22c55e' : s === 'PARTIAL' ? '#fbbf24' : '#94a3b8';
+
+function CriteriaRow({ item }) {
+  const { pass, label, detail } = item;
+  return (
+    <div className="flex items-start gap-1 py-0.5">
+      <span className="text-[9px] font-bold shrink-0 mt-px" style={{ color: pass ? '#22c55e' : '#ef4444' }}>
+        {pass ? '✓' : '✗'}
+      </span>
+      <div className="min-w-0">
+        <div className="text-[8px] font-semibold leading-tight" style={{ color: pass ? '#d1fae5' : '#fca5a5' }}>
+          {label}
+        </div>
+        <div className="text-[7px] leading-tight text-zinc-500 truncate" title={detail}>
+          {detail}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FlowSidePanel({ data, side, isRec }) {
+  const col  = side === 'CALL' ? '#22c55e' : '#ef4444';
+  const crit = Object.values(data.criteria);
+  return (
+    <div className="flex-1 rounded border px-2 py-1.5 min-w-0"
+      style={{
+        borderColor: isRec ? `${col}50` : 'rgba(255,255,255,0.07)',
+        background:  isRec ? `${col}08`  : 'transparent',
+      }}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[8px] font-black uppercase tracking-wider" style={{ color: col }}>
+          {side} BUY
+        </span>
+        <div className="flex items-center gap-1">
+          <span className="text-[8px] font-bold" style={{ color: SIG_COL(data.signal) }}>
+            [{data.score}/4]
+          </span>
+          <span className="text-[7px] font-bold px-1 rounded"
+            style={{ background: `${SIG_COL(data.signal)}20`, color: SIG_COL(data.signal) }}>
+            {data.signal}
+          </span>
+        </div>
+      </div>
+      <div className="divide-y divide-zinc-800/40">
+        {crit.map((item, i) => <CriteriaRow key={i} item={item} />)}
+      </div>
+    </div>
+  );
+}
+
+function FlowCriteria({ flowData }) {
+  if (!flowData) return null;
+  const { call_buy, put_buy, recommended, avg_iv, iv_status, total_ce_vol, total_pe_vol } = flowData;
+  const recBull = recommended === 'CALL_BUY';
+  const recBear = recommended === 'PUT_BUY';
+  return (
+    <div className="space-y-1.5">
+      {/* IV + Vol strip */}
+      <div className="flex items-center gap-3 px-1 text-[8px]">
+        <span className="text-zinc-600 uppercase tracking-wider">Flow:</span>
+        <span className="text-zinc-400">ATM IV <span className="font-bold text-zinc-200">{avg_iv}%</span> <span className="text-zinc-500">{iv_status}</span></span>
+        <span className="text-zinc-400">CE Vol <span style={{ color: '#22c55e' }}>{(total_ce_vol / 1000).toFixed(0)}K</span></span>
+        <span className="text-zinc-400">PE Vol <span style={{ color: '#ef4444' }}>{(total_pe_vol / 1000).toFixed(0)}K</span></span>
+      </div>
+      {/* Recommended banner */}
+      {recommended !== 'NEUTRAL' && (
+        <div className="rounded px-2 py-1 text-[8px] font-bold flex items-center gap-1.5"
+          style={{
+            background: recBull ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
+            border: recBull ? '1px solid rgba(34,197,94,0.30)' : '1px solid rgba(239,68,68,0.30)',
+            color: recBull ? '#22c55e' : '#ef4444',
+          }}>
+          ★ Recommended: {recBull ? 'CALL BUY' : 'PUT BUY'}
+        </div>
+      )}
+      {/* Two-column criteria */}
+      <div className="flex gap-1.5">
+        <FlowSidePanel data={call_buy} side="CALL" isRec={recBull} />
+        <FlowSidePanel data={put_buy}  side="PUT"  isRec={recBear} />
+      </div>
+    </div>
+  );
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 export default function NiftyRejOptionsSection({ onStrikeSelect }) {
   const [collapsed, setCollapsed]   = useState(false);
   const [signal,    setSignal]      = useState(null);   // REJ signal from NIFTY bars
   const [pick,      setPick]        = useState(null);   // option pick from API
+  const [flowData,  setFlowData]    = useState(null);   // 4-criteria flow analysis
   const [loading,   setLoading]     = useState(false);
   const [error,     setError]       = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -93,18 +180,27 @@ export default function NiftyRejOptionsSection({ onStrikeSelect }) {
     setLoading(true);
     setError(null);
     try {
-      // 1. Fetch NIFTY 1-min bars
-      const barsRes = await fetch(`${API}/stock/bars/%5ENSEI?timespan=minute&multiplier=1&limit=200`);
-      const barsData = await barsRes.json();
-      const bars = barsData?.bars || [];
+      // 1. Fetch NIFTY 1-min bars + flow data in parallel
+      const [barsRes, flowRes] = await Promise.allSettled([
+        fetch(`${API}/stock/bars/%5ENSEI?timespan=minute&multiplier=1&limit=200`),
+        fetch(`${API}/rej/option-flow`),
+      ]);
+
+      const bars = barsRes.status === 'fulfilled'
+        ? ((await barsRes.value.json())?.bars || [])
+        : [];
+
+      if (flowRes.status === 'fulfilled' && flowRes.value.ok) {
+        const fd = await flowRes.value.json();
+        setFlowData(fd);
+      }
 
       // 2. Detect REJ signal (or use manual override)
       let sig = null;
       if (override) {
-        // Manual: use last close as entry
         const lastBar = bars[bars.length - 1];
         const spot    = lastBar?.close || 24000;
-        const slDist  = spot * 0.003;  // 0.3% SL
+        const slDist  = spot * 0.003;
         sig = {
           type: override, status: 'MANUAL',
           entry:  spot,
@@ -241,6 +337,11 @@ export default function NiftyRejOptionsSection({ onStrikeSelect }) {
             </div>
           )}
 
+          {/* Flow Criteria — always show when available */}
+          {!loading && flowData && (
+            <FlowCriteria flowData={flowData} />
+          )}
+
           {/* Error */}
           {!loading && error && (
             <div className="text-[10px] text-yellow-400 bg-yellow-500/10 rounded px-2 py-1.5">{error}</div>
@@ -371,7 +472,7 @@ export default function NiftyRejOptionsSection({ onStrikeSelect }) {
 
                     {/* Filter summary */}
                     <div className="text-[7.5px] text-zinc-700 pt-1 leading-relaxed">
-                      Priority: OI▼ → Δ → γ · Filter: {isBuy ? 'Δ≥0.80' : 'Δ≤−0.80'} · γ≥0.0005 · OI≥1L · θ>−12
+                      Priority: OI▼ → Δ → γ · Filter: {isBuy ? 'Δ≥0.80' : 'Δ≤−0.80'} · γ≥0.0005 · OI≥1L · θ{">"}-12
                       {' · '}{pick.candidates_count} candidates
                       {pick.tier && pick.tier !== 'strict' && (
                         <span className="text-yellow-500 ml-1">[{pick.tier}]</span>
