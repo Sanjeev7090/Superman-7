@@ -15353,7 +15353,6 @@ _CRUDE_EIA_TTL = 3600  # 1 hour — EIA data is weekly anyway
 async def get_crude_eia_status():
     """
     Fetch latest US EIA crude inventory data from FRED (free, no API key).
-    Series: WCRSTUS1 — Weekly US Ending Stocks of Crude Oil (1000 barrels).
     Falls back to last-known values on error.
     """
     import aiohttp as _aio
@@ -15374,23 +15373,22 @@ async def get_crude_eia_status():
 
         def _parse(line: str):
             d, v = line.strip().split(",")
-            return d.strip(), round(float(v) / 1_000, 3)  # kb → mb
+            return d.strip(), round(float(v) / 1_000, 3)
 
         prev_date, prev_mb = _parse(rows[-2])
         curr_date, curr_mb = _parse(rows[-1])
         change_mb = round(curr_mb - prev_mb, 3)
-        kind = "DRAW" if change_mb < 0 else "BUILD"
 
         result = {
-            "available":       True,
-            "us_curr_mb":      curr_mb,
-            "us_prev_mb":      prev_mb,
-            "us_change_mb":    change_mb,
-            "us_date":         curr_date,
-            "us_kind":         kind,
-            "india_mb":        104.0,
-            "india_status":    "Near 1-yr High",
-            "india_date":      "end of June",
+            "available":    True,
+            "us_curr_mb":   curr_mb,
+            "us_prev_mb":   prev_mb,
+            "us_change_mb": change_mb,
+            "us_date":      curr_date,
+            "us_kind":      "DRAW" if change_mb < 0 else "BUILD",
+            "india_mb":     104.0,
+            "india_status": "Near 1-yr High",
+            "india_date":   "end of June",
         }
         _crude_eia_cache["data"] = result
         _crude_eia_cache["ts"]   = now_ts
@@ -15412,3 +15410,112 @@ async def get_crude_eia_status():
         _crude_eia_cache["data"] = fallback
         _crude_eia_cache["ts"]   = now_ts
         return fallback
+
+
+# ── Crude Score History (MongoDB, 7-day) ────────────────────────────────────
+def _crude_score_compute(brent: float, brent_chg: float, usdinr_chg: float,
+                          eia_change: float, geo_level: str) -> int:
+    s = 0
+    e = eia_change or 0
+    if e < -5:   s -= 2
+    elif e < 0:  s -= 1
+    elif e > 5:  s += 2
+    elif e > 0:  s += 1
+
+    if brent >= 90:   s -= 2
+    elif brent >= 85: s -= 1
+    elif brent < 78:  s += 1
+    c = brent_chg or 0
+    if c >= 2:   s -= 1
+    elif c <= -2: s += 1
+
+    u = usdinr_chg or 0
+    if u >= 0.5:    s -= 2
+    elif u >= 0.15: s -= 1
+    elif u <= -0.5:  s += 2
+    elif u <= -0.15: s += 1
+
+    if geo_level == "HIGH":   s -= 2
+    elif geo_level == "MEDIUM": s -= 1
+    else:                     s += 1
+    return s
+
+
+@app.post("/api/crude/save-score")
+async def save_crude_score(payload: dict):
+    """Frontend posts today's computed score for sparkline history."""
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    await db.crude_score_history.update_one(
+        {"date": today},
+        {"$set": {
+            "date":    today,
+            "score":   int(payload.get("score", 0)),
+            "brent":   float(payload.get("brent", 0)),
+            "verdict": payload.get("verdict", ""),
+            "ts":      datetime.now(timezone.utc).isoformat(),
+        }},
+        upsert=True,
+    )
+    return {"status": "ok", "date": today}
+
+
+@app.get("/api/crude/score-history")
+async def get_crude_score_history():
+    """Return last 7 days of crude supply macro scores for sparkline."""
+    cursor = db.crude_score_history.find({}, {"_id": 0}).sort("date", -1).limit(7)
+    docs = await cursor.to_list(7)
+    docs.reverse()  # oldest first for sparkline left→right
+    return {"history": docs}
+
+
+# ── Metals Live Prices (Gold / Silver) ───────────────────────────────────────
+_metals_cache: dict = {"data": None, "ts": 0.0}
+_METALS_TTL = 60  # 1 minute refresh
+
+
+@app.get("/api/metals/prices")
+async def get_metals_prices():
+    """Gold (GC=F / XAUUSD) and Silver (SI=F) live prices via yfinance."""
+    import yfinance as _yf
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+
+    now_ts = _crude_time.time()
+    if _metals_cache["data"] and (now_ts - _metals_cache["ts"]) < _METALS_TTL:
+        return _metals_cache["data"]
+
+    TICKERS = {
+        "GC=F":    ("gold",   "XAUUSD", "$"),
+        "SI=F":    ("silver", "XAGUSD", "$"),
+    }
+
+    def _fetch_one(sym_info):
+        sym, (key, label, unit) = sym_info
+        try:
+            hist = _yf.Ticker(sym).history(period="5d", interval="1d")
+            if hist.empty:
+                return key, None
+            curr  = float(hist["Close"].iloc[-1])
+            prev  = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else curr
+            chg   = round((curr - prev) / prev * 100, 2) if prev else 0
+            wk_p  = float(hist["Close"].iloc[0]) if len(hist) >= 5 else prev
+            wk_ch = round((curr - wk_p) / wk_p * 100, 2) if wk_p else 0
+            return key, {
+                "price":       round(curr, 2),
+                "change_pct":  chg,
+                "week_chg":    wk_ch,
+                "label":       label,
+                "unit":        unit,
+                "ticker":      sym,
+            }
+        except Exception as e:
+            return key, {"price": 0, "change_pct": 0, "week_chg": 0,
+                         "label": label, "unit": unit, "ticker": sym, "error": str(e)}
+
+    with _TPE(max_workers=2) as ex:
+        results = dict(ex.map(_fetch_one, TICKERS.items()))
+
+    out = {"gold": results.get("gold"), "silver": results.get("silver"), "ts": now_ts}
+    _metals_cache["data"] = out
+    _metals_cache["ts"]   = now_ts
+    return out

@@ -605,10 +605,42 @@ function EIABanner({ C }) {
   );
 }
 
+// ── Crude Score Sparkline ─────────────────────────────────────────────────────
+function CrudeSparkline({ scores }) {
+  if (!scores || scores.length < 2) return null;
+  const W = 56, H = 30, PAD = 3;
+  const min = Math.min(-4, ...scores), max = Math.max(4, ...scores);
+  const range = max - min || 1;
+  const pts = scores.map((v, i) => {
+    const x = PAD + (i / (scores.length - 1)) * (W - PAD * 2);
+    const y = PAD + ((max - v) / range) * (H - PAD * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const last = scores[scores.length - 1];
+  const lineColor = last > 0 ? '#22c55e' : last < 0 ? '#ef4444' : '#94a3b8';
+  // Zero-line y
+  const zeroY = (PAD + ((max - 0) / range) * (H - PAD * 2)).toFixed(1);
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      {/* Zero line */}
+      <line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} stroke="#334155" strokeWidth="0.5" strokeDasharray="2 2" />
+      {/* Score line */}
+      <polyline points={pts.join(' ')} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      {/* Dots */}
+      {scores.map((v, i) => {
+        const [x, y] = pts[i].split(',');
+        const c = v > 0 ? '#22c55e' : v < 0 ? '#ef4444' : '#94a3b8';
+        return <circle key={i} cx={x} cy={y} r="2" fill={c} />;
+      })}
+    </svg>
+  );
+}
+
 function CrudeSupplyCard({ brent, brentChgPct, usdinr, usdinrChgPct, geoRisk, C, isDark }) {
   const [expanded, setExpanded] = useState(false);
   const [eia, setEia]           = useState(null);
   const [eiaLoading, setEiaLoading] = useState(false);
+  const [scoreHistory, setScoreHistory] = useState([]);
   const API = process.env.REACT_APP_BACKEND_URL || '';
 
   useEffect(() => {
@@ -616,6 +648,8 @@ function CrudeSupplyCard({ brent, brentChgPct, usdinr, usdinrChgPct, geoRisk, C,
     fetch(`${API}/api/crude/eia-status`)
       .then(r => r.json()).then(setEia).catch(() => setEia(null))
       .finally(() => setEiaLoading(false));
+    fetch(`${API}/api/crude/score-history`)
+      .then(r => r.json()).then(d => setScoreHistory(d.history || [])).catch(() => {});
   }, [API]);
 
   // Signal 1: US EIA
@@ -670,6 +704,22 @@ function CrudeSupplyCard({ brent, brentChgPct, usdinr, usdinrChgPct, geoRisk, C,
     if (total <= 3)  return { verdict: 'BULLISH',        action: 'Call Buy · Long bias on dips',         color: '#22c55e', bg: '#22c55e12', note: 'Crude falling + INR strong → favorable for Nifty' };
     return             { verdict: 'STRONG BULLISH',      action: 'Aggressive Long · Calls on dips',      color: '#16a34a', bg: '#22c55e15', note: 'Strong multi-factor tailwind — crude macro supports rally' };
   })();
+
+  // Save today's score to MongoDB for sparkline history
+  useEffect(() => {
+    if (!eia || eiaLoading || !brent) return;
+    fetch(`${API}/api/crude/save-score`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ score: total, brent, verdict: plan.verdict }),
+    }).then(r => r.json()).then(d => {
+      if (d.status === 'ok') {
+        // Refresh sparkline after saving
+        fetch(`${API}/api/crude/score-history`)
+          .then(r => r.json()).then(d2 => setScoreHistory(d2.history || [])).catch(() => {});
+      }
+    }).catch(() => {});
+  }, [total, eia, brent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const signals = [
     { label: 'US EIA',    sig: eiaSignal },
@@ -728,20 +778,42 @@ function CrudeSupplyCard({ brent, brentChgPct, usdinr, usdinrChgPct, geoRisk, C,
           ))}
         </div>
 
-        {/* Verdict */}
-        <div className="flex items-center justify-between rounded-xl px-3 py-2.5"
-          style={{ background: `${plan.color}18`, border: `1.5px solid ${plan.color}50` }}>
-          <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-black uppercase tracking-wide" style={{ color: plan.color }}>{plan.verdict}</div>
-            <div className="text-[9px] font-medium mt-0.5" style={{ color: C.textSecond }}>{plan.action}</div>
-            <div className="text-[7.5px] mt-1" style={{ color: C.textMuted }}>{plan.note}</div>
-          </div>
-          <div className="text-right shrink-0 ml-3">
-            <div className="text-[7px] mb-0.5" style={{ color: C.textMuted }}>Score</div>
-            <div className="text-[20px] font-black font-mono leading-none" style={{ color: plan.color }}>
-              {total > 0 ? `+${total}` : total}
+        {/* Verdict + Sparkline */}
+        <div className="flex items-stretch gap-2">
+          <div className="flex-1 flex items-center justify-between rounded-xl px-3 py-2.5"
+            style={{ background: `${plan.color}18`, border: `1.5px solid ${plan.color}50` }}>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-wide" style={{ color: plan.color }}>{plan.verdict}</div>
+              <div className="text-[9px] font-medium mt-0.5" style={{ color: C.textSecond }}>{plan.action}</div>
+              <div className="text-[7.5px] mt-1" style={{ color: C.textMuted }}>{plan.note}</div>
+            </div>
+            <div className="text-right shrink-0 ml-3">
+              <div className="text-[7px] mb-0.5" style={{ color: C.textMuted }}>Score</div>
+              <div className="text-[20px] font-black font-mono leading-none" style={{ color: plan.color }}>
+                {total > 0 ? `+${total}` : total}
+              </div>
             </div>
           </div>
+
+          {/* Sparkline — 5-day score trend */}
+          {scoreHistory.length >= 2 && (
+            <div className="rounded-xl px-2.5 py-2 flex flex-col items-center justify-between shrink-0"
+              style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${C.borderSubtle}`, minWidth: 68 }}>
+              <div className="text-[6.5px] uppercase tracking-wider font-bold mb-1" style={{ color: C.textMuted }}>5d Trend</div>
+              <CrudeSparkline scores={scoreHistory.map(r => r.score)} />
+              <div className="text-[6px] mt-1" style={{ color: C.textMuted }}>
+                {(() => {
+                  const arr = scoreHistory.map(r => r.score);
+                  const diff = arr[arr.length - 1] - arr[0];
+                  return diff > 0
+                    ? <span style={{ color: '#22c55e' }}>Improving ↑</span>
+                    : diff < 0
+                    ? <span style={{ color: '#ef4444' }}>Worsening ↓</span>
+                    : <span style={{ color: '#94a3b8' }}>Stable →</span>;
+                })()}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

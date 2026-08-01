@@ -10,14 +10,55 @@ const fmtPrice = (v) => {
   return `$${v.toFixed(6)}`;
 };
 
+// ── Metals row component ──────────────────────────────────────────────────────
+function MetalRow({ label, ticker, price, changePct, weekChg, icon, onSelect }) {
+  const isUp = changePct >= 0;
+  return (
+    <button
+      onClick={() => onSelect && onSelect({ ticker, name: label, type: 'STOCK', symbol: ticker, current_price: price, price_change_pct_24h: changePct })}
+      className="w-full flex items-center justify-between px-2.5 py-2 text-left border-b border-white/5 hover:bg-white/5 transition-all"
+      data-testid={`metal-item-${ticker}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-[13px] shrink-0">{icon}</span>
+        <div>
+          <div className="text-[10px] font-bold text-white">{ticker}</div>
+          <div className="text-[8px] text-zinc-500">{label}</div>
+        </div>
+      </div>
+      <div className="text-right">
+        <div className="text-[10px] font-mono text-white">{fmtPrice(price)}</div>
+        <div className={`text-[9px] font-mono flex items-center justify-end gap-0.5 ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
+          {isUp ? <TrendUp size={8} /> : <TrendDown size={8} />}
+          {Math.abs(changePct || 0).toFixed(2)}%
+        </div>
+      </div>
+    </button>
+  );
+}
+
 const CryptoList = ({ onCryptoSelect, selectedCrypto }) => {
   const [coins, setCoins] = useState([]);
+  const [metals, setMetals] = useState(null);
   const [liveOverlay, setLiveOverlay] = useState({});   // coin_id → {price, change_pct}
   const [flashSet, setFlashSet] = useState(new Set());  // coin_ids flashing
   const [wsStatus, setWsStatus] = useState('connecting'); // connecting | live | offline
   const [loading, setLoading] = useState(true);
   const [searchQ, setSearchQ] = useState('');
   const prevPricesRef = useRef({});
+
+  // ---- Metals live prices ----
+  const fetchMetals = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${API}/metals/prices`);
+      setMetals(data);
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => {
+    fetchMetals();
+    const id = setInterval(fetchMetals, 60_000); // refresh every 60s
+    return () => clearInterval(id);
+  }, [fetchMetals]);
 
   // ---- Initial data from CoinPaprika (metadata + baseline prices) ----
   const fetchCoins = useCallback(async () => {
@@ -117,6 +158,32 @@ const CryptoList = ({ onCryptoSelect, selectedCrypto }) => {
             data-testid="crypto-list-search" />
         </div>
       </div>
+
+      {/* ── Metals Section ─────────────────────────────────────────────── */}
+      {metals && (
+        <div>
+          <div className="px-2.5 py-1.5 flex items-center gap-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <span className="text-[7px] font-black uppercase tracking-widest" style={{ color: '#f59e0b' }}>Metals</span>
+            <div className="flex-1 h-px" style={{ background: 'rgba(245,158,11,0.2)' }} />
+          </div>
+          {metals.gold && (
+            <MetalRow
+              label="Gold" ticker="XAUUSD" icon="🥇"
+              price={metals.gold.price} changePct={metals.gold.change_pct} weekChg={metals.gold.week_chg}
+              onSelect={onCryptoSelect} />
+          )}
+          {metals.silver && (
+            <MetalRow
+              label="Silver" ticker="XAGUSD" icon="🥈"
+              price={metals.silver.price} changePct={metals.silver.change_pct} weekChg={metals.silver.week_chg}
+              onSelect={onCryptoSelect} />
+          )}
+          <div className="px-2.5 py-1.5 flex items-center gap-2 mt-0.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <span className="text-[7px] font-black uppercase tracking-widest" style={{ color: '#a78bfa' }}>Crypto</span>
+            <div className="flex-1 h-px" style={{ background: 'rgba(167,139,250,0.2)' }} />
+          </div>
+        </div>
+      )}
 
       {/* Coin List */}
       <div className="flex-1 overflow-y-auto">
