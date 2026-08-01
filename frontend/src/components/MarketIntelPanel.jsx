@@ -808,12 +808,16 @@ const MarketIntelPanel = ({ onClose }) => {
     setLoading(true);
     setError(null);
     try {
-      const [{ data: d }, sbRes] = await Promise.allSettled([
+      const [marketRes, sbRes] = await Promise.allSettled([
         axios.get(`${API}/market-intel`),
         axios.get(`${API}/sectors/breadth`),
       ]);
-      if (d.status === 'fulfilled') { setData(d.value.data); setTs(new Date()); }
-      else { setError('Failed to load market intelligence data'); }
+      if (marketRes.status === 'fulfilled') {
+        setData(marketRes.value.data);
+        setTs(new Date());
+      } else {
+        setError('Failed to load market intelligence data');
+      }
       if (sbRes.status === 'fulfilled') setSectorBreadth(sbRes.value.data);
     } catch (e) {
       setError('Failed to load market intelligence data');
