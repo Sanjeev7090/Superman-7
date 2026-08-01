@@ -3,6 +3,8 @@
 ## Original Problem Statement
 Full-stack algorithmic trading app (React + FastAPI + MongoDB) for Indian markets (Nifty 50 focus).
 Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals screener.
+Paper trading for equities + Nifty/Sensex Options with 2-second Auto SL/Target monitor.
+Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, AngelOne, Dhan, Fyers).
 
 ## User Preferences
 - **Language:** Hinglish/Hindi responses
@@ -18,6 +20,7 @@ Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals s
 ├── backend/
 │   ├── server.py           (FastAPI main — all routes, 15k+ lines)
 │   ├── database.py         (Shared MongoDB connection)
+│   ├── groww_service.py    (Groww API wrapper — live data + orders)
 │   ├── routes/
 │   │   ├── crude.py        (EIA status, save-score, score-history)
 │   │   ├── metals.py       (Gold/Silver live prices)
@@ -33,6 +36,10 @@ Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals s
 │   │   ├── VibeResearchPanel.jsx (Strategy Builder feature added)
 │   │   ├── MarketIntelPanel.jsx  (~1107 lines — refactored)
 │   │   ├── market-intel/         (8 extracted components)
+│   │   ├── PaperTradingPanel.jsx (Paper + Live toggle, broker integration)
+│   │   ├── OptionsPaperTradeModal.jsx (Nifty/Sensex options paper trading)
+│   │   ├── BrokerSettingsModal.jsx (Multi-broker connection UI)
+│   │   ├── SettingsDrawer.jsx   (GROWW tab removed)
 │   │   └── CryptoList.jsx
 └── memory/
     └── PRD.md

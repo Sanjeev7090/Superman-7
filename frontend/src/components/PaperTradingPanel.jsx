@@ -2,10 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
   TrendUp, TrendDown, X, ArrowsClockwise, Wallet, Trophy,
-  ChartBar, FloppyDisk, Warning, CheckCircle, Info
+  ChartBar, Warning, Info, PlugsConnected, Plugs
 } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 import OptionsPaperTradeModal from './OptionsPaperTradeModal';
+import BrokerSettingsModal from './BrokerSettingsModal';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -201,6 +202,9 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
   const [tab, setTab] = useState('positions'); // positions | history | order
   const [closeModal, setCloseModal] = useState(null);
   const [showOptionsModal, setShowOptionsModal] = useState(false);
+  const [showBrokerModal, setShowBrokerModal] = useState(false);
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [brokerSettings, setBrokerSettings] = useState(null);
   const [loadingPortfolio, setLoadingPortfolio] = useState(false);
   const [resetting, setResetting] = useState(false);
 
@@ -234,11 +238,24 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
     }
   }, []);
 
+  const fetchBrokerSettings = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/broker/settings`);
+      setBrokerSettings(res.data);
+      if (res.data?.connected) {
+        setIsLiveMode(true);
+      }
+    } catch (e) {
+      // no broker connected yet
+    }
+  }, []);
+
   useEffect(() => {
     fetchAll();
+    fetchBrokerSettings();
     const interval = setInterval(fetchAll, 30000); // refresh every 30s
     return () => clearInterval(interval);
-  }, [fetchAll]);
+  }, [fetchAll, fetchBrokerSettings]);
 
   // Pre-fill order form when selectedStock changes
   useEffect(() => {
@@ -272,18 +289,31 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
     }
     setPlacing(true);
     try {
-      await axios.post(`${API}/paper-trade/order`, {
-        symbol: form.symbol.trim().toUpperCase(),
-        name: selectedStock?.name || form.symbol,
-        direction: form.direction,
-        quantity: parseInt(form.quantity),
-        entry_price: parseFloat(form.entry_price),
-        stop_loss: parseFloat(form.stop_loss),
-        target: parseFloat(form.target),
-        strategy: form.strategy,
-        source: 'MANUAL',
-      });
-      toast.success(`Paper trade placed: ${form.direction} ${form.symbol}`);
+      if (isLiveMode && brokerSettings?.connected) {
+        // Live trade via broker API
+        await axios.post(`${API}/live-trade/order`, {
+          symbol: form.symbol.trim().toUpperCase(),
+          direction: form.direction,
+          quantity: parseInt(form.quantity),
+          price: parseFloat(form.entry_price),
+          order_type: 'LIMIT',
+        });
+        toast.success(`LIVE order placed: ${form.direction} ${form.symbol} via ${brokerSettings?.profile?.broker || 'Broker'}`);
+      } else {
+        // Paper trade
+        await axios.post(`${API}/paper-trade/order`, {
+          symbol: form.symbol.trim().toUpperCase(),
+          name: selectedStock?.name || form.symbol,
+          direction: form.direction,
+          quantity: parseInt(form.quantity),
+          entry_price: parseFloat(form.entry_price),
+          stop_loss: parseFloat(form.stop_loss),
+          target: parseFloat(form.target),
+          strategy: form.strategy,
+          source: 'MANUAL',
+        });
+        toast.success(`Paper trade placed: ${form.direction} ${form.symbol}`);
+      }
       await fetchAll();
       setTab('positions');
     } catch (e) {
@@ -337,17 +367,57 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
           onOrderPlaced={() => { setShowOptionsModal(false); fetchAll(); }}
         />
       )}
+      {showBrokerModal && (
+        <BrokerSettingsModal
+          onClose={() => { setShowBrokerModal(false); fetchBrokerSettings(); }}
+          onConnected={(profile) => {
+            setBrokerSettings({ connected: true, profile });
+            setIsLiveMode(true);
+            setShowBrokerModal(false);
+          }}
+        />
+      )}
 
       <div className="flex flex-col h-full" data-testid="paper-trading-panel">
         {/* Portfolio Summary */}
         <div className="p-3 border-b border-white/10 shrink-0">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <Wallet size={13} className="text-[#00E676]" weight="fill" />
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300">Paper Trading</span>
-              <span className="text-[8px] px-1.5 py-0.5 rounded font-black bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">5x</span>
+              <Wallet size={13} className={isLiveMode ? 'text-[#FF9800]' : 'text-[#00E676]'} weight="fill" />
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-300">
+                {isLiveMode ? 'Live Trading' : 'Paper Trading'}
+              </span>
+              {!isLiveMode && (
+                <span className="text-[8px] px-1.5 py-0.5 rounded font-black bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">5x</span>
+              )}
             </div>
             <div className="flex items-center gap-2">
+              {/* PAPER / LIVE Toggle */}
+              <div className="flex items-center rounded-lg border border-white/10 overflow-hidden text-[8px] font-black uppercase">
+                <button
+                  onClick={() => setIsLiveMode(false)}
+                  className={`px-2 py-1 transition-colors ${!isLiveMode ? 'bg-[#00E676]/20 text-[#00E676]' : 'text-zinc-600 hover:text-zinc-400'}`}
+                  data-testid="paper-mode-btn"
+                >
+                  Paper
+                </button>
+                <button
+                  onClick={() => {
+                    if (!brokerSettings?.connected) {
+                      setShowBrokerModal(true);
+                    } else {
+                      setIsLiveMode(true);
+                    }
+                  }}
+                  className={`px-2 py-1 transition-colors flex items-center gap-1 ${isLiveMode ? 'bg-[#FF9800]/20 text-[#FF9800]' : 'text-zinc-600 hover:text-zinc-400'}`}
+                  data-testid="live-mode-btn"
+                >
+                  {brokerSettings?.connected
+                    ? <PlugsConnected size={9} />
+                    : <Plugs size={9} />}
+                  Live
+                </button>
+              </div>
               {/* Auto Execute Toggle */}
               <div className="flex items-center gap-1.5">
                 <span className="text-[8px] text-zinc-500 uppercase tracking-wider">Auto</span>
@@ -379,6 +449,32 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
               </button>
             </div>
           </div>
+
+          {/* Live Mode Banner */}
+          {isLiveMode && brokerSettings?.connected && (
+            <div className="flex items-center gap-2 p-2 bg-[#FF9800]/10 border border-[#FF9800]/30 rounded-lg mb-2">
+              <PlugsConnected size={11} className="text-[#FF9800] shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-[9px] font-black text-[#FF9800]">LIVE MODE — </span>
+                <span className="text-[9px] text-zinc-400">{brokerSettings.profile?.broker || 'Broker'} connected. Real orders place honge.</span>
+              </div>
+              <button
+                onClick={() => setShowBrokerModal(true)}
+                className="text-[8px] px-1.5 py-0.5 rounded border border-[#FF9800]/30 text-[#FF9800] hover:bg-[#FF9800]/10 transition-colors"
+              >
+                Manage
+              </button>
+            </div>
+          )}
+          {isLiveMode && !brokerSettings?.connected && (
+            <div className="flex items-center gap-2 p-2 bg-red-500/10 border border-red-500/30 rounded-lg mb-2">
+              <Plugs size={11} className="text-red-400 shrink-0" />
+              <span className="text-[9px] text-red-400 flex-1">Broker connected nahi hai. </span>
+              <button onClick={() => setShowBrokerModal(true)} className="text-[8px] px-1.5 py-0.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10">
+                Connect
+              </button>
+            </div>
+          )}
 
           {portfolio ? (
             <>
@@ -640,13 +736,17 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
                 onClick={handlePlaceOrder}
                 disabled={placing}
                 className={`w-full py-2.5 text-[11px] font-black uppercase tracking-wider rounded-lg transition-all ${
-                  form.direction === 'BUY'
-                    ? 'bg-[#00E676]/20 text-[#00E676] hover:bg-[#00E676]/30 border border-[#00E676]/30'
-                    : 'bg-[#FF3B30]/20 text-[#FF3B30] hover:bg-[#FF3B30]/30 border border-[#FF3B30]/30'
+                  isLiveMode
+                    ? form.direction === 'BUY'
+                      ? 'bg-[#FF9800]/20 text-[#FF9800] hover:bg-[#FF9800]/30 border border-[#FF9800]/30'
+                      : 'bg-[#FF3B30]/20 text-[#FF3B30] hover:bg-[#FF3B30]/30 border border-[#FF3B30]/30'
+                    : form.direction === 'BUY'
+                      ? 'bg-[#00E676]/20 text-[#00E676] hover:bg-[#00E676]/30 border border-[#00E676]/30'
+                      : 'bg-[#FF3B30]/20 text-[#FF3B30] hover:bg-[#FF3B30]/30 border border-[#FF3B30]/30'
                 } disabled:opacity-40`}
                 data-testid="place-order-btn"
               >
-                {placing ? 'Placing...' : `Paper ${form.direction} Order`}
+                {placing ? 'Placing...' : isLiveMode ? `LIVE ${form.direction} Order` : `Paper ${form.direction} Order`}
               </button>
             </div>
           )}

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import Watchlist from './Watchlist';
-import GrowwPortfolio from './GrowwPortfolio';
 import PortfolioTracker from './PortfolioTracker';
 import AlertSystem from './AlertSystem';
 import RLAgentPanel from './RLAgentPanel';
@@ -50,7 +49,6 @@ function QuantPanel({ selectedStock }) {
 
 const SECTIONS = [
   { id: 'watchlist', label: 'Watchlist' },
-  { id: 'groww', label: 'Groww' },
   { id: 'portfolio', label: 'Portfolio' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'rlagent', label: 'RL Agent' },
@@ -154,7 +152,6 @@ const SettingsDrawer = ({
           </div>
 
           {section === 'watchlist' && <Watchlist onStockSelect={onStockSelect} selectedStock={selectedStock} />}
-          {section === 'groww' && <GrowwPortfolio />}
           {section === 'portfolio' && <PortfolioTracker selectedStock={selectedStock} />}
           {section === 'alerts' && <AlertSystem selectedStock={selectedStock} />}
 

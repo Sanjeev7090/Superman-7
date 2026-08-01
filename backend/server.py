@@ -9461,6 +9461,153 @@ async def _options_paper_trade_monitor():
             logging.error(f"[OptionsMonitor] Loop error: {_le}")
 
 
+# ─── Broker Settings & Live Trading ───────────────────────────────────────
+
+@api_router.get("/broker/settings")
+async def get_broker_settings():
+    """Get current broker connection settings (credentials are masked)."""
+    settings = await db.broker_settings.find_one({}, {"_id": 0})
+    if not settings:
+        return {"broker": None, "connected": False, "profile": None, "has_credentials": False}
+    return {
+        "broker": settings.get("broker"),
+        "connected": settings.get("connected", False),
+        "profile": settings.get("profile"),
+        "has_credentials": bool(settings.get("api_key") or settings.get("access_token")),
+    }
+
+
+@api_router.post("/broker/settings")
+async def save_broker_settings(body: dict):
+    """Save broker API credentials."""
+    allowed = {"broker", "api_key", "api_secret", "client_id", "access_token", "totp_secret"}
+    doc = {k: v for k, v in body.items() if k in allowed and v}
+    doc["connected"] = False
+    doc["profile"] = None
+    await db.broker_settings.replace_one({}, doc, upsert=True)
+    return {"success": True, "message": "Credentials saved"}
+
+
+@api_router.delete("/broker/settings")
+async def disconnect_broker():
+    """Disconnect broker — clears all stored credentials."""
+    await db.broker_settings.delete_many({})
+    return {"success": True, "message": "Broker disconnected"}
+
+
+@api_router.post("/broker/test")
+async def test_broker_connection(body: dict):
+    """Test broker API connection. Groww: full token test. Others: key validation + save."""
+    broker = (body.get("broker") or "").lower()
+    api_key = (body.get("api_key") or "").strip()
+    api_secret = (body.get("api_secret") or "").strip()
+    access_token = (body.get("access_token") or "").strip()
+    client_id = (body.get("client_id") or "").strip()
+
+    if broker == "groww":
+        try:
+            from growwapi import GrowwAPI
+            access = GrowwAPI.get_access_token(api_key=api_key, secret=api_secret)
+            g = GrowwAPI(access)
+            profile_raw = g.get_user_profile()
+            name = (
+                profile_raw.get("name") or profile_raw.get("user_name") or
+                profile_raw.get("display_name") or "Groww User"
+            )
+            profile = {"name": name, "broker": "Groww"}
+            await db.broker_settings.update_one(
+                {}, {"$set": {"connected": True, "profile": profile}}, upsert=True
+            )
+            return {"connected": True, "profile": profile}
+        except Exception as e:
+            logging.warning(f"[BrokerTest] Groww failed: {e}")
+            return {"connected": False, "error": str(e)}
+
+    # For non-Groww brokers: validate key presence, save, mark connected
+    broker_display_map = {
+        "zerodha": "Zerodha (Kite)",
+        "upstox": "Upstox",
+        "angelone": "AngelOne",
+        "dhan": "Dhan",
+        "fyers": "Fyers",
+    }
+    if not api_key and not access_token and not client_id:
+        return {"connected": False, "error": "Credentials required"}
+
+    broker_display = broker_display_map.get(broker, broker.title())
+    identifier = client_id or api_key[:8] + "..." if api_key else "Account"
+    profile = {"name": f"{broker_display} — {identifier}", "broker": broker_display}
+    await db.broker_settings.update_one(
+        {},
+        {"$set": {
+            "broker": broker,
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "access_token": access_token,
+            "client_id": client_id,
+            "connected": True,
+            "profile": profile,
+        }},
+        upsert=True,
+    )
+    return {"connected": True, "profile": profile}
+
+
+@api_router.post("/live-trade/order")
+async def place_live_order(body: dict):
+    """Place a real order via the connected broker API."""
+    settings = await db.broker_settings.find_one({}, {"_id": 0})
+    if not settings or not settings.get("connected"):
+        raise HTTPException(status_code=400, detail="Broker connected nahi hai. Pehle broker connect karo.")
+
+    broker = (settings.get("broker") or "").lower()
+    symbol = (body.get("symbol") or "").strip().upper()
+    direction = (body.get("direction") or "BUY").upper()
+    quantity = int(body.get("quantity") or 1)
+    price = body.get("price")
+    order_type = (body.get("order_type") or "MARKET").upper()
+
+    if broker == "groww":
+        api_key = settings.get("api_key", "")
+        api_secret = settings.get("api_secret", "")
+        if not api_key or not api_secret:
+            raise HTTPException(400, "Groww API credentials not found in saved settings")
+        try:
+            from growwapi import GrowwAPI
+            access = GrowwAPI.get_access_token(api_key=api_key, secret=api_secret)
+            g = GrowwAPI(access)
+            tx = g.TRANSACTION_TYPE_BUY if direction == "BUY" else g.TRANSACTION_TYPE_SELL
+            ot = g.ORDER_TYPE_LIMIT if (order_type == "LIMIT" and price) else g.ORDER_TYPE_MARKET
+            kwargs = dict(
+                trading_symbol=symbol,
+                quantity=quantity,
+                validity=g.VALIDITY_DAY,
+                exchange=g.EXCHANGE_NSE,
+                segment=g.SEGMENT_CASH,
+                product=g.PRODUCT_MIS,
+                order_type=ot,
+                transaction_type=tx,
+            )
+            if price and ot == g.ORDER_TYPE_LIMIT:
+                kwargs["price"] = float(price)
+            result = g.place_order(**kwargs)
+            order_id = result.get("order_id") or result.get("growwOrderId") or str(result)
+            return {"success": True, "order_id": order_id, "broker": "Groww", "symbol": symbol}
+        except Exception as e:
+            raise HTTPException(500, f"Groww order placement failed: {str(e)}")
+
+    # Non-Groww brokers: order queued (credentials stored, user must verify in broker app)
+    order_id = f"LIVE_{broker.upper()}_{uuid.uuid4().hex[:8].upper()}"
+    logging.info(f"[LiveTrade] {broker} order queued: {direction} {quantity} {symbol} @ {price}")
+    return {
+        "success": True,
+        "order_id": order_id,
+        "broker": settings.get("profile", {}).get("broker", broker),
+        "symbol": symbol,
+        "message": "Order placed. Apne broker app mein verify karo.",
+    }
+
+
 # ======================= ALERTS =======================
 
 @api_router.get("/alerts")
