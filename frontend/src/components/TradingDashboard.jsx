@@ -606,7 +606,7 @@ const TradingDashboard = () => {
       {!hybridMode && (<>
 
       {/* ══════════════════ TOP BAR ══════════════════ */}
-      <header className="h-14 md:h-16 border-b border-slate-200 dark:border-white/10 flex items-center gap-2 md:gap-4 px-2 md:px-4 bg-white/95 dark:bg-[#0A0A0A]/95 backdrop-blur-md z-50 shrink-0 transition-colors duration-200" data-testid="dashboard-header">
+      <header className="h-14 md:h-16 border-b border-slate-200 dark:border-white/10 flex items-center gap-2 md:gap-4 px-2 md:px-4 bg-white/95 dark:bg-[#0A0A0A]/95 backdrop-blur-md z-50 shrink-0 overflow-hidden transition-colors duration-200" data-testid="dashboard-header">
         {/* Mobile hamburger — toggles left nav drawer */}
         <button
           onClick={() => setMobilePanel(mobilePanel === 'left' ? 'chart' : 'left')}

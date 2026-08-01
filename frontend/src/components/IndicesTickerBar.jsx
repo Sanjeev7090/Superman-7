@@ -79,7 +79,7 @@ const IndicesTickerBar = ({ onIndexClick }) => {
         key={idx.key}
         onClick={() => supportsOptions && onIndexClick?.(idx.symbol, idx.name)}
         disabled={!supportsOptions}
-        className={`min-w-[100px] md:min-w-[120px] flex-shrink-0 text-left rounded-md border px-2 md:px-3 py-1.5 transition-all ${
+        className={`min-w-[88px] md:min-w-[120px] flex-shrink-0 text-left rounded-md border px-1.5 md:px-3 py-1 md:py-1.5 transition-all ${
           supportsOptions
             ? 'border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] hover:bg-slate-50 dark:hover:bg-white/[0.08] hover:border-[#007AFF]/40 active:scale-[0.98] cursor-pointer'
             : 'border-slate-100 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] opacity-80 cursor-default'
@@ -88,7 +88,7 @@ const IndicesTickerBar = ({ onIndexClick }) => {
         title={isUs ? `${idx.name} (US Market)` : idx.name}
       >
         <div className="flex items-center gap-1 mb-0.5">
-          <span className={`text-[8px] md:text-[9px] font-bold uppercase tracking-wider truncate ${
+          <span className={`text-[7px] md:text-[9px] font-bold uppercase tracking-wider truncate ${
             isUs ? 'text-blue-500 dark:text-blue-400' : 'text-slate-500 dark:text-white/60'
           }`}>
             {idx.name}
@@ -100,24 +100,24 @@ const IndicesTickerBar = ({ onIndexClick }) => {
             <span className="text-[7px] font-bold text-blue-400/60 shrink-0">US</span>
           )}
         </div>
-        <div className="flex items-baseline gap-1.5">
+        <div className="flex items-baseline gap-1">
           <span
-            className="text-base md:text-xl font-black tracking-tighter tabular-nums text-slate-900 dark:text-white"
+            className="text-sm md:text-xl font-black tracking-tighter tabular-nums text-slate-900 dark:text-white"
             style={{ fontFamily: "'Chivo', sans-serif" }}
           >
             {priceStr}
           </span>
           <div className="flex flex-col items-start">
             <span
-              className={`text-[10px] md:text-xs font-bold font-mono flex items-center gap-0.5 ${
+              className={`text-[9px] md:text-xs font-bold font-mono flex items-center gap-0.5 ${
                 isUp ? 'text-[#34C759]' : 'text-[#FF3B30]'
               }`}
             >
-              {isUp ? <CaretUp size={10} weight="fill" /> : <CaretDown size={10} weight="fill" />}
+              {isUp ? <CaretUp size={8} weight="fill" /> : <CaretDown size={8} weight="fill" />}
               {Math.abs(changePct || 0).toFixed(2)}%
             </span>
             <span
-              className={`text-[8px] font-mono leading-none ${
+              className={`hidden md:block text-[8px] font-mono leading-none ${
                 isUp ? 'text-[#34C759]/80' : 'text-[#FF3B30]/80'
               }`}
             >
