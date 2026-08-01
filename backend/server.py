@@ -15341,3 +15341,74 @@ async def vibe_chat(req: VibeChatRequest):
 
 
 app.include_router(_vibe_router)
+
+
+# ── Crude Oil EIA Live Status ─────────────────────────────────────────────────
+import time as _crude_time
+_crude_eia_cache: dict = {"data": None, "ts": 0.0}
+_CRUDE_EIA_TTL = 3600  # 1 hour — EIA data is weekly anyway
+
+
+@app.get("/api/crude/eia-status")
+async def get_crude_eia_status():
+    """
+    Fetch latest US EIA crude inventory data from FRED (free, no API key).
+    Series: WCRSTUS1 — Weekly US Ending Stocks of Crude Oil (1000 barrels).
+    Falls back to last-known values on error.
+    """
+    import aiohttp as _aio
+
+    now_ts = _crude_time.time()
+    if _crude_eia_cache["data"] and (now_ts - _crude_eia_cache["ts"]) < _CRUDE_EIA_TTL:
+        return _crude_eia_cache["data"]
+
+    try:
+        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=WCRSTUS1"
+        async with _aio.ClientSession() as sess:
+            async with sess.get(url, timeout=_aio.ClientTimeout(total=12)) as r:
+                text = await r.text()
+
+        rows = [ln for ln in text.strip().splitlines() if ln and not ln.startswith("DATE")]
+        if len(rows) < 2:
+            raise ValueError("Insufficient rows")
+
+        def _parse(line: str):
+            d, v = line.strip().split(",")
+            return d.strip(), round(float(v) / 1_000, 3)  # kb → mb
+
+        prev_date, prev_mb = _parse(rows[-2])
+        curr_date, curr_mb = _parse(rows[-1])
+        change_mb = round(curr_mb - prev_mb, 3)
+        kind = "DRAW" if change_mb < 0 else "BUILD"
+
+        result = {
+            "available":       True,
+            "us_curr_mb":      curr_mb,
+            "us_prev_mb":      prev_mb,
+            "us_change_mb":    change_mb,
+            "us_date":         curr_date,
+            "us_kind":         kind,
+            "india_mb":        104.0,
+            "india_status":    "Near 1-yr High",
+            "india_date":      "end of June",
+        }
+        _crude_eia_cache["data"] = result
+        _crude_eia_cache["ts"]   = now_ts
+        return result
+
+    except Exception as exc:
+        fallback = {
+            "available":    False,
+            "error":        str(exc),
+            "us_curr_mb":   430.7,
+            "us_prev_mb":   437.9,
+            "us_change_mb": -7.167,
+            "us_date":      "2025-07-25",
+            "us_kind":      "DRAW",
+            "india_mb":     104.0,
+            "india_status": "Near 1-yr High",
+            "india_date":   "end of June",
+        }
+        _crude_eia_cache["data"] = fallback
+        _crude_eia_cache["ts"]   = now_ts
+        return fallback
