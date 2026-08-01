@@ -454,6 +454,23 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
+## Fix (Aug 2026) — Geopolitical Risk Card
+
+**Feature**: Added "Geopolitical Risk" card to Market Intelligence panel.
+
+**Backend (`market_intel.py`)**:
+- Added `_GEO_RISK_CATEGORIES` — 8 categories with severity weights (Nuclear=4, War=3, Middle East=2, Sanctions=2, US-China=2, Russia-Ukraine=2, Oil Supply=2, Risk-Off=1)
+- Added `_compute_geo_risk(news_items)` — scans existing news items, scores geopolitical keywords, returns {score, level, triggers, affected_sectors, nifty_impact}
+- Scoring: 0-3=LOW, 4-7=MEDIUM, 8+=HIGH (max capped at 15)
+- `geo_risk` field included in `/api/market-intel` response — no extra network call
+  
+**Frontend (`MarketIntelPanel.jsx`)**:
+- New `GeoRiskCard` component: risk level badge, animated score bar, triggers list with category+weight+headline, affected sectors pills, Nifty impact description
+- Compact `Geo Risk` mini card in top data strip (score bar + level)
+- HIGH level shows pulsing ALERT badge
+
+---
+
 ## Fix (Aug 2026) — News Sentiment Context-Aware Rules
 
 **Bug**: Oil price surge news (e.g. "Brent jumps 8%") was tagged BULLISH. India is net oil importer → oil surge = BEARISH for Nifty 50.

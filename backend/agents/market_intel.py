@@ -799,6 +799,142 @@ _news_market_cache: Dict[str, Any] = {}
 _NEWS_MARKET_CACHE_TTL = 900  # 15 minutes
 
 
+# ── Geopolitical Risk Scoring ──────────────────────────────────────────────────
+# Categorized keywords with severity weights (max score cap = 15)
+_GEO_RISK_CATEGORIES: Dict[str, Dict] = {
+    "nuclear": {
+        "weight": 4, "label": "Nuclear Threat",
+        "keywords": ["nuclear weapon", "atomic bomb", "nuclear threat", "nuclear strike",
+                     "radiation leak", "radioactive", "nuclear crisis"],
+        "sectors": ["All Sectors (Severe)"],
+    },
+    "war_conflict": {
+        "weight": 3, "label": "Armed Conflict / War",
+        "keywords": ["war declared", "military invasion", "ground offensive", "airstrike",
+                     "air strike", "missile attack", "bombing", "naval blockade",
+                     "troops deployed", "military escalation", "armed conflict"],
+        "sectors": ["Aviation", "Oil & Gas", "Defence"],
+    },
+    "middle_east": {
+        "weight": 2, "label": "Middle East Tensions",
+        "keywords": ["iran", "israel", "hamas", "hezbollah", "gaza strip", "west bank",
+                     "strait of hormuz", "middle east conflict", "tehran", "beirut attack",
+                     "houthi", "red sea attack"],
+        "sectors": ["Aviation", "Paints", "Auto", "FMCG"],
+    },
+    "oil_supply": {
+        "weight": 2, "label": "Oil Supply Disruption",
+        "keywords": ["opec cut", "oil supply cut", "pipeline attack", "oil embargo",
+                     "crude supply disruption", "oil sanctions", "refinery attack"],
+        "sectors": ["Aviation", "Paints", "Chemicals", "Auto"],
+    },
+    "sanctions": {
+        "weight": 2, "label": "Economic Sanctions",
+        "keywords": ["us sanctions", "trade sanctions", "export ban", "import embargo",
+                     "trade blockade", "technology ban", "chip ban", "iran sanctions"],
+        "sectors": ["IT", "Pharma", "Metals", "Chemicals"],
+    },
+    "us_china": {
+        "weight": 2, "label": "US-China Tensions",
+        "keywords": ["us china trade war", "china tariff", "taiwan strait", "china blockade",
+                     "beijing sanctions", "sino-american", "trade restriction china"],
+        "sectors": ["IT", "Electronics", "Specialty Chemicals"],
+    },
+    "russia_ukraine": {
+        "weight": 2, "label": "Russia-Ukraine Conflict",
+        "keywords": ["russia ukraine", "ukraine war", "kyiv attack", "moscow strike",
+                     "nato russia", "russian invasion", "ukraine ceasefire"],
+        "sectors": ["Metals", "Fertilisers", "Energy"],
+    },
+    "risk_off": {
+        "weight": 1, "label": "Global Risk-Off Sentiment",
+        "keywords": ["geopolitical risk", "safe haven demand", "flight to safety",
+                     "risk-off", "global uncertainty", "war premium crude",
+                     "geopolitical tension", "escalating tensions"],
+        "sectors": ["FII Flows", "Banking", "Midcap"],
+    },
+}
+
+
+def _compute_geo_risk(news_items: List[Dict]) -> Dict:
+    """
+    Compute geopolitical risk score from already-fetched Nifty 50 news items.
+    No extra network call — reuses the existing news cache.
+
+    Returns:
+        score      : int 0-15
+        level      : 'LOW' | 'MEDIUM' | 'HIGH'
+        level_color: hex color
+        triggers   : list of {category, keyword, news_title, weight}
+        nifty_impact: descriptive string
+        affected_sectors: list of sector strings
+        headline_count: int
+    """
+    score = 0
+    triggers: List[Dict] = []
+    affected_sectors_set: set = set()
+    seen_categories: set = set()
+
+    for item in news_items:
+        text = (item.get("title", "") + " " + item.get("summary", "")).lower()
+        for cat_key, cat in _GEO_RISK_CATEGORIES.items():
+            matched_kw = next((kw for kw in cat["keywords"] if kw in text), None)
+            if matched_kw and cat_key not in seen_categories:
+                score += cat["weight"]
+                seen_categories.add(cat_key)
+                for s in cat["sectors"]:
+                    affected_sectors_set.add(s)
+                triggers.append({
+                    "category":   cat["label"],
+                    "keyword":    matched_kw,
+                    "news_title": item.get("title", "")[:80],
+                    "weight":     cat["weight"],
+                })
+
+    score = min(score, 15)
+
+    if score >= 8:
+        level       = "HIGH"
+        level_color = "#ef4444"
+        nifty_impact = (
+            "Strong bearish risk — expect VIX spike, FII selling pressure, "
+            "potential 200-400 pts downside. Avoid aggressive longs."
+        )
+        nifty_sectors_note = "Defensives (Pharma/FMCG) may outperform; Aviation, Auto vulnerable"
+    elif score >= 4:
+        level       = "MEDIUM"
+        level_color = "#f97316"
+        nifty_impact = (
+            "Moderate risk — FII outflow possible, oil-import sectors under pressure. "
+            "Wait for stability before entering large positions."
+        )
+        nifty_sectors_note = "Monitor oil-linked sectors (Auto, Paints, Aviation)"
+    else:
+        level       = "LOW"
+        level_color = "#22c55e"
+        nifty_impact = (
+            "Minimal direct geopolitical impact on Nifty 50 currently. "
+            "Focus on domestic macro (PCR, FII/DII, VIX) for direction."
+        )
+        nifty_sectors_note = "No sector-specific geo-risk today"
+
+    # Sort triggers by weight (highest first)
+    triggers.sort(key=lambda x: -x["weight"])
+
+    return {
+        "score":            score,
+        "score_max":        15,
+        "level":            level,
+        "level_color":      level_color,
+        "nifty_impact":     nifty_impact,
+        "sectors_note":     nifty_sectors_note,
+        "triggers":         triggers[:6],
+        "affected_sectors": sorted(list(affected_sectors_set))[:8],
+        "headline_count":   len(news_items),
+        "available":        True,
+    }
+
+
 def _n50_classify_item(title: str, desc: str) -> Optional[str]:
     """
     Classify a news item for Nifty 50 relevance.
@@ -1844,6 +1980,7 @@ async def _build_intel() -> Dict:
         "breadth": breadth_data if breadth_data else {},
         "today_actual": today_actual,
         "market_news": market_news_data if market_news_data else {"available": False, "items": []},
+        "geo_risk":    _compute_geo_risk(market_news_data.get("items", []) if market_news_data else []),
         "updated_at": now.isoformat(),
     }
     _cache["intel"] = {"data": data, "ts": now}
