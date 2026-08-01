@@ -78,8 +78,14 @@ Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals s
 ---
 
 ## Refactoring Backlog (P2)
-- `MarketIntelPanel.jsx` (~2700 lines) → split GeoRiskCard, CrudeSupplyCard, EIABanner into separate files
-- `server.py` (~15k lines) → split routes into `/routes` directory
+- `MarketIntelPanel.jsx` (~2700 lines) → DONE - Split into 8 modules in `market-intel/` dir
+- `server.py` (~15k lines) → PARTIALLY DONE - Extracted 228 lines into route modules
+
+## Extracted Route Modules (Backend)
+- `backend/database.py` — shared MongoDB connection
+- `backend/routes/crude.py` — `/api/crude/*` (EIA status, save-score, score-history)
+- `backend/routes/metals.py` — `/api/metals/*` (live Gold/Silver prices)
+- `backend/routes/market_intel.py` — `/api/market-intel/*` (bias, FII, news-refresh)
 
 ## Known Constraints
 - FRED API times out in preview container (handled with static fallback — works in production)
