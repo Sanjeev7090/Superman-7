@@ -454,6 +454,22 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
+## Feature (Aug 2026) — Crude Oil Supply Card
+
+**Card**: "Crude Oil Supply — India + Trading Logic" — added below Geo Risk card in Market Intel panel.
+
+**Sections**:
+1. **Live Status Strip** (always visible): Current Brent price + derived supply signal from day % change → shows live bias (Bullish/Bearish/Cautious/Neutral)
+2. **Supply Logic Table**: 4-row table mapping Supply Situation → Crude Impact → Nifty Impact → Trading Bias
+3. **Simple Trading Rules**: 3 numbered rules for Nifty traders
+4. **Data Sources**: EIA (free+best), PPAC India, Kpler/Vortexa, ET — with clickable links
+5. **Best Practical Routine**: Wednesday EIA schedule, India news tracking, $85+ alert
+6. **Short Rule Banner**: "Supply badhe → Crude girta → Nifty support / Supply ghate → Crude badhta → Nifty pressure"
+
+**Dynamic logic**: Brent ≥ $88 → "HIGH ZONE" badge; +3% → SUPPLY TIGHT/Bearish; +1-3% → Cautious; -1-3% → Softening; -3%+ → SUPPLY EASING/Bullish
+
+---
+
 ## Fix (Aug 2026) — Geopolitical Risk Card
 
 **Feature**: Added "Geopolitical Risk" card to Market Intelligence panel.
