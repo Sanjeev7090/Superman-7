@@ -64,6 +64,17 @@ Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals s
   - Fix: Changed to `type:'METAL'` + `yf_ticker` field; `handleCryptoSelect` and `handleTimeframeChange` now route METAL type through `fetchStockData(yf_ticker)` using `/api/stock/bars/GC=F` (yfinance)
   - Testing: Verified via testing agent (iteration_39.json — 100% pass)
 
+- **Silver Intraday Chart (15m/1H):**
+  - Fixed `selectedCrypto` pass-through for METAL type in CryptoList so metals get highlighted when selected
+  - Fixed `ticker` for GannQSCPanel: metals now pass `yf_ticker` (`GC=F`/`SI=F`) instead of `XAUUSD`/`XAGUSD`
+  - All TF buttons (15M, 1H, etc.) now work for XAUUSD and XAGUSD via yfinance fallback
+
+- **MarketIntelPanel Refactor:**
+  - 2729-line file split into 8 new components in `/components/market-intel/`:
+    - `PcrSparkline.jsx`, `MarketNewsCard.jsx`, `GeoRiskCard.jsx`, `EIABanner.jsx`
+    - `CrudeSupplyCard.jsx`, `SectorBreadthCard.jsx`, `BreadthCard.jsx`, `FiiSection.jsx`
+  - Main `MarketIntelPanel.jsx` reduced from 2729 → 1107 lines
+
 ---
 
 ## Refactoring Backlog (P2)

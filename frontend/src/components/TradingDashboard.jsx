@@ -824,7 +824,7 @@ const TradingDashboard = () => {
             {activeTab === 'crypto' && (
               <CryptoList
                 onCryptoSelect={handleCryptoSelect}
-                selectedCrypto={isCrypto ? selectedStock : null}
+                selectedCrypto={(isCrypto || selectedStock?.type === 'METAL') ? selectedStock : null}
               />
             )}
 
@@ -896,7 +896,7 @@ const TradingDashboard = () => {
             {stockData?.bars?.length > 0 && selectedStock && (
               <GannQSCPanel
                 bars={stockData.bars}
-                ticker={isCrypto ? selectedStock.symbol : selectedStock.ticker}
+                ticker={isCrypto ? selectedStock.symbol : (selectedStock?.type === 'METAL' ? selectedStock.yf_ticker : selectedStock.ticker)}
               />
             )}
             {stockData && !isCrypto && (
