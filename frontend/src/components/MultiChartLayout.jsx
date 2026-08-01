@@ -260,17 +260,17 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
 
   const handleStockSelect = useCallback((stock) => {
     onUpdate(slot.id, { selectedStock: stock, stockData: null });
-    fetchData(stock.ticker, slot.timeframe);
+    fetchData(stock.yf_ticker || stock.ticker, slot.timeframe);
   }, [slot.id, slot.timeframe, fetchData, onUpdate]);
 
   const handleTfChange = useCallback((tf) => {
     onUpdate(slot.id, { timeframe: tf });
-    if (slot.selectedStock) fetchData(slot.selectedStock.ticker, tf);
+    if (slot.selectedStock) fetchData(slot.selectedStock.yf_ticker || slot.selectedStock.ticker, tf);
   }, [slot.id, slot.selectedStock, fetchData, onUpdate]);
 
   const handleDsChange = useCallback((ds) => {
     onUpdate(slot.id, { dataSource: ds });
-    if (slot.selectedStock) fetchData(slot.selectedStock.ticker, slot.timeframe, ds);
+    if (slot.selectedStock) fetchData(slot.selectedStock.yf_ticker || slot.selectedStock.ticker, slot.timeframe, ds);
   }, [slot.id, slot.selectedStock, slot.timeframe, fetchData, onUpdate]);
 
   const handleSemiLog = useCallback((v) => onUpdate(slot.id, { semiLogScale: v }), [slot.id, onUpdate]);
@@ -280,7 +280,7 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
     // (stock metadata is saved but chart data is never stored — need a fresh fetch)
     useEffect(() => {
       if (slot.id !== 1 && slot.selectedStock && !slot.stockData && !slot.loading) {
-        fetchData(slot.selectedStock.ticker, slot.timeframe);
+        fetchData(slot.selectedStock.yf_ticker || slot.selectedStock.ticker, slot.timeframe);
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [slot.id]);
@@ -291,7 +291,7 @@ function ChartSlot({ slot, onUpdate, isCompact, onOpenOptionChain }) {
   useEffect(() => {
     if (!isIntraday || !slot.selectedStock) return;
     const id = setInterval(() => {
-      fetchData(slot.selectedStock.ticker, slot.timeframe);
+      fetchData(slot.selectedStock.yf_ticker || slot.selectedStock.ticker, slot.timeframe);
     }, 5 * 60 * 1000); // 5 minutes
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
