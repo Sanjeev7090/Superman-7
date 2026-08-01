@@ -454,6 +454,22 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ---
 
+## Fix (Aug 2026) — News Sentiment Context-Aware Rules
+
+**Bug**: Oil price surge news (e.g. "Brent jumps 8%") was tagged BULLISH. India is net oil importer → oil surge = BEARISH for Nifty 50.
+
+**Fix in `market_intel.py`**:
+- Removed generic price-movement words ("surge","jump","rise","gains") from `_N50_BULLISH_KW` to prevent false matches
+- Added `_OIL_SURGE_PATTERNS` / `_OIL_FALL_PATTERNS` / `_GEO_BEARISH_PATTERNS` lists
+- New `_n50_context_sentiment()` function: India-specific contextual override before keyword fallback
+  - Crude/Brent surge → BEARISH (India 85% oil importer → inflation + CAD + rupee weak)
+  - Crude/Brent fall  → BULLISH
+  - US stocks slide   → BEARISH (global risk-off → FII outflows)
+  - Geopolitical escalation + oil topic → BEARISH
+- Verified: All 4 screenshot headlines now correctly BEARISH
+
+---
+
 ## Update (Feb 2026) — PCR Historical Trend Chart
 
 **Feature**: PCR Trend Sparkline added inside the PCR Signal card

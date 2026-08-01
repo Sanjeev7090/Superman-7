@@ -704,23 +704,96 @@ _N50_TOP_COMPANIES = [
 ]
 
 # ── Sentiment Keywords (Nifty 50 context) ─────────────────────────────────────
+# NOTE: Generic price-movement words (surge/jump/rise) are intentionally EXCLUDED
+# from bullish list because they must be evaluated in context (oil surge = BEARISH).
 _N50_BULLISH_KW = [
-    "rally", "rallies", "surge", "surges", "rises", "rise", "gains", "gain",
-    "bullish", "strong", "upside", "positive", "rebound", "recovery",
-    "jumps", "jump", "breakout", "fii buying", "foreign buying",
+    "rally", "rallies", "bullish", "strong", "upside", "positive", "rebound",
+    "recovery", "breakout", "fii buying", "foreign buying", "fii inflow",
     "buying interest", "support", "all-time high", "record high",
-    "rate cut", "outperform", "upgrade", "accumulate", "overweight",
-    "net buyer", "net inflow", "inflows", "higher", "advances",
+    "rate cut", "repo cut", "outperform", "upgrade", "accumulate", "overweight",
+    "net buyer", "net inflow", "inflows", "advances", "green", "gains today",
+    "oil falls", "crude falls", "oil drops", "crude drops", "oil declines",
+    "brent falls", "brent drops", "crude down", "oil down",
+    "rupee strengthens", "rupee gains", "rupee rises",
+    "us markets rise", "wall street gains", "dow gains", "s&p gains",
 ]
 
 _N50_BEARISH_KW = [
     "crash", "fall", "falls", "drop", "drops", "decline", "declines",
     "bearish", "selloff", "sell-off", "weak", "weakness", "downside",
-    "negative", "caution", "fear", "fii selling", "foreign selling",
+    "negative", "caution", "fear", "fii selling", "foreign selling", "fii outflow",
     "net seller", "outflow", "outflows", "correction", "breakdown",
-    "pressure", "plunge", "slump", "rout", "rate hike",
+    "pressure", "plunge", "slump", "rout", "rate hike", "repo hike",
     "overbought", "downgrade", "reduce", "underweight", "avoid",
+    "geopolitical", "escalation", "war", "attack", "strikes", "conflict",
+    "rupee weakens", "rupee falls", "rupee declines", "rupee at record low",
+    "us stocks slide", "wall street falls", "dow falls", "s&p falls", "us markets fall",
+    "inflation rises", "inflation surge", "high inflation",
 ]
+
+# ── Oil/Crude Contextual Rules (India is net oil importer) ───────────────────
+# These patterns OVERRIDE generic keyword scoring for oil-related news
+_OIL_SURGE_PATTERNS = [
+    "crude jumps", "crude surges", "crude rises", "crude soars", "crude spikes",
+    "crude climbs", "brent jumps", "brent surges", "brent rises", "brent soars",
+    "brent climbs", "oil jumps", "oil surges", "oil rises", "oil soars",
+    "oil spikes", "oil climbs", "oil rebound", "oil prices jump", "oil prices rise",
+    "oil prices surge", "oil prices soar", "oil prices climb", "crude up",
+    "brent up", "oil up", "crude nears", "brent nears", "oil nears",
+    "crude above", "brent above",
+]
+_OIL_FALL_PATTERNS = [
+    "crude falls", "crude drops", "crude declines", "crude plunges", "crude slumps",
+    "brent falls", "brent drops", "brent declines", "brent plunges",
+    "oil falls", "oil drops", "oil declines", "oil plunges", "oil slumps",
+    "oil prices fall", "oil prices drop", "oil prices decline",
+    "crude down", "brent down", "oil down",
+]
+
+# ── Geopolitical Escalation → BEARISH for Nifty (global risk-off) ─────────────
+_GEO_BEARISH_PATTERNS = [
+    "middle east", "iran", "israel", "gaza", "hamas", "hezbollah",
+    "trump warns", "us forces attack", "missile", "airstrike", "air strike",
+    "war escalates", "conflict escalates", "military strike", "us iran",
+]
+
+
+def _n50_context_sentiment(text_lower: str) -> Optional[str]:
+    """
+    Context-aware Nifty 50 sentiment override.
+    Returns 'BEARISH' | 'BULLISH' | None (use keyword fallback).
+
+    Key India-specific rules:
+    - Oil/Crude surge → BEARISH (India imports ~85% crude → inflation + CAD + rupee weak)
+    - Oil/Crude fall  → BULLISH
+    - Geopolitical escalation + oil surge → STRONGLY BEARISH
+    - US stocks slide  → BEARISH (global risk-off hits FII flows)
+    """
+    has_oil_topic = any(p in text_lower for p in [
+        "crude", "brent", "oil price", "wti", "petroleum"
+    ])
+
+    if has_oil_topic:
+        # Oil surge → BEARISH for India
+        if any(p in text_lower for p in _OIL_SURGE_PATTERNS):
+            return "BEARISH"
+        # Oil fall → BULLISH for India
+        if any(p in text_lower for p in _OIL_FALL_PATTERNS):
+            return "BULLISH"
+
+    # US stocks falling → global risk-off → FII sell India → BEARISH
+    us_bear = ["us stocks slide", "us stocks fall", "wall street falls", "wall street slides",
+               "dow falls", "dow drops", "s&p falls", "s&p drops", "nasdaq falls",
+               "us markets fall", "us markets down", "american stocks fall"]
+    if any(p in text_lower for p in us_bear):
+        return "BEARISH"
+
+    # Geopolitical escalation with oil → strong BEARISH
+    has_geo = any(p in text_lower for p in _GEO_BEARISH_PATTERNS)
+    if has_geo and has_oil_topic:
+        return "BEARISH"
+
+    return None  # fallback to keyword counting
 
 _news_market_cache: Dict[str, Any] = {}
 _NEWS_MARKET_CACHE_TTL = 900  # 15 minutes
@@ -823,16 +896,22 @@ def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
                 if impact_level is None:
                     continue
 
-                # Keyword-based sentiment scoring
+                # Context-aware sentiment (India-specific rules first)
                 text_lower = (title + " " + desc).lower()
-                bull = sum(1 for kw in _N50_BULLISH_KW if kw in text_lower)
-                bear = sum(1 for kw in _N50_BEARISH_KW if kw in text_lower)
-                if bull > bear:
-                    sentiment, s_color = "BULLISH", "#22c55e"
-                elif bear > bull:
-                    sentiment, s_color = "BEARISH", "#ef4444"
+                ctx_sentiment = _n50_context_sentiment(text_lower)
+                if ctx_sentiment:
+                    sentiment = ctx_sentiment
+                    s_color = "#22c55e" if sentiment == "BULLISH" else "#ef4444"
                 else:
-                    sentiment, s_color = "NEUTRAL", "#94a3b8"
+                    # Fallback: keyword-based scoring
+                    bull = sum(1 for kw in _N50_BULLISH_KW if kw in text_lower)
+                    bear = sum(1 for kw in _N50_BEARISH_KW if kw in text_lower)
+                    if bull > bear:
+                        sentiment, s_color = "BULLISH", "#22c55e"
+                    elif bear > bull:
+                        sentiment, s_color = "BEARISH", "#ef4444"
+                    else:
+                        sentiment, s_color = "NEUTRAL", "#94a3b8"
 
                 # Parse pub date to ISO
                 pub_iso = ""
