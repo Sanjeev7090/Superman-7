@@ -15,7 +15,7 @@ function MetalRow({ label, ticker, price, changePct, weekChg, icon, onSelect }) 
   const isUp = changePct >= 0;
   return (
     <button
-      onClick={() => onSelect && onSelect({ ticker, name: label, type: 'STOCK', symbol: ticker, current_price: price, price_change_pct_24h: changePct })}
+      onClick={() => onSelect && onSelect({ ticker, name: label, type: 'METAL', yf_ticker: ticker === 'XAUUSD' ? 'GC=F' : 'SI=F', symbol: ticker, current_price: price, price_change_pct_24h: changePct })}
       className="w-full flex items-center justify-between px-2.5 py-2 text-left border-b border-white/5 hover:bg-white/5 transition-all"
       data-testid={`metal-item-${ticker}`}>
       <div className="flex items-center gap-2">

@@ -503,9 +503,15 @@ const TradingDashboard = () => {
     setGannFan(null);
     setSignal(null);
     setSelectedStock(crypto);
+    setMobilePanel('chart');
+    if (crypto.type === 'METAL') {
+      const defaultTf = { multiplier: 1, timespan: 'day', label: '1D' };
+      setTimeframe(defaultTf);
+      fetchStockData(crypto.yf_ticker, defaultTf);
+      return;
+    }
     setCryptoChartDays(7);
     fetchCryptoData(crypto.coin_id, 7, 1440);
-    setMobilePanel('chart');
   };
 
   const handleTimeframeChange = (tf) => {
@@ -524,6 +530,8 @@ const TradingDashboard = () => {
         const optIntervalMap = { '1MIN': 1, '2M': 2, '3M': 3, '5M': 5, '10M': 10, '15M': 15, '30M': 30, '45M': 45 };
         const ivm = optIntervalMap[tf.label] || 1;
         fetchOptionIntraday(selectedStock.selectedOption, ivm);
+      } else if (selectedStock.type === 'METAL') {
+        fetchStockData(selectedStock.yf_ticker, tf);
       } else {
         fetchStockData(selectedStock.ticker, tf);
       }
@@ -549,7 +557,7 @@ const TradingDashboard = () => {
   };
 
   const fetchSignal = async (pivot) => {
-    if (!selectedStock || !pivot || selectedStock.type === 'CRYPTO' || selectedStock.type === 'OPTION') return;
+    if (!selectedStock || !pivot || selectedStock.type === 'CRYPTO' || selectedStock.type === 'OPTION' || selectedStock.type === 'METAL') return;
     try {
       const response = await axios.get(`${API}/signal/${selectedStock.ticker}`, {
         params: { pivot_price: pivot.price, pivot_timestamp: pivot.timestamp }
