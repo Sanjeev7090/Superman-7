@@ -7,7 +7,6 @@ Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals s
 ## User Preferences
 - **Language:** Hinglish/Hindi responses
 - **NO screenshots during dev**
-- **NO testing agent** (except hard crashes)
 - **India-first logic** — all signals mapped to Nifty 50 impact
 
 ---
@@ -18,15 +17,23 @@ Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals s
 /app/
 ├── backend/
 │   ├── server.py           (FastAPI main — all routes, 15k+ lines)
+│   ├── database.py         (Shared MongoDB connection)
+│   ├── routes/
+│   │   ├── crude.py        (EIA status, save-score, score-history)
+│   │   ├── metals.py       (Gold/Silver live prices)
+│   │   └── market_intel.py (Bias, FII, news-refresh)
 │   ├── agents/
 │   │   └── market_intel.py (Geo risk, news sentiment, macro scores)
 │   └── .env
 ├── frontend/
 │   ├── src/components/
 │   │   ├── TradingDashboard.jsx
-│   │   ├── MarketIntelPanel.jsx  (~2700 lines — refactor needed)
-│   │   ├── CryptoList.jsx        (Crypto + Metals sidebar)
-│   │   └── ChartPanel.jsx
+│   │   ├── MultiChartLayout.jsx  (passes externalMarkers to slot-1 ChartPanel)
+│   │   ├── ChartPanel.jsx        (accepts strategyMarkers prop, merges with EMA markers)
+│   │   ├── VibeResearchPanel.jsx (Strategy Builder feature added)
+│   │   ├── MarketIntelPanel.jsx  (~1107 lines — refactored)
+│   │   ├── market-intel/         (8 extracted components)
+│   │   └── CryptoList.jsx
 └── memory/
     └── PRD.md
 ```
@@ -35,15 +42,17 @@ Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals s
 - `crude_score_history`: `{ date: string, score: float }`
 
 ## Key API Endpoints
-- `POST /api/vibe/chat`
+- `POST /api/vibe/chat`             — Streaming Vibe Research chat (SSE)
+- `POST /api/vibe/strategy-build`   — LLM generates Python strategy code
+- `POST /api/vibe/strategy-execute` — Sandboxed exec of strategy code → markers
 - `GET /api/market-intel/news-refresh`
 - `GET /api/crude/eia-status`
 - `POST /api/crude/save-score`
-- `GET /api/metals/prices` — Gold/Silver live prices (yfinance GC=F, SI=F)
-- `GET /api/stock/bars/{ticker}` — OHLCV via yfinance (supports GC=F, SI=F, etc.)
+- `GET /api/metals/prices`          — Gold/Silver live prices (yfinance GC=F, SI=F)
+- `GET /api/stock/bars/{ticker}`    — OHLCV via yfinance (supports GC=F, SI=F, etc.)
 
 ## 3rd Party Integrations
-- OpenAI / Emergent LLM Key
+- OpenAI / Emergent LLM Key (Anthropic claude-sonnet-4-6)
 - yfinance (no key needed)
 - FRED API (EIA data, static fallback in container)
 
@@ -58,34 +67,43 @@ Gann Angles analysis, AI Vibe Chat, Market Intelligence Panel, Crypto + Metals s
 - Score Sparkline — last 5 days macro trend (SVG, MongoDB backed)
 - Metals in Crypto List — Gold (GC=F) + Silver (SI=F) added to sidebar
 
-### Session (Current — Feb 2026)
-- **Bug Fix:** XAUUSD/XAGUSD chart load failure
-  - Root cause: MetalRow passed `type:'STOCK'` with no `coin_id` → `fetchCryptoData(undefined)` → `/api/crypto/chart/undefined` → 404
-  - Fix: Changed to `type:'METAL'` + `yf_ticker` field; `handleCryptoSelect` and `handleTimeframeChange` now route METAL type through `fetchStockData(yf_ticker)` using `/api/stock/bars/GC=F` (yfinance)
-  - Testing: Verified via testing agent (iteration_39.json — 100% pass)
+### Session (Feb 2026 — Part 1)
+- **Bug Fix:** XAUUSD/XAGUSD chart load failure (type: METAL + yf_ticker fix)
+- **Silver Intraday Chart:** 15m/1H intraday view added for Silver
+- **MarketIntelPanel Refactor:** 2729-line file split into 8 new components in `/components/market-intel/`
+- **Backend Refactor:** server.py partially split into route modules (crude, metals, market_intel)
+- **Timeframe Bug Fix:** METAL type timeframe switching fixed in MultiChartLayout
 
-- **Silver Intraday Chart (15m/1H):**
-  - Fixed `selectedCrypto` pass-through for METAL type in CryptoList so metals get highlighted when selected
-  - Fixed `ticker` for GannQSCPanel: metals now pass `yf_ticker` (`GC=F`/`SI=F`) instead of `XAUUSD`/`XAGUSD`
-  - All TF buttons (15M, 1H, etc.) now work for XAUUSD and XAGUSD via yfinance fallback
-
-- **MarketIntelPanel Refactor:**
-  - 2729-line file split into 8 new components in `/components/market-intel/`:
-    - `PcrSparkline.jsx`, `MarketNewsCard.jsx`, `GeoRiskCard.jsx`, `EIABanner.jsx`
-    - `CrudeSupplyCard.jsx`, `SectorBreadthCard.jsx`, `BreadthCard.jsx`, `FiiSection.jsx`
-  - Main `MarketIntelPanel.jsx` reduced from 2729 → 1107 lines
+### Session (Feb 2026 — Part 2)
+- **Strategy Builder Feature:** (COMPLETED)
+  - Backend: `POST /api/vibe/strategy-build` — LLM generates Python strategy code from user prompt
+  - Backend: `POST /api/vibe/strategy-execute` — Sandboxed Python exec with restricted builtins, blocked dangerous keywords, returns lightweight-charts markers
+  - Frontend: Dedicated "Strategy" button (code icon) in Vibe Research input area
+  - Frontend: Strategy Builder modal with quick prompt chips + textarea + Generate button
+  - Frontend: Code block rendered in chat with "Load on Chart" button
+  - Frontend: ChartPanel accepts `strategyMarkers` prop, merges with EMA markers
+  - Frontend: State flows: TradingDashboard → MultiChartLayout → ChartPanel
+  - Security: Blocked imports, os/sys/subprocess, eval/exec calls, 10s timeout
+  - Testing: Backend 100% (6/6), Frontend 90% (minor toggle LOW priority)
 
 ---
 
 ## Refactoring Backlog (P2)
-- `MarketIntelPanel.jsx` (~2700 lines) → DONE - Split into 8 modules in `market-intel/` dir
-- `server.py` (~15k lines) → PARTIALLY DONE - Extracted 228 lines into route modules
+- `server.py` (~15k lines) → PARTIALLY DONE — `_vibe_router` still embedded; could extract to `/routes/vibe.py`
 
 ## Extracted Route Modules (Backend)
 - `backend/database.py` — shared MongoDB connection
-- `backend/routes/crude.py` — `/api/crude/*` (EIA status, save-score, score-history)
-- `backend/routes/metals.py` — `/api/metals/*` (live Gold/Silver prices)
-- `backend/routes/market_intel.py` — `/api/market-intel/*` (bias, FII, news-refresh)
+- `backend/routes/crude.py` — `/api/crude/*`
+- `backend/routes/metals.py` — `/api/metals/*`
+- `backend/routes/market_intel.py` — `/api/market-intel/*`
 
 ## Known Constraints
-- FRED API times out in preview container (handled with static fallback — works in production)
+- FRED API times out in preview container (handled with static fallback)
+- NIFTYIFTB.NS ticker shows yfinance 404 warnings (not critical)
+
+## Strategy Builder Technical Notes
+- LLM System Prompt ensures: pure Python, no imports, uses `bars` list, populates `signals` list
+- Sandboxed exec: only safe builtins (abs, min, max, len, range, sum, float, int, etc.)
+- Keyword blocklist: `import `, `__import__`, `exec(`, `eval(`, `open(`, `os.`, `sys.`, etc.
+- Bars sanitized before execution: only open/high/low/close/volume/timestamp (float/int typed)
+- Markers sorted by time before returning (lightweight-charts requirement)
