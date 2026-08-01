@@ -365,6 +365,8 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
         <OptionsPaperTradeModal
           onClose={() => setShowOptionsModal(false)}
           onOrderPlaced={() => { setShowOptionsModal(false); fetchAll(); }}
+          isLiveMode={isLiveMode && brokerSettings?.connected}
+          brokerProfile={brokerSettings?.profile}
         />
       )}
       {showBrokerModal && (

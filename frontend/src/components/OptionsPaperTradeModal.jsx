@@ -122,7 +122,7 @@ const ChainTable = ({ strikes, underlying, selectedStrike, onSelect }) => {
 };
 
 // ── Main Modal ───────────────────────────────────────────────────────────────
-const OptionsPaperTradeModal = ({ onClose, onOrderPlaced }) => {
+const OptionsPaperTradeModal = ({ onClose, onOrderPlaced, isLiveMode, brokerProfile }) => {
   const [selectedIndex, setSelectedIndex] = useState('NIFTY');
   const [chainData, setChainData] = useState(null);
   const [loadingChain, setLoadingChain] = useState(false);
@@ -220,29 +220,44 @@ const OptionsPaperTradeModal = ({ onClose, onOrderPlaced }) => {
 
     const symbol = `${selectedIndex}${selectedStrike.strike}${selectedStrike.optionType}`;
     const name = `${selectedIndex} ${Number(selectedStrike.strike).toLocaleString('en-IN')} ${selectedStrike.optionType} ${selectedExpiry || ''}`;
+    const option_meta_payload = {
+      underlying: selectedIndex,
+      strike: selectedStrike.strike,
+      option_type: selectedStrike.optionType,
+      expiry: selectedExpiry || chainData?.nearest_expiry,
+      lot_size: lotSize,
+      lots: lots,
+    };
 
     setPlacing(true);
     try {
-      await axios.post(`${API}/paper-trade/order`, {
-        symbol,
-        name,
-        direction,
-        quantity: totalQty,
-        entry_price: ep,
-        stop_loss: sl,
-        target: tgt,
-        strategy: 'OPTIONS',
-        source: 'MANUAL',
-        option_meta: {
-          underlying: selectedIndex,
-          strike: selectedStrike.strike,
-          option_type: selectedStrike.optionType,
-          expiry: selectedExpiry || chainData?.nearest_expiry,
-          lot_size: lotSize,
-          lots: lots,
-        },
-      });
-      toast.success(`✅ ${direction} ${name} @ ₹${ep} placed!`);
+      if (isLiveMode) {
+        // ── LIVE order via Groww ──────────────────────────────────────
+        await axios.post(`${API}/live-trade/order`, {
+          symbol,
+          direction,
+          quantity: totalQty,
+          price: ep,
+          order_type: 'LIMIT',
+          option_meta: option_meta_payload,
+        });
+        toast.success(`LIVE ${direction} ${name} @ ₹${ep} — Groww mein order placed!`);
+      } else {
+        // ── Paper trade ───────────────────────────────────────────────
+        await axios.post(`${API}/paper-trade/order`, {
+          symbol,
+          name,
+          direction,
+          quantity: totalQty,
+          entry_price: ep,
+          stop_loss: sl,
+          target: tgt,
+          strategy: 'OPTIONS',
+          source: 'MANUAL',
+          option_meta: option_meta_payload,
+        });
+        toast.success(`Paper ${direction} ${name} @ ₹${ep} placed!`);
+      }
       if (onOrderPlaced) onOrderPlaced();
       onClose();
     } catch (e) {
@@ -261,9 +276,17 @@ const OptionsPaperTradeModal = ({ onClose, onOrderPlaced }) => {
         {/* ── Header ── */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-2">
-            <Lightning size={14} className="text-yellow-400" weight="fill" />
-            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">Options Paper Trade</span>
-            <span className="text-[8px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 font-bold">5x</span>
+            <Lightning size={14} className={isLiveMode ? "text-[#FF9800]" : "text-yellow-400"} weight="fill" />
+            <span className="text-[11px] font-black uppercase tracking-[0.2em] text-white">
+              {isLiveMode ? 'Live Options Trade' : 'Options Paper Trade'}
+            </span>
+            {isLiveMode ? (
+              <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#FF9800]/20 text-[#FF9800] border border-[#FF9800]/30 font-bold animate-pulse">
+                LIVE · Groww
+              </span>
+            ) : (
+              <span className="text-[8px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 font-bold">5x</span>
+            )}
           </div>
           <button onClick={onClose} className="p-1.5 text-zinc-500 hover:text-white transition-colors rounded-lg hover:bg-white/5">
             <X size={14} />
@@ -482,13 +505,23 @@ const OptionsPaperTradeModal = ({ onClose, onOrderPlaced }) => {
             </div>
           )}
 
-          {/* Auto-execute notice */}
-          <div className="flex items-start gap-1.5 p-2 bg-blue-500/8 border border-blue-500/15 rounded-lg">
-            <Info size={10} className="text-blue-400 mt-0.5 shrink-0" />
-            <p className="text-[8px] text-blue-300 leading-relaxed">
-              <span className="font-bold">Auto SL/Target:</span> System har 2 second mein option price check karta hai aur automatically position close karta hai jab SL ya Target hit ho.
-            </p>
-          </div>
+          {/* Auto-execute / live notice */}
+          {isLiveMode ? (
+            <div className="flex items-start gap-1.5 p-2 bg-[#FF9800]/8 border border-[#FF9800]/20 rounded-lg">
+              <Warning size={10} className="text-[#FF9800] mt-0.5 shrink-0" />
+              <p className="text-[8px] text-[#FF9800]/90 leading-relaxed">
+                <span className="font-black text-[#FF9800]">LIVE MODE:</span> Real money se Groww account mein order jayega. 
+                Confirm karke hi buy/sell karo.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-start gap-1.5 p-2 bg-blue-500/8 border border-blue-500/15 rounded-lg">
+              <Info size={10} className="text-blue-400 mt-0.5 shrink-0" />
+              <p className="text-[8px] text-blue-300 leading-relaxed">
+                <span className="font-bold">Auto SL/Target:</span> System har 2 second mein option price check karta hai aur automatically position close karta hai jab SL ya Target hit ho.
+              </p>
+            </div>
+          )}
 
           {/* Place Button */}
           <button
@@ -497,15 +530,19 @@ const OptionsPaperTradeModal = ({ onClose, onOrderPlaced }) => {
             className={`w-full py-2.5 text-[11px] font-black uppercase tracking-wider rounded-xl transition-all border ${
               !selectedStrike
                 ? 'border-white/10 text-zinc-600 bg-white/[0.02] cursor-not-allowed'
-                : direction === 'BUY'
-                  ? 'bg-[#00E676]/20 text-[#00E676] hover:bg-[#00E676]/30 border-[#00E676]/30'
-                  : 'bg-[#FF3B30]/20 text-[#FF3B30] hover:bg-[#FF3B30]/30 border-[#FF3B30]/30'
+                : isLiveMode
+                  ? direction === 'BUY'
+                    ? 'bg-[#FF9800]/20 text-[#FF9800] hover:bg-[#FF9800]/30 border-[#FF9800]/30'
+                    : 'bg-[#FF3B30]/20 text-[#FF3B30] hover:bg-[#FF3B30]/30 border-[#FF3B30]/30'
+                  : direction === 'BUY'
+                    ? 'bg-[#00E676]/20 text-[#00E676] hover:bg-[#00E676]/30 border-[#00E676]/30'
+                    : 'bg-[#FF3B30]/20 text-[#FF3B30] hover:bg-[#FF3B30]/30 border-[#FF3B30]/30'
             } disabled:opacity-50`}
           >
             {placing
               ? 'Placing...'
               : selectedStrike
-                ? `${direction === 'BUY' ? '▲ BUY' : '▼ SELL'} ${selectedIndex} ${Number(selectedStrike.strike).toLocaleString('en-IN')} ${selectedStrike.optionType} — ${lots} Lot${lots > 1 ? 's' : ''} (${totalQty} qty)`
+                ? `${isLiveMode ? 'LIVE ' : ''}${direction === 'BUY' ? '▲ BUY' : '▼ SELL'} ${selectedIndex} ${Number(selectedStrike.strike).toLocaleString('en-IN')} ${selectedStrike.optionType} — ${lots} Lot${lots > 1 ? 's' : ''} (${totalQty} qty)`
                 : 'Pehle strike select karo ↑'
             }
           </button>

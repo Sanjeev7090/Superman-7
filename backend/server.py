@@ -9553,57 +9553,163 @@ async def test_broker_connection(body: dict):
     return {"connected": True, "profile": profile}
 
 
+def _lookup_groww_fno_symbol(underlying: str, expiry_date_str: str, strike: int, option_type: str) -> Optional[str]:
+    """
+    Look up exact Groww F&O trading_symbol from instruments CSV.
+    expiry_date_str can be: "29-Jan-2025", "2025-01-29", "29-01-2025" etc.
+    Returns symbol like "NIFTY2660222400PE" or None if not found.
+    """
+    try:
+        import pandas as pd
+        csv_path = os.path.join(os.path.dirname(__file__), "groww_instruments.csv")
+        if not os.path.exists(csv_path):
+            logging.warning("[Groww F&O] groww_instruments.csv not found")
+            return None
+
+        # Normalize expiry to YYYY-MM-DD
+        from datetime import datetime as _dt
+        exp_normalized = None
+        for fmt in ["%d-%b-%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"]:
+            try:
+                exp_normalized = _dt.strptime(expiry_date_str.strip(), fmt).strftime("%Y-%m-%d")
+                break
+            except ValueError:
+                continue
+        if not exp_normalized:
+            logging.warning(f"[Groww F&O] Could not parse expiry: {expiry_date_str}")
+            return None
+
+        df = pd.read_csv(csv_path, low_memory=False)
+        fno = df[df["segment"] == "FNO"]
+        mask = (
+            (fno["underlying_symbol"].str.upper() == underlying.upper()) &
+            (fno["expiry_date"] == exp_normalized) &
+            (fno["strike_price"].astype(float) == float(strike)) &
+            (fno["instrument_type"].str.upper() == option_type.upper())
+        )
+        matches = fno[mask]
+        if len(matches) > 0:
+            return str(matches.iloc[0]["trading_symbol"])
+        logging.warning(f"[Groww F&O] No match: {underlying} {exp_normalized} {strike} {option_type}")
+    except Exception as e:
+        logging.error(f"[Groww F&O] Lookup error: {e}")
+    return None
+
+
 @api_router.post("/live-trade/order")
 async def place_live_order(body: dict):
-    """Place a real order via the connected broker API."""
+    """Place a real order via the connected broker API.
+    For options: pass option_meta={underlying, strike, option_type, expiry}
+    For stocks: pass symbol, direction, quantity, price
+    """
     settings = await db.broker_settings.find_one({}, {"_id": 0})
     if not settings or not settings.get("connected"):
         raise HTTPException(status_code=400, detail="Broker connected nahi hai. Pehle broker connect karo.")
 
     broker = (settings.get("broker") or "").lower()
-    symbol = (body.get("symbol") or "").strip().upper()
     direction = (body.get("direction") or "BUY").upper()
     quantity = int(body.get("quantity") or 1)
     price = body.get("price")
     order_type = (body.get("order_type") or "MARKET").upper()
+    option_meta = body.get("option_meta")   # present for options orders
+    symbol_raw = (body.get("symbol") or "").strip().upper()
 
     if broker == "groww":
         api_key = settings.get("api_key", "")
         api_secret = settings.get("api_secret", "")
         if not api_key or not api_secret:
-            raise HTTPException(400, "Groww API credentials not found in saved settings")
+            raise HTTPException(400, "Groww API credentials not found. Pehle broker reconnect karo.")
         try:
             from growwapi import GrowwAPI
             access = GrowwAPI.get_access_token(api_key=api_key, secret=api_secret)
             g = GrowwAPI(access)
             tx = g.TRANSACTION_TYPE_BUY if direction == "BUY" else g.TRANSACTION_TYPE_SELL
-            ot = g.ORDER_TYPE_LIMIT if (order_type == "LIMIT" and price) else g.ORDER_TYPE_MARKET
-            kwargs = dict(
-                trading_symbol=symbol,
-                quantity=quantity,
-                validity=g.VALIDITY_DAY,
-                exchange=g.EXCHANGE_NSE,
-                segment=g.SEGMENT_CASH,
-                product=g.PRODUCT_MIS,
-                order_type=ot,
-                transaction_type=tx,
-            )
-            if price and ot == g.ORDER_TYPE_LIMIT:
-                kwargs["price"] = float(price)
-            result = g.place_order(**kwargs)
-            order_id = result.get("order_id") or result.get("growwOrderId") or str(result)
-            return {"success": True, "order_id": order_id, "broker": "Groww", "symbol": symbol}
+
+            if option_meta:
+                # ── Options Order (F&O) ──────────────────────────────────────
+                underlying = (option_meta.get("underlying") or "").upper()
+                strike     = int(option_meta.get("strike") or 0)
+                otype      = (option_meta.get("option_type") or "CE").upper()
+                expiry     = option_meta.get("expiry") or ""
+
+                # Lookup exact Groww trading symbol from instruments CSV
+                groww_symbol = _lookup_groww_fno_symbol(underlying, expiry, strike, otype)
+                if not groww_symbol:
+                    raise HTTPException(
+                        422,
+                        f"Groww mein {underlying} {strike}{otype} ({expiry}) ka symbol nahi mila. "
+                        "Expiry ya strike check karo — Groww instruments CSV mein available hona chahiye."
+                    )
+
+                # SENSEX trades on BSE; NIFTY/BANKNIFTY on NSE
+                exchange = g.EXCHANGE_BSE if underlying in ("SENSEX", "BANKEX", "BSX") else g.EXCHANGE_NSE
+                seg = g.SEGMENT_FNO
+                product = g.PRODUCT_NRML  # F&O intraday use MIS, overnight use NRML
+
+                ot = g.ORDER_TYPE_LIMIT if (order_type == "LIMIT" and price) else g.ORDER_TYPE_MARKET
+                kwargs = dict(
+                    trading_symbol=groww_symbol,
+                    quantity=quantity,
+                    validity=g.VALIDITY_DAY,
+                    exchange=exchange,
+                    segment=seg,
+                    product=product,
+                    order_type=ot,
+                    transaction_type=tx,
+                )
+                if price and ot == g.ORDER_TYPE_LIMIT:
+                    kwargs["price"] = float(price)
+
+                result = g.place_order(**kwargs)
+                order_id = result.get("order_id") or result.get("growwOrderId") or str(result)
+                logging.info(f"[LiveTrade] Options order placed: {groww_symbol} {direction} qty={quantity} → order_id={order_id}")
+                return {
+                    "success": True,
+                    "order_id": order_id,
+                    "broker": "Groww",
+                    "symbol": groww_symbol,
+                    "segment": "FNO",
+                    "underlying": underlying,
+                    "strike": strike,
+                    "option_type": otype,
+                }
+
+            else:
+                # ── Stock Intraday Order (CASH/MIS) ─────────────────────────
+                # Clean the symbol: remove .NS / .BO suffix for Groww
+                clean_symbol = symbol_raw.replace(".NS", "").replace(".BO", "")
+                ot = g.ORDER_TYPE_LIMIT if (order_type == "LIMIT" and price) else g.ORDER_TYPE_MARKET
+                kwargs = dict(
+                    trading_symbol=clean_symbol,
+                    quantity=quantity,
+                    validity=g.VALIDITY_DAY,
+                    exchange=g.EXCHANGE_NSE,
+                    segment=g.SEGMENT_CASH,
+                    product=g.PRODUCT_MIS,   # MIS = intraday
+                    order_type=ot,
+                    transaction_type=tx,
+                )
+                if price and ot == g.ORDER_TYPE_LIMIT:
+                    kwargs["price"] = float(price)
+                result = g.place_order(**kwargs)
+                order_id = result.get("order_id") or result.get("growwOrderId") or str(result)
+                logging.info(f"[LiveTrade] Stock order placed: {clean_symbol} {direction} qty={quantity} → order_id={order_id}")
+                return {"success": True, "order_id": order_id, "broker": "Groww", "symbol": clean_symbol, "segment": "CASH"}
+
+        except HTTPException:
+            raise
         except Exception as e:
+            logging.error(f"[LiveTrade] Groww error: {e}")
             raise HTTPException(500, f"Groww order placement failed: {str(e)}")
 
-    # Non-Groww brokers: order queued (credentials stored, user must verify in broker app)
+    # Non-Groww brokers
     order_id = f"LIVE_{broker.upper()}_{uuid.uuid4().hex[:8].upper()}"
-    logging.info(f"[LiveTrade] {broker} order queued: {direction} {quantity} {symbol} @ {price}")
+    logging.info(f"[LiveTrade] {broker} order queued: {direction} {quantity} {symbol_raw} @ {price}")
     return {
         "success": True,
         "order_id": order_id,
         "broker": settings.get("profile", {}).get("broker", broker),
-        "symbol": symbol,
+        "symbol": symbol_raw,
         "message": "Order placed. Apne broker app mein verify karo.",
     }
 
