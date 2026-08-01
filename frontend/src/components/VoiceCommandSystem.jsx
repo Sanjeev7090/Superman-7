@@ -237,15 +237,6 @@ export default function VoiceCommandSystem({ onLoadStock, onNavigate, onSetAlert
 
       {/* Mic button */}
       <div className="flex items-center gap-2">
-        {/* Help toggle */}
-        <button
-          onClick={() => setShowHelp(h => !h)}
-          className="w-8 h-8 rounded-full bg-[#1a1a2e] border border-white/10 flex items-center justify-center text-zinc-500 hover:text-white hover:border-white/30 transition-all"
-          title="Voice command help"
-          data-testid="voice-help-btn"
-        >
-          <span className="text-[11px] font-bold">?</span>
-        </button>
 
         {/* Main mic button */}
         <button
