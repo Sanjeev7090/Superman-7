@@ -525,6 +525,204 @@ const SECTOR_ICONS_LABEL = {
   media: 'MEDIA', psubank: 'PSU BK', midcap: 'MIDCAP',
 };
 
+// ── Crude Oil Supply Card ─────────────────────────────────────────────────────
+const INDIA_SOURCES = [
+  { name: 'US EIA Inventory',           desc: 'Best global proxy — every Wednesday ~8:30 PM IST', url: 'https://www.eia.gov/petroleum/supply/weekly/', tag: 'FREE · BEST',      tagColor: '#22c55e' },
+  { name: 'Kpler / Vortexa',            desc: 'Real-time tanker tracking — paid but most accurate', url: 'https://kpler.com/',                          tag: 'PAID · ACCURATE',  tagColor: '#f59e0b' },
+  { name: 'PPAC India',                 desc: 'Official Indian data — monthly, slight delay',       url: 'https://ppac.gov.in/',                         tag: 'FREE · OFFICIAL',  tagColor: '#3b82f6' },
+  { name: 'Ministry of Petroleum',      desc: 'MoPNG website for policy & supply updates',          url: 'https://mopng.gov.in/',                        tag: 'FREE',             tagColor: '#3b82f6' },
+  { name: 'Reuters / Bloomberg / ET',   desc: 'Breaking news when major supply changes happen',     url: 'https://economictimes.indiatimes.com/markets/commodities', tag: 'FREE · NEWS', tagColor: '#94a3b8' },
+];
+
+function CrudeSupplyCard({ brent, brentChgPct, usdinr, usdinrChgPct, geoRisk, C, isDark }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // ── Signal 1: Crude/Brent trend ───────────────────────────────────────────
+  const crudeSignal = (() => {
+    if (!brent) return { score: 0, label: 'N/A', color: '#94a3b8', detail: 'No data' };
+    const chg = brentChgPct || 0;
+    if (chg >= 3)   return { score: -2, label: `CRUDE SURGING +${chg.toFixed(1)}%`, color: '#ef4444', detail: 'Supply tight → strong Nifty pressure' };
+    if (chg >= 1)   return { score: -1, label: `CRUDE RISING +${chg.toFixed(1)}%`,  color: '#f97316', detail: 'Moderate pressure on Nifty' };
+    if (chg <= -3)  return { score: +2, label: `CRUDE FALLING ${chg.toFixed(1)}%`,  color: '#22c55e', detail: 'Supply easing → Nifty supportive' };
+    if (chg <= -1)  return { score: +1, label: `CRUDE SOFTENING ${chg.toFixed(1)}%`, color: '#4ade80', detail: 'Mild relief for Nifty' };
+    return { score: 0, label: `CRUDE STABLE ${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%`, color: '#94a3b8', detail: 'No clear supply signal today' };
+  })();
+
+  // ── Signal 2: USDINR trend ────────────────────────────────────────────────
+  const usdinrSignal = (() => {
+    if (!usdinr) return { score: 0, label: 'N/A', color: '#94a3b8', detail: 'No data' };
+    const chg = usdinrChgPct || 0;
+    if (chg >= 0.5)  return { score: -2, label: `₹ WEAKENING +${chg.toFixed(2)}%`, color: '#ef4444', detail: 'Rupee falls → FII outflow → Nifty bearish' };
+    if (chg >= 0.15) return { score: -1, label: `₹ MILD WEAK +${chg.toFixed(2)}%`, color: '#f97316', detail: 'Slight rupee pressure' };
+    if (chg <= -0.5) return { score: +2, label: `₹ STRENGTHENING ${chg.toFixed(2)}%`, color: '#22c55e', detail: 'Rupee gains → FII inflow → Nifty bullish' };
+    if (chg <= -0.15) return { score: +1, label: `₹ MILD STRONG ${chg.toFixed(2)}%`, color: '#4ade80', detail: 'Mild rupee support' };
+    return { score: 0, label: `₹ STABLE ${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`, color: '#94a3b8', detail: 'Rupee neutral today' };
+  })();
+
+  // ── Signal 3: Global risk (from geo_risk) ─────────────────────────────────
+  const geoSignal = (() => {
+    if (!geoRisk) return { score: 0, label: 'N/A', color: '#94a3b8', detail: 'No data' };
+    if (geoRisk.level === 'HIGH')   return { score: -2, label: 'GLOBAL RISK HIGH',   color: '#ef4444', detail: geoRisk.triggers?.[0]?.category || 'Geopolitical tensions elevated' };
+    if (geoRisk.level === 'MEDIUM') return { score: -1, label: 'GLOBAL RISK MEDIUM', color: '#f97316', detail: 'Moderate geopolitical concern' };
+    return { score: +1, label: 'GLOBAL RISK LOW', color: '#22c55e', detail: 'Calm global environment' };
+  })();
+
+  // ── Final Decision (sum of 3 signal scores) ───────────────────────────────
+  const totalScore = crudeSignal.score + usdinrSignal.score + geoSignal.score;
+  const finalDecision = (() => {
+    if (totalScore <= -4) return { label: 'STRONG BEARISH',   action: 'Avoid Longs · Buy Puts / Hedge',          color: '#ef4444', bg: '#ef444410' };
+    if (totalScore <= -2) return { label: 'BEARISH',          action: 'Cautious · Short / Put Buy bias',          color: '#f97316', bg: '#f9731610' };
+    if (totalScore === -1) return { label: 'MILDLY BEARISH',  action: 'Wait & Watch · Reduce position size',      color: '#fb923c', bg: '#fb923c10' };
+    if (totalScore === 0)  return { label: 'NEUTRAL',         action: 'No strong edge · Follow chart levels',     color: '#94a3b8', bg: '#94a3b810' };
+    if (totalScore <= 2)  return { label: 'MILDLY BULLISH',   action: 'Mild Long bias · Small Call Buy',          color: '#4ade80', bg: '#4ade8010' };
+    return                       { label: 'BULLISH',          action: 'Long / Call Buy · Strong support for Nifty', color: '#22c55e', bg: '#22c55e10' };
+  })();
+
+  const alertZone = brent >= 88;
+
+  return (
+    <div className="rounded-xl overflow-hidden" data-testid="crude-supply-card"
+      style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-4 py-3 cursor-pointer"
+        style={{ borderBottom: `1px solid ${C.border}` }}
+        onClick={() => setExpanded(v => !v)}>
+        <div className="flex items-center gap-2">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>
+          </svg>
+          <span className="text-[11px] font-bold uppercase tracking-wide" style={{ color: C.textPrimary }}>
+            Crude Oil Supply
+          </span>
+          {alertZone && (
+            <span className="text-[7px] font-black px-1.5 py-0.5 rounded-full animate-pulse"
+              style={{ background: '#ef444418', color: '#ef4444', border: '1px solid #ef444440' }}>
+              BRENT ${brent?.toFixed(1)} · HIGH ZONE
+            </span>
+          )}
+        </div>
+        <span className="text-[9px] rounded px-1 py-0.5" style={{ color: C.textMuted, background: C.panelBg }}>
+          {expanded ? '▲' : '▼'}
+        </span>
+      </div>
+
+      {/* ── Final Decision — ALWAYS VISIBLE ───────────────────────────────── */}
+      <div className="px-4 py-3" style={{ borderBottom: expanded ? `1px solid ${C.borderSubtle}` : 'none', background: finalDecision.bg }}>
+        <div className="text-[8px] uppercase tracking-wider font-bold mb-2" style={{ color: C.textMuted }}>
+          Final Decision (3 Confirmations)
+        </div>
+        {/* 3 signals row */}
+        <div className="grid grid-cols-3 gap-2 mb-2.5">
+          {[
+            { title: 'Crude Trend', sig: crudeSignal },
+            { title: 'USD/INR',     sig: usdinrSignal },
+            { title: 'Global Risk', sig: geoSignal },
+          ].map(({ title, sig }) => (
+            <div key={title} className="rounded-lg px-2 py-1.5 text-center"
+              style={{ background: `${sig.color}10`, border: `1px solid ${sig.color}30` }}>
+              <div className="text-[7px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>{title}</div>
+              <div className="text-[8px] font-bold leading-tight" style={{ color: sig.color }}>{sig.label}</div>
+              <div className="text-[6.5px] mt-0.5 leading-tight" style={{ color: C.textMuted }}>{sig.detail}</div>
+            </div>
+          ))}
+        </div>
+        {/* Combined verdict */}
+        <div className="flex items-center justify-between rounded-xl px-3 py-2"
+          style={{ background: `${finalDecision.color}15`, border: `1.5px solid ${finalDecision.color}50` }}>
+          <div>
+            <div className="text-[8px] uppercase tracking-wider font-black" style={{ color: finalDecision.color }}>
+              {finalDecision.label}
+            </div>
+            <div className="text-[9px] mt-0.5" style={{ color: C.textSecond }}>{finalDecision.action}</div>
+          </div>
+          <div className="text-right shrink-0 ml-2">
+            <div className="text-[7px]" style={{ color: C.textMuted }}>Score</div>
+            <div className="text-[13px] font-black font-mono" style={{ color: finalDecision.color }}>
+              {totalScore > 0 ? `+${totalScore}` : totalScore}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Expanded content ──────────────────────────────────────────────── */}
+      {expanded && (
+        <>
+          {/* Trading Rules */}
+          <div className="px-4 py-3" style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+            <div className="text-[8px] uppercase tracking-wider font-bold mb-2" style={{ color: C.textMuted }}>
+              Trading Logic (Nifty ke liye)
+            </div>
+            <div className="space-y-1.5">
+              {[
+                { num: '1', rule: 'Crude Inventory Rising (Supply ↑)', detail: 'Crude soft → Nifty ke liye supportive → Long / Call Buy bias', color: '#22c55e' },
+                { num: '2', rule: 'Crude Inventory Falling (Supply ↓)', detail: 'Crude strong → Nifty pe pressure → Short / Put Buy ya hedge', color: '#ef4444' },
+                { num: '3', rule: 'Extra Confirmation — teeno align karo', detail: 'Brent/WTI trend + USDINR direction + Global risk sentiment — sabko dekho, tabhi strong signal', color: '#f59e0b' },
+              ].map(r => (
+                <div key={r.num} className="flex items-start gap-2 rounded-lg px-2.5 py-1.5"
+                  style={{ background: `${r.color}08`, border: `1px solid ${r.color}25` }}>
+                  <span className="w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-black shrink-0"
+                    style={{ background: r.color, color: '#000' }}>{r.num}</span>
+                  <div>
+                    <div className="text-[9px] font-bold" style={{ color: r.color }}>{r.rule}</div>
+                    <div className="text-[8px] mt-0.5" style={{ color: C.textSecond }}>{r.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Best Sources */}
+          <div className="px-4 py-3" style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+            <div className="text-[8px] uppercase tracking-wider font-bold mb-1.5" style={{ color: C.textMuted }}>
+              Best Sources — India Crude Supply Check
+            </div>
+            <div className="text-[7.5px] mb-2 px-2 py-1.5 rounded-lg"
+              style={{ color: '#22c55e', background: '#22c55e0d', border: '1px solid #22c55e25' }}>
+              Practical free way: Google "India crude oil inventory" ya "India crude stocks" · Weekly US EIA data dekhna sabse acha free indicator hai
+            </div>
+            <div className="space-y-1.5">
+              {INDIA_SOURCES.map(s => (
+                <div key={s.name} className="flex items-center justify-between rounded-lg px-2.5 py-1.5"
+                  style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${C.border}` }}>
+                  <div>
+                    <a href={s.url} target="_blank" rel="noopener noreferrer"
+                      className="text-[9px] font-bold hover:underline" style={{ color: C.textPrimary }}>
+                      {s.name}
+                    </a>
+                    <div className="text-[7.5px] mt-0.5" style={{ color: C.textMuted }}>{s.desc}</div>
+                  </div>
+                  <span className="text-[6.5px] font-black px-1.5 py-0.5 rounded-full shrink-0 ml-2"
+                    style={{ color: s.tagColor, background: `${s.tagColor}18`, border: `1px solid ${s.tagColor}30` }}>
+                    {s.tag}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Short Rule reminder */}
+          <div className="px-4 py-2.5">
+            <div className="rounded-lg px-3 py-2"
+              style={{ background: isDark ? 'rgba(249,115,22,0.07)' : 'rgba(249,115,22,0.05)', border: '1px solid rgba(249,115,22,0.28)' }}>
+              <div className="text-[8px] font-black uppercase tracking-wider mb-1" style={{ color: '#f97316' }}>
+                Yaad Rakho
+              </div>
+              <div className="space-y-0.5 text-[8px]" style={{ color: C.textSecond }}>
+                <div>Supply badhe → Crude girta hai → <span className="font-bold" style={{ color: '#22c55e' }}>Nifty ko support</span></div>
+                <div>Supply ghate → Crude badhta hai → <span className="font-bold" style={{ color: '#ef4444' }}>Nifty pe pressure</span></div>
+                <div className="mt-1" style={{ color: C.textMuted }}>
+                  Har Wednesday ~8:30 PM IST — US EIA Crude Inventory data aata hai (sabse important signal)
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
   const [expanded, setExpanded] = useState(false);
   if (!sb || sb.total === 0) return null;
@@ -1946,6 +2144,17 @@ const MarketIntelPanel = ({ onClose }) => {
 
             {/* ── Geopolitical Risk Card ───────────────────────────────── */}
             <GeoRiskCard geoRisk={data.geo_risk} C={C} isDark={isDark} />
+
+            {/* ── Crude Oil Supply ─────────────────────────────────────── */}
+            <CrudeSupplyCard
+              brent={data.brent}
+              brentChgPct={data.brent_chg_pct}
+              usdinr={data.usdinr}
+              usdinrChgPct={data.usdinr_chg_pct}
+              geoRisk={data.geo_risk}
+              C={C}
+              isDark={isDark}
+            />
 
             {/* ── FII Activity Section (Collapsible) ─────────────────────── */}
             <FiiSection C={C} isDark={isDark} />

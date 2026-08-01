@@ -1765,9 +1765,10 @@ def _fetch_yf_prices() -> Dict[str, float]:
         "^NSEI":      "nifty",
         "^IXIC":      "nasdaq",
         "^HSI":       "hang_seng",
+        "USDINR=X":   "usdinr",
     }
     results: Dict[str, float] = {}
-    with ThreadPoolExecutor(max_workers=5) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         futures = {ex.submit(_fetch_single_ticker, sym, key): key
                    for sym, key in tickers_map.items()}
         for fut in as_completed(futures):
@@ -1813,6 +1814,8 @@ async def _build_intel() -> Dict:
     nasdaq_chg    = yf_data.get("nasdaq_chg_pct",    0.0)
     hang_seng_chg = yf_data.get("hang_seng_chg_pct", 0.0)
     nasdaq_prev = yf_data.get("nasdaq_prev", nasdaq)
+    usdinr      = yf_data.get("usdinr", 0.0)
+    usdinr_chg  = yf_data.get("usdinr_chg_pct", 0.0)
 
     # Nasdaq absolute point change (for Nifty correlation)
     nasdaq_pts = round(nasdaq - nasdaq_prev, 2) if nasdaq_prev else 0.0
@@ -1981,6 +1984,8 @@ async def _build_intel() -> Dict:
         "today_actual": today_actual,
         "market_news": market_news_data if market_news_data else {"available": False, "items": []},
         "geo_risk":    _compute_geo_risk(market_news_data.get("items", []) if market_news_data else []),
+        "usdinr":      round(usdinr, 2) if usdinr else None,
+        "usdinr_chg_pct": round(usdinr_chg, 3) if usdinr_chg else None,
         "updated_at": now.isoformat(),
     }
     _cache["intel"] = {"data": data, "ts": now}
