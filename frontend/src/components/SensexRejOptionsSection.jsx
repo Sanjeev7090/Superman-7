@@ -2,11 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// ── REJ detection helpers (same logic as ChartPanel / NiftyRejOptionsSection) ──
+// ── REJ detection helpers — identical to NiftyRejOptionsSection ──────────────
 function resampleBars(bars, targetMinutes) {
   if (!bars || !bars.length || !targetMinutes) return bars || [];
   const ms = targetMinutes * 60 * 1000;
-  const out = []; let bucket = null;
+  const out = [];
+  let bucket = null;
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i];
     const bStart = Math.floor(b.timestamp / ms) * ms;
@@ -35,9 +36,9 @@ function detect15mRej(bars15) {
     const b = bars15[i]; const r = _rng(b); if (r <= 0) continue;
     const bod = _bod(b); const uw = _uw(b); const lw = _lw(b); const sw = 1.5;
     if (lw >= sw * bod && lw >= 0.55 * r && uw <= bod * 1.1)
-      return { type: 'BUY',  bar: b, idx: i, extreme: b.low,  rejectionHigh: b.high, rejectionLow: b.low,  time: b.timestamp / 1000, name: '15m Hammer' };
+      return { type: 'BUY',  bar: b, idx: i, extreme: b.low,  rejectionHigh: b.high, rejectionLow: b.low,  time: b.timestamp / 1000, name: '15m Hammer / Lower Wick Rejection' };
     if (uw >= sw * bod && uw >= 0.55 * r && lw <= bod * 1.1)
-      return { type: 'SELL', bar: b, idx: i, extreme: b.high, rejectionHigh: b.high, rejectionLow: b.low,  time: b.timestamp / 1000, name: '15m Shooting Star' };
+      return { type: 'SELL', bar: b, idx: i, extreme: b.high, rejectionHigh: b.high, rejectionLow: b.low,  time: b.timestamp / 1000, name: '15m Shooting Star / Upper Wick Rejection' };
   }
   return null;
 }
@@ -51,33 +52,37 @@ function _confirmWin(wb, type) {
   }
   return null;
 }
-function detectREJSignal(bars1m) {
-  if (!bars1m || bars1m.length < 20) return null;
-  const bars15 = resampleBars(bars1m, 15);
-  const rej    = detect15mRej(bars15);
+// ── Same find1mConfirm as Nifty ───────────────────────────────────────────────
+function find1mConfirm(bars1m, rej) {
+  if (!bars1m?.length || !rej) return null;
+  const rejEnd = rej.bar.timestamp + 15 * 60 * 1000;
+  const after  = bars1m.filter(b => b.timestamp >= rejEnd);
+  return _confirmWin(after.length ? after : bars1m.filter(b => b.timestamp > rej.bar.timestamp), rej.type);
+}
+// ── Same detectREJSignal as Nifty (identical parameters) ─────────────────────
+function detectREJSignal(bars) {
+  if (!bars || bars.length < 10) return null;
+  const bars15  = resampleBars(bars, 15);
+  const rej     = detect15mRej(bars15);
   if (!rej) return null;
-  const rejBar15Ts = rej.bar.timestamp;
-  const window1m   = bars1m.filter(b => b.timestamp >= rejBar15Ts).slice(0, 20);
-  const confirm    = _confirmWin(window1m, rej.type);
-  const spot = bars1m[bars1m.length - 1]?.close || 0;
-  const slDist  = Math.abs(spot - rej.extreme) * 1.02;
-  const entry   = confirm?.entry || spot;
-  const sl      = rej.type === 'BUY' ? entry - slDist : entry + slDist;
-  const target  = rej.type === 'BUY' ? entry + slDist * 2 : entry - slDist * 2;
-  return {
-    type:       rej.type,
-    status:     confirm ? 'CONFIRMED' : 'PENDING',
-    rejection:  rej,
-    entry:      Math.round(entry),
-    sl:         Math.round(sl),
-    target:     Math.round(target),
-  };
+  const confirm = find1mConfirm(bars, rej);
+  if (!confirm) {
+    const entry = rej.bar.close;
+    const sl    = rej.type === 'BUY' ? rej.extreme * 0.9995 : rej.extreme * 1.0005;
+    const risk  = Math.abs(entry - sl);
+    return { status: 'PENDING', type: rej.type, rejection: rej, confirm: null, entry, sl, target: rej.type === 'BUY' ? entry + risk * 2 : entry - risk * 2, rr: 2 };
+  }
+  const entry = confirm.entry;
+  const sl    = rej.type === 'BUY' ? rej.extreme * 0.9995 : rej.extreme * 1.0005;
+  const risk  = Math.abs(entry - sl);
+  if (risk <= 0) return null;
+  return { status: 'CONFIRMED', type: rej.type, rejection: rej, confirm, entry, sl, target: rej.type === 'BUY' ? entry + risk * 2 : entry - risk * 2, rr: 2 };
 }
 
-// ── Flow Criteria (shared sub-components) ────────────────────────────────────
-const SIG_COL_S = s => s === 'STRONG' ? '#22c55e' : s === 'PARTIAL' ? '#fbbf24' : '#94a3b8';
+// ── Flow Criteria — same display style as Nifty (no strict mode) ─────────────
+const SIG_COL = s => s === 'STRONG' ? '#22c55e' : s === 'PARTIAL' ? '#fbbf24' : '#94a3b8';
 
-function SCriteriaRow({ item }) {
+function CriteriaRow({ item }) {
   const { pass, label, detail } = item;
   return (
     <div className="flex items-start gap-1 py-0.5">
@@ -96,7 +101,7 @@ function SCriteriaRow({ item }) {
   );
 }
 
-function SFlowSidePanel({ data, side, isRec }) {
+function FlowSidePanel({ data, side, isRec }) {
   const col  = side === 'CALL' ? '#22c55e' : '#ef4444';
   const crit = Object.values(data.criteria);
   return (
@@ -110,62 +115,36 @@ function SFlowSidePanel({ data, side, isRec }) {
           {side} BUY
         </span>
         <div className="flex items-center gap-1">
-          <span className="text-[8px] font-bold" style={{ color: SIG_COL_S(data.signal) }}>
+          <span className="text-[8px] font-bold" style={{ color: SIG_COL(data.signal) }}>
             [{data.score}/4]
           </span>
           <span className="text-[7px] font-bold px-1 rounded"
-            style={{ background: `${SIG_COL_S(data.signal)}20`, color: SIG_COL_S(data.signal) }}>
+            style={{ background: `${SIG_COL(data.signal)}20`, color: SIG_COL(data.signal) }}>
             {data.signal}
           </span>
         </div>
       </div>
       <div className="divide-y divide-zinc-800/40">
-        {crit.map((item, i) => <SCriteriaRow key={i} item={item} />)}
+        {crit.map((item, i) => <CriteriaRow key={i} item={item} />)}
       </div>
     </div>
   );
 }
 
-function SFlowCriteria({ flowData }) {
+function FlowCriteria({ flowData }) {
   if (!flowData) return null;
-  const { call_buy, put_buy, recommended, avg_iv, iv_status,
-          total_ce_vol, total_pe_vol, strict_mode, is_derived,
-          vix_change_pct, spot_change } = flowData;
+  const { call_buy, put_buy, recommended, avg_iv, iv_status, total_ce_vol, total_pe_vol } = flowData;
   const recBull = recommended === 'CALL_BUY';
   const recBear = recommended === 'PUT_BUY';
   return (
     <div className="space-y-1.5">
-      {/* Header badges */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-zinc-600 uppercase tracking-wider text-[7px]">Flow:</span>
-        <span className="text-zinc-400 text-[8px]">
-          ATM IV <span className="font-bold text-zinc-200">{avg_iv}%</span>{' '}
-          <span className="text-zinc-500">{iv_status}</span>
-        </span>
-        <span className="text-zinc-400 text-[8px]">
-          VIX <span style={{ color: vix_change_pct > 0 ? '#ef4444' : '#22c55e' }}>
-            {vix_change_pct >= 0 ? '+' : ''}{vix_change_pct}%
-          </span>
-        </span>
-        <span className="text-zinc-400 text-[8px]">
-          Spot <span style={{ color: spot_change > 0 ? '#22c55e' : '#ef4444' }}>
-            {spot_change >= 0 ? '+' : ''}{spot_change}%
-          </span>
-        </span>
-        {strict_mode && (
-          <span className="text-[7px] font-black px-1.5 py-0.5 rounded"
-            style={{ background: 'rgba(251,146,60,0.15)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.40)' }}>
-            ⚡ STRICT
-          </span>
-        )}
-        {is_derived && (
-          <span className="text-[7px] px-1 rounded text-zinc-600"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-            BS-Derived · VIX Proxy
-          </span>
-        )}
+      {/* IV + Vol strip — same as Nifty */}
+      <div className="flex items-center gap-3 px-1 text-[8px]">
+        <span className="text-zinc-600 uppercase tracking-wider">Flow:</span>
+        <span className="text-zinc-400">ATM IV <span className="font-bold text-zinc-200">{avg_iv}%</span> <span className="text-zinc-500">{iv_status}</span></span>
+        <span className="text-zinc-400">CE Vol <span style={{ color: '#22c55e' }}>{(total_ce_vol / 1000).toFixed(0)}K</span></span>
+        <span className="text-zinc-400">PE Vol <span style={{ color: '#ef4444' }}>{(total_pe_vol / 1000).toFixed(0)}K</span></span>
       </div>
-
       {/* Recommended banner */}
       {recommended !== 'NEUTRAL' && (
         <div className="rounded px-2 py-1 text-[8px] font-bold flex items-center gap-1.5"
@@ -177,23 +156,16 @@ function SFlowCriteria({ flowData }) {
           ★ Recommended: {recBull ? 'CALL BUY' : 'PUT BUY'}
         </div>
       )}
-      {recommended === 'NEUTRAL' && strict_mode && (
-        <div className="rounded px-2 py-1 text-[8px]"
-          style={{ background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.25)', color: '#fb923c' }}>
-          ⚡ Strict filters active — no clear signal yet (need score ≥ 3)
-        </div>
-      )}
-
       {/* Two-column criteria */}
       <div className="flex gap-1.5">
-        <SFlowSidePanel data={call_buy} side="CALL" isRec={recBull} />
-        <SFlowSidePanel data={put_buy}  side="PUT"  isRec={recBear} />
+        <FlowSidePanel data={call_buy} side="CALL" isRec={recBull} />
+        <FlowSidePanel data={put_buy}  side="PUT"  isRec={recBear} />
       </div>
     </div>
   );
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Component ──────────────────────────────────────────────────────────────────
 export default function SensexRejOptionsSection({ onStrikeSelect }) {
   const [collapsed,   setCollapsed]   = useState(false);
   const [signal,      setSignal]      = useState(null);
@@ -209,8 +181,8 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
     setLoading(true);
     setError(null);
     try {
+      // 1. Fetch SENSEX 1-min bars + flow data in parallel
       const [barsRes, flowRes] = await Promise.allSettled([
-        // SENSEX 1m bars via yfinance symbol ^BSESN
         fetch(`${API}/stock/bars/%5EBSESN?timespan=minute&multiplier=1&limit=200`),
         fetch(`${API}/rej/sensex-option-flow`),
       ]);
@@ -224,6 +196,7 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
         setFlowData(fd);
       }
 
+      // 2. Detect REJ signal (or use manual override) — same as Nifty
       let sig = null;
       if (override) {
         const lastBar = bars[bars.length - 1];
@@ -243,6 +216,7 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
       setSignal(sig);
       if (!sig) { setPick(null); setLoading(false); setLastUpdated(new Date()); return; }
 
+      // 3. Fetch option pick — same flow as Nifty
       const pickRes = await fetch(`${API}/rej/sensex-option-pick`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -251,6 +225,7 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
           entry:  sig.entry,
           sl:     sig.sl,
           target: sig.target,
+          symbol: 'SENSEX',
         }),
       });
       const pickData = await pickRes.json();
@@ -263,40 +238,46 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
     }
   }, []);
 
-  // Auto-refresh every 3 min
+  // Auto-refresh every 3 minutes
   useEffect(() => {
     fetchSignalAndPick(manualSig);
     timerRef.current = setInterval(() => fetchSignalAndPick(manualSig), 3 * 60 * 1000);
     return () => clearInterval(timerRef.current);
   }, [fetchSignalAndPick, manualSig]);
 
-  const handleManual = sig => {
-    setManualSig(prev => (prev === sig ? null : sig));
-    fetchSignalAndPick(sig === manualSig ? null : sig);
-  };
-  const handleStrikeTap = strike => {
-    if (onStrikeSelect) onStrikeSelect({ symbol: `SENSEX_${strike.strike}${strike.type}`, ...strike });
+  const handleManual = (type) => {
+    const next = manualSig === type ? null : type;
+    setManualSig(next);
   };
 
-  const sigType   = signal?.type;
+  // ── Render ────────────────────────────────────────────────────────────────
+  const sigType   = signal?.type || pick?.signal_type;
   const isBuy     = sigType === 'BUY';
   const accentCol = isBuy ? '#22c55e' : '#ef4444';
   const sideLbl   = isBuy ? 'CE' : 'PE';
   const top       = pick?.top_picks || [];
-  const best      = top[0] || null;
-  const rr        = pick?.rr_info || null;
+  const rr        = pick?.rr_info;
+  const best      = top[0];
 
-  // ── Strict gate: show pick only if flow score ≥ 3 (all 4 or at most 1 missing) ──
-  const flowScore   = isBuy ? (flowData?.call_buy?.score ?? 0) : (flowData?.put_buy?.score ?? 0);
-  const flowPasses  = flowScore >= 3;
-  const failedCount = 4 - flowScore;
-  const failedItems = isBuy
-    ? Object.values(flowData?.call_buy?.criteria || {}).filter(c => !c.pass).map(c => c.label)
-    : Object.values(flowData?.put_buy?.criteria  || {}).filter(c => !c.pass).map(c => c.label);
+  const handleStrikeTap = (t) => {
+    if (!onStrikeSelect || !pick) return;
+    onStrikeSelect({
+      underlying:      pick.symbol || 'SENSEX',
+      strike:          t.strike,
+      type:            t.type,
+      expiry:          pick.expiry || '',
+      expiry_display:  pick.expiry || '',
+      last_price:      t.last_price,
+      change_pct:      0,
+      instrument:      `${pick.symbol || 'SENSEX'} ${t.strike} ${t.type === 'CE' ? 'Call' : 'Put'}`,
+      is_live_derived: true,
+      is_equity:       false,
+    });
+  };
 
   return (
     <div className="border-t border-zinc-800/60">
-      {/* Header */}
+      {/* Section header */}
       <button
         onClick={() => setCollapsed(v => !v)}
         className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors"
@@ -304,11 +285,6 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
         <div className="flex items-center gap-2">
           <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-zinc-400">
             Sensex · REJ Option Picks
-          </span>
-          {/* Strict mode badge */}
-          <span className="text-[7px] font-black px-1.5 py-0.5 rounded"
-            style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.30)' }}>
-            ⚡ STRICT
           </span>
           {sigType && !loading && (
             <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-sm ${isBuy ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
@@ -337,7 +313,7 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
 
       {!collapsed && (
         <div className="px-3 pb-3 space-y-2">
-          {/* Manual override */}
+          {/* Manual signal override — same as Nifty */}
           <div className="flex items-center gap-2 pt-1">
             <span className="text-[8px] text-zinc-600 uppercase tracking-wider">Manual Override:</span>
             <button
@@ -351,20 +327,20 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
             <button
               onClick={() => fetchSignalAndPick(manualSig)}
               disabled={loading}
-              className="ml-auto px-2 py-0.5 text-[8px] text-zinc-400 border border-zinc-700 hover:border-amber-500/40 hover:text-amber-400 rounded transition-all disabled:opacity-40"
+              className="ml-auto px-2 py-0.5 text-[8px] text-zinc-400 border border-zinc-700 hover:border-cyan-500/40 hover:text-cyan-400 rounded transition-all disabled:opacity-40"
             >{loading ? '⟳' : '↻ Refresh'}</button>
           </div>
 
           {/* Loading */}
           {loading && (
             <div className="text-[10px] text-zinc-500 py-2 text-center animate-pulse">
-              ⟳ Fetching SENSEX bars + BS options…
+              ⟳ Fetching SENSEX bars + option chain…
             </div>
           )}
 
-          {/* Flow Criteria */}
+          {/* Flow Criteria — always show when available */}
           {!loading && flowData && (
-            <SFlowCriteria flowData={flowData} />
+            <FlowCriteria flowData={flowData} />
           )}
 
           {/* Error */}
@@ -377,21 +353,20 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
             <div className="text-[10px] text-zinc-500 py-2">
               No REJ setup detected on SENSEX 1m chart.
               <br />
-              <span className="text-zinc-600">Use Manual Override above to get picks for BUY or SELL.</span>
+              <span className="text-zinc-600">Use Manual Override above to get option picks for BUY or SELL.</span>
             </div>
           )}
 
           {/* Signal found */}
           {!loading && signal && (
             <>
-              {/* Signal info */}
+              {/* Signal info bar */}
               <div className="rounded border px-2 py-1.5 text-[9px] font-mono"
                 style={{ borderColor: `${accentCol}40`, background: `${accentCol}0d` }}>
                 <div className="flex justify-between items-center">
                   <span style={{ color: accentCol }} className="font-bold">
                     {signal.type} · {signal.status}
                   </span>
-                  <span className="text-zinc-500 text-[8px]">{signal.rejection?.name}</span>
                 </div>
                 <div className="flex gap-3 mt-1 text-[8px]">
                   <span className="text-zinc-400">Entry <span style={{ color: accentCol }}>₹{signal.entry?.toFixed(0)}</span></span>
@@ -400,61 +375,23 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
                 </div>
               </div>
 
-              {/* ── Strict gate: show pick only if flow score ≥ 3 ── */}
-              {flowData && !flowPasses && (
-                <div className="rounded-lg px-3 py-2.5 space-y-1.5"
-                  style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.20)' }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-black text-red-400 uppercase tracking-wider">
-                      Flow Criteria Fail — {flowScore}/4 pass
-                    </span>
-                    <span className="text-[7px] px-1.5 py-0.5 rounded font-bold"
-                      style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.30)' }}>
-                      {failedCount} parameter{failedCount > 1 ? 's' : ''} missing
-                    </span>
-                  </div>
-                  <div className="text-[8px] text-zinc-400 leading-snug">
-                    Pick tab show hoga jab <span className="text-white font-bold">minimum 3/4 criteria</span> pass ho (strict 4/4 ya 1 parameter kam).
-                  </div>
-                  {failedItems.length > 0 && (
-                    <div className="space-y-0.5">
-                      {failedItems.map((lbl, i) => (
-                        <div key={i} className="flex items-center gap-1.5 text-[7.5px]">
-                          <span className="text-red-400 font-bold">✗</span>
-                          <span className="text-zinc-500">{lbl}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Option pick card — only when flow ≥ 3/4 */}
-              {flowPasses && pick && (
+              {/* Option pick card — always shown (no strict gate) */}
+              {pick && (
                 <div className="rounded border" style={{ borderColor: `${accentCol}33` }}>
+                  {/* Header row */}
                   <div className="flex items-center justify-between px-2 py-1.5 border-b" style={{ borderColor: `${accentCol}22` }}>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[9px] font-bold" style={{ color: accentCol }}>
-                        SENSEX {sideLbl} PICKS
-                      </span>
-                      <span className="text-[7px] px-1 rounded text-zinc-500"
-                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                        ATM ±200 pts
-                      </span>
-                      <span className="text-[7px] font-bold px-1.5 py-0.5 rounded"
-                        style={{ background: 'rgba(34,197,94,0.10)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)' }}>
-                        {flowScore}/4 ✓
-                      </span>
-                    </div>
+                    <span className="text-[9px] font-bold" style={{ color: accentCol }}>
+                      SENSEX {sideLbl} PICKS
+                    </span>
                     <span className="text-[8px] text-zinc-500">
-                      ₹{pick.spot} · {pick.expiry} · {pick.T_days}d
+                      Spot ₹{pick.spot} · {pick.expiry} · DTE {pick.T_days}d
                     </span>
                   </div>
 
                   <div className="p-2 space-y-1.5">
                     {top.length === 0 && (
                       <div className="text-[9px] text-yellow-400 py-1">
-                        ⚠ No {sideLbl} strikes passed filter within ATM ±200 pts
+                        ⚠ No {sideLbl} strikes passed filter (Δ/γ/OI/θ criteria)
                       </div>
                     )}
 
@@ -473,6 +410,7 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
                           <span className="text-[10px] text-zinc-300 font-mono">₹{best.last_price}</span>
                         </div>
 
+                        {/* Greeks grid */}
                         <div className="grid grid-cols-4 gap-1 mb-1.5">
                           {[['Δ Delta', best.delta], ['γ Gamma', best.gamma], ['ν Vega', best.vega], ['θ Theta', best.theta]].map(([lbl, val]) => (
                             <div key={lbl} className="text-center">
@@ -482,14 +420,13 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
                           ))}
                         </div>
 
+                        {/* OI + IV */}
                         <div className="flex gap-3 text-[8px] text-zinc-500 mb-2">
                           <span>OI <span className="text-zinc-300">{best.oi_lakh}L</span></span>
                           <span>IV <span className="text-zinc-300">{best.iv_pct}%</span></span>
-                          {best.is_live_derived && (
-                            <span className="text-zinc-600">BS-Est</span>
-                          )}
                         </div>
 
+                        {/* Entry / SL / Target on option */}
                         {rr && (
                           <div className="grid grid-cols-3 gap-1 text-center text-[8px] pt-1.5 border-t border-zinc-700/50">
                             <div>
@@ -509,7 +446,7 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
                       </div>
                     )}
 
-                    {/* Other qualifying strikes */}
+                    {/* Other picks compact table */}
                     {top.length > 1 && (
                       <div>
                         <div className="text-[7.5px] text-zinc-600 uppercase tracking-wider mb-1 px-0.5">
@@ -521,6 +458,7 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
                               key={i}
                               className="flex justify-between text-[8px] text-zinc-500 py-0.5 border-b border-zinc-800/60 last:border-0 cursor-pointer hover:bg-white/5 px-1 rounded transition-colors"
                               onClick={() => handleStrikeTap(t)}
+                              title="Tap to load chart"
                             >
                               <span className="text-zinc-300 font-mono w-20">{t.strike} {sideLbl}</span>
                               <span className="font-mono">₹{t.last_price}</span>
@@ -533,9 +471,10 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
                       </div>
                     )}
 
-                    {/* Filter summary */}
+                    {/* Filter summary — same format as Nifty */}
                     <div className="text-[7.5px] text-zinc-700 pt-1 leading-relaxed">
-                      Strict: ATM±200 · Δ≥0.80 · γ≥0.0005 · θ{">"}−12 · {pick.candidates_count} candidates
+                      Priority: OI▼ → Δ → γ · Filter: {isBuy ? 'Δ≥0.80' : 'Δ≤−0.80'} · γ≥0.0005 · OI≥1L · θ{">"}-12
+                      {' · '}{pick.candidates_count} candidates
                       {pick.tier && pick.tier !== 'strict' && (
                         <span className="text-yellow-500 ml-1">[{pick.tier}]</span>
                       )}
