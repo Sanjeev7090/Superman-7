@@ -2444,6 +2444,24 @@ async def fetch_gap_prediction() -> Dict:
         vix           = vix,
     )
 
+    # ── Market status (IST) ────────────────────────────────────────
+    from zoneinfo import ZoneInfo as _ZI
+    _IST     = _ZI("Asia/Kolkata")
+    _now_ist = datetime.now(_IST)
+    _is_wd   = _now_ist.weekday() < 5          # Mon–Fri
+    _mo      = _now_ist.replace(hour=9,  minute=15, second=0, microsecond=0)
+    _mc      = _now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
+    _is_open = _is_wd and _mo <= _now_ist <= _mc
+
+    # Prediction label: "Today" if pre-market / live; "Tomorrow/Next Session" if post-close
+    _after_close   = _is_wd and _now_ist > _mc
+    _prediction_for = (
+        "Next Trading Day" if (_after_close or not _is_wd)
+        else "Today"
+    )
+    _today_display = _now_ist.strftime("%d %b %Y")          # e.g. "26 Feb 2026"
+    _day_abbr      = _now_ist.strftime("%a")                # e.g. "Wed"
+
     data = {
         # Live input values
         "gift_vs_prev":      gift_vs_prev,
@@ -2461,6 +2479,12 @@ async def fetch_gap_prediction() -> Dict:
         "vix":               vix,
         # Prediction
         "prediction":        match_result,
+        # Market status
+        "market_open":       _is_open,
+        "market_status":     "OPEN" if _is_open else "CLOSED",
+        "today_date":        _today_display,
+        "today_day":         _day_abbr,
+        "prediction_for":    _prediction_for,
         # Full matrix (for table display)
         "matrix":            _GAP_MATRIX,
         "updated_at":        datetime.now(timezone.utc).isoformat(),
