@@ -49,7 +49,7 @@ export default function SensexGammaBlastSection({ onStrikeSelect }) {
       setCountdown(prev => Math.max(0, prev - 1));
     }, 1000);
     return () => clearInterval(timerRef.current);
-  }, [data?.window_status]);
+  }, [data]);
 
   const handleStrikeTap = (option) => {
     if (!onStrikeSelect || !option) return;

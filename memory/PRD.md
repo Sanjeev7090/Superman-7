@@ -82,7 +82,13 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
 - **Backend Refactor:** server.py partially split into route modules (crude, metals, market_intel)
 - **Timeframe Bug Fix:** METAL type timeframe switching fixed in MultiChartLayout
 
-### Session (Feb 2026 — Part 2)
+### Session (Feb 2026 — Part 3 — Insider Tracker)
+- **Insider Tracker Feature:** (COMPLETED)
+  - Backend: `GET /api/insider/detections` — NSE SEBI Reg 7(2) insider buy disclosures, last 7 days, priority score (8+=HIGH, 5-7=WATCHLIST, <5=MONITOR), 30-min cache
+  - Backend: `GET /api/insider/pattern-scan` — Chart pattern detection across 36 F&O stocks across 3 timeframes (15m, 1H, 1D). Patterns: Double Top/Bottom, H&S, Inverse H&S, Bull/Bear Flag, Cup & Handle, Range. Filters: timeframe, bias, pattern name. 15-min cache.
+  - Frontend: `InsiderTracker.jsx` — Slide-in modal panel with two tabs: "Insider Buys" + "Pattern Scanner"
+  - Frontend: Eye icon added to header (amber color, next to Market Intel newspaper icon)
+  - Bug Fix: `SensexGammaBlastSection.jsx` useEffect missing dependency warning fixed (P1 pending issue resolved)
 - **Strategy Builder Feature:** (COMPLETED)
   - Backend: `POST /api/vibe/strategy-build` — LLM generates Python strategy code from user prompt
   - Backend: `POST /api/vibe/strategy-execute` — Sandboxed Python exec with restricted builtins, blocked dangerous keywords, returns lightweight-charts markers

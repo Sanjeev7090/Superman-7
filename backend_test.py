@@ -19,7 +19,7 @@ import sys
 from typing import Dict, Any
 
 # Backend URL from environment
-BACKEND_URL = "https://krypton-deploy-1.preview.emergentagent.com"
+BACKEND_URL = "https://trading-kronos-ai.preview.emergentagent.com"
 API_ENDPOINT = f"{BACKEND_URL}/api/market-intel/closing-prediction"
 
 # Expected factor names (exact match required)

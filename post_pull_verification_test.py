@@ -19,7 +19,7 @@ import sys
 from datetime import datetime
 
 # Backend URL from frontend/.env
-BASE_URL = "https://sensex-call-put-1.preview.emergentagent.com"
+BASE_URL = "https://trading-kronos-ai.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 
 class Colors:

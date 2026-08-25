@@ -51,8 +51,10 @@ import CryptoList from './CryptoList';
 import {
   ChartLineUp, List, Newspaper, Sun, Moon, X,
   MagnifyingGlass, UsersThree, Notebook, GearSix, CurrencyBtc, Globe, ChatCircleText,
+  Eye,
 } from '@phosphor-icons/react';
 import VibeResearchPanel from './VibeResearchPanel';
+import InsiderTracker from './InsiderTracker';
 import { useTheme } from '../context/ThemeContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -101,6 +103,7 @@ const TradingDashboard = () => {
   const [showHybridBrain, setShowHybridBrain] = useState(false); // Hybrid Super Brain
   const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
   const [strategyMarkers, setStrategyMarkers] = useState([]); // Strategy overlay markers from Vibe Research
+  const [showInsider, setShowInsider] = useState(false); // Insider Tracker
   const { theme, toggleTheme } = useTheme();
   const wsRef = useRef(null);
   const rlPollRef = useRef(null);
@@ -657,6 +660,16 @@ const TradingDashboard = () => {
             <Newspaper size={15} />
           </button>
 
+          {/* Insider Tracker button */}
+          <button
+            onClick={() => setShowInsider(true)}
+            className="p-1.5 rounded-md border border-slate-200 dark:border-white/10 text-amber-400 hover:bg-slate-100 dark:hover:bg-white/10 transition-all"
+            title="Insider Tracker — NSE SEBI Reg 7(2) + Pattern Scanner"
+            data-testid="insider-tracker-btn"
+          >
+            <Eye size={15} />
+          </button>
+
           {/* RL AGENT BACKGROUND TRAINING INDICATOR — jumps into Settings drawer */}
           {rlStatus?.status === 'training' && (
             <button
@@ -985,6 +998,11 @@ const TradingDashboard = () => {
       {/* Hybrid Super Brain */}
       {showHybridBrain && (
         <HybridBrainPanel onClose={() => setShowHybridBrain(false)} />
+      )}
+
+      {/* Insider Tracker Panel */}
+      {showInsider && (
+        <InsiderTracker onClose={() => setShowInsider(false)} />
       )}
 
       {/* Voice Command System */}
