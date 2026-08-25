@@ -1691,6 +1691,414 @@ def _compute_nifty_fo_impact(participants: Dict) -> Dict:
     }
 
 
+
+# ── Gap Up / Gap Down Prediction System ────────────────────────────────────────
+
+# 16-row master matrix (as per user spec)
+_GAP_MATRIX = [
+    # ── GIFT >= +80 ──────────────────────────────────────────────────────
+    {"id": 1,  "gift_min": 80,   "gift_max": 9999, "fii": "buying",        "close": "strong",       "preopen": "buy_heavy",
+     "prediction": "Strong Gap Up",       "pts_min": 100, "pts_max": 160, "prob": "84-87%", "color": "#22c55e"},
+
+    {"id": 2,  "gift_min": 80,   "gift_max": 9999, "fii": "buying",        "close": "strong",       "preopen": "sell_mixed",
+     "prediction": "Mild-Strong Gap Up",  "pts_min": 70,  "pts_max": 130, "prob": "75-78%", "color": "#4ade80"},
+
+    {"id": 3,  "gift_min": 80,   "gift_max": 9999, "fii": "buying",        "close": "weak_neutral", "preopen": "buy_heavy",
+     "prediction": "Mild-Strong Gap Up",  "pts_min": 70,  "pts_max": 120, "prob": "76-80%", "color": "#4ade80"},
+
+    {"id": 4,  "gift_min": 80,   "gift_max": 9999, "fii": "selling",       "close": "strong",       "preopen": "buy_heavy",
+     "prediction": "Mild Gap Up",         "pts_min": 50,  "pts_max": 100, "prob": "72-75%", "color": "#86efac"},
+
+    {"id": 5,  "gift_min": 80,   "gift_max": 9999, "fii": "selling",       "close": "weak",         "preopen": "sell_heavy",
+     "prediction": "Flat to Mild Up",     "pts_min": 20,  "pts_max": 60,  "prob": "68-72%", "color": "#94a3b8"},
+
+    # ── GIFT +40 to +80 ──────────────────────────────────────────────────
+    {"id": 6,  "gift_min": 40,   "gift_max": 80,   "fii": "buying",        "close": "strong",       "preopen": "buy_heavy",
+     "prediction": "Mild Gap Up",         "pts_min": 50,  "pts_max": 100, "prob": "75-78%", "color": "#86efac"},
+
+    {"id": 7,  "gift_min": 40,   "gift_max": 80,   "fii": "buying",        "close": "weak",         "preopen": "sell_mixed",
+     "prediction": "Flat to Mild Up",     "pts_min": 20,  "pts_max": 50,  "prob": "70-73%", "color": "#94a3b8"},
+
+    {"id": 8,  "gift_min": 40,   "gift_max": 80,   "fii": "selling",       "close": "any",          "preopen": "any",
+     "prediction": "Flat",                "pts_min": -20, "pts_max": 40,  "prob": "73-76%", "color": "#64748b"},
+
+    # ── GIFT -40 to +40 ──────────────────────────────────────────────────
+    {"id": 9,  "gift_min": -40,  "gift_max": 40,   "fii": "strong_buying", "close": "strong",       "preopen": "buy_heavy",
+     "prediction": "Mild Gap Up / Flat",  "pts_min": 10,  "pts_max": 50,  "prob": "72-75%", "color": "#86efac"},
+
+    {"id": 10, "gift_min": -40,  "gift_max": 40,   "fii": "strong_selling","close": "weak",         "preopen": "sell_heavy",
+     "prediction": "Mild Gap Down / Flat","pts_min": -50, "pts_max": 10,  "prob": "72-75%", "color": "#fca5a5"},
+
+    {"id": 11, "gift_min": -40,  "gift_max": 40,   "fii": "mixed",         "close": "any",          "preopen": "any",
+     "prediction": "Flat",                "pts_min": -30, "pts_max": 30,  "prob": "75%+",   "color": "#64748b"},
+
+    # ── GIFT -40 to -80 ──────────────────────────────────────────────────
+    {"id": 12, "gift_min": -80,  "gift_max": -40,  "fii": "selling",       "close": "weak",         "preopen": "sell_heavy",
+     "prediction": "Mild Gap Down",       "pts_min": -110,"pts_max": -50, "prob": "74-78%", "color": "#fca5a5"},
+
+    {"id": 13, "gift_min": -80,  "gift_max": -40,  "fii": "buying",        "close": "strong",       "preopen": "buy_heavy",
+     "prediction": "Flat to Mild Down",   "pts_min": -40, "pts_max": 20,  "prob": "70-73%", "color": "#94a3b8"},
+
+    # ── GIFT <= -80 ───────────────────────────────────────────────────────
+    {"id": 14, "gift_min": -9999,"gift_max": -80,  "fii": "selling",       "close": "weak",         "preopen": "sell_heavy",
+     "prediction": "Strong Gap Down",     "pts_min": -160,"pts_max": -90, "prob": "82-85%", "color": "#ef4444"},
+
+    {"id": 15, "gift_min": -9999,"gift_max": -80,  "fii": "selling",       "close": "strong",       "preopen": "sell_mixed",
+     "prediction": "Mild-Strong Gap Down","pts_min": -130,"pts_max": -70, "prob": "75-78%", "color": "#fca5a5"},
+
+    {"id": 16, "gift_min": -9999,"gift_max": -80,  "fii": "buying",        "close": "strong",       "preopen": "buy_heavy",
+     "prediction": "Mild Gap Down",       "pts_min": -90, "pts_max": -40, "prob": "72-75%", "color": "#fca5a5"},
+]
+
+
+def _categorise_gift(premium: float) -> str:
+    """Map GIFT vs prev-close premium to band label."""
+    if premium >= 80:
+        return "gte_80"
+    elif premium >= 40:
+        return "40_to_80"
+    elif premium >= -40:
+        return "neg40_to_40"
+    elif premium >= -80:
+        return "neg80_to_neg40"
+    else:
+        return "lte_neg80"
+
+
+def _categorise_fii(net_index: int) -> str:
+    """Map FII net index futures to category."""
+    if net_index >= 30000:
+        return "strong_buying"
+    elif net_index >= 3000:
+        return "buying"
+    elif net_index <= -30000:
+        return "strong_selling"
+    elif net_index <= -3000:
+        return "selling"
+    else:
+        return "mixed"
+
+
+def _categorise_close(ratio: float) -> str:
+    """
+    ratio = (close - low) / (high - low)  for the previous trading day.
+    > 0.68 = strong, < 0.32 = weak, else neutral.
+    """
+    if ratio >= 0.68:
+        return "strong"
+    elif ratio <= 0.32:
+        return "weak"
+    else:
+        return "neutral"
+
+
+def _categorise_preopen(imbalance: str) -> str:
+    """Normalise pre-open imbalance label."""
+    lbl = imbalance.lower()
+    if "buy" in lbl and "heavy" in lbl:
+        return "buy_heavy"
+    if "sell" in lbl and "heavy" in lbl:
+        return "sell_heavy"
+    if "sell" in lbl or "mixed" in lbl:
+        return "sell_mixed"
+    return "any"
+
+
+def _row_matches(row: Dict, gift_cat: str, fii_cat: str, close_cat: str, preopen_cat: str) -> bool:
+    """Check if a matrix row matches current live categories."""
+    g = row["gift_min"]
+    # Map gift band to category
+    if g >= 80 and gift_cat != "gte_80":
+        return False
+    if 40 <= g < 80 and gift_cat != "40_to_80":
+        return False
+    if -40 <= g < 40 and gift_cat != "neg40_to_40":
+        return False
+    if -80 <= g < -40 and gift_cat != "neg80_to_neg40":
+        return False
+    if g < -80 and gift_cat != "lte_neg80":
+        return False
+
+    # FII condition
+    rf = row["fii"]
+    if rf != "any":
+        # "selling" in row also covers strong_selling
+        if rf == "selling" and fii_cat not in ("selling", "strong_selling"):
+            return False
+        if rf == "buying" and fii_cat not in ("buying", "strong_buying"):
+            return False
+        if rf not in ("any", "selling", "buying") and rf != fii_cat:
+            return False
+
+    # Close strength
+    rc = row["close"]
+    if rc == "weak_neutral":
+        if close_cat not in ("weak", "neutral"):
+            return False
+    elif rc != "any" and rc != close_cat:
+        return False
+
+    # Pre-open
+    rp = row["preopen"]
+    if rp == "sell_mixed":
+        if preopen_cat not in ("sell_heavy", "sell_mixed", "any"):
+            return False
+    elif rp != "any" and rp != preopen_cat:
+        return False
+
+    return True
+
+
+def _match_gap_matrix(gift_premium: float, fii_net: int, close_ratio: float,
+                      preopen_label: str, vix: float) -> Dict:
+    """
+    Match current live values against the 16-row Gap Prediction Matrix.
+    Returns best matching row + VIX adjustment if needed.
+    """
+    gift_cat   = _categorise_gift(gift_premium)
+    fii_cat    = _categorise_fii(fii_net)
+    close_cat  = _categorise_close(close_ratio)
+    preopen_cat= _categorise_preopen(preopen_label)
+
+    # Try exact match first, then progressively relax constraints
+    match = None
+    for row in _GAP_MATRIX:
+        if _row_matches(row, gift_cat, fii_cat, close_cat, preopen_cat):
+            match = row
+            break
+
+    # Fallback: match on gift + fii only
+    if not match:
+        for row in _GAP_MATRIX:
+            r = {**row, "close": "any", "preopen": "any"}
+            if _row_matches(r, gift_cat, fii_cat, "any", "any"):
+                match = row
+                break
+
+    # Ultimate fallback: gift band only
+    if not match:
+        for row in _GAP_MATRIX:
+            r = {**row, "fii": "any", "close": "any", "preopen": "any"}
+            if _row_matches(r, gift_cat, "any", "any", "any"):
+                match = row
+                break
+
+    if not match:
+        match = _GAP_MATRIX[10]   # Flat row
+
+    pts_min = match["pts_min"]
+    pts_max = match["pts_max"]
+
+    # VIX > 14 → reduce expected points by 20-25%
+    vix_adjusted = False
+    if vix > 14:
+        factor = 0.78 if vix > 16 else 0.82
+        pts_min = round(pts_min * factor)
+        pts_max = round(pts_max * factor)
+        vix_adjusted = True
+
+    def _fmt_pts(mn, mx):
+        s, e = min(mn, mx), max(mn, mx)
+        if s == e:
+            return f"{'+' if s > 0 else ''}{s}"
+        ss = f"{'+' if s > 0 else ''}{s}"
+        ee = f"{'+' if e > 0 else ''}{e}"
+        return f"{ss} to {ee} pts"
+
+    return {
+        "row_id":        match["id"],
+        "gift_cat":      gift_cat,
+        "fii_cat":       fii_cat,
+        "close_cat":     close_cat,
+        "preopen_cat":   preopen_cat,
+        "prediction":    match["prediction"],
+        "pts_label":     _fmt_pts(pts_min, pts_max),
+        "pts_min":       pts_min,
+        "pts_max":       pts_max,
+        "prob":          match["prob"],
+        "color":         match["color"],
+        "vix_adjusted":  vix_adjusted,
+        "vix_note":      f"India VIX {vix:.1f} > 14 — points reduced by ~{round((1-factor)*100) if vix_adjusted else 0}%" if vix_adjusted else "",
+    }
+
+
+def _fetch_close_strength_sync() -> Dict:
+    """
+    Fetch previous trading day's Nifty OHLC to calculate close strength.
+    close_ratio = (close - low) / (high - low)
+    """
+    try:
+        import yfinance as yf
+        data = yf.download("^NSEI", period="5d", interval="1d", progress=False, auto_adjust=True)
+        if data.empty or len(data) < 2:
+            return {"close_ratio": 0.5, "close_cat": "neutral",
+                    "prev_close": 0, "prev_high": 0, "prev_low": 0, "source": "unavailable"}
+
+        # Use second-to-last row = previous completed trading day
+        row = data.iloc[-2]
+        o, h, l, c = float(row["Open"]), float(row["High"]), float(row["Low"]), float(row["Close"])
+        rng = h - l
+        ratio = round((c - l) / rng, 3) if rng > 1 else 0.5
+        return {
+            "close_ratio": ratio,
+            "close_cat":   _categorise_close(ratio),
+            "prev_close":  round(c, 2),
+            "prev_high":   round(h, 2),
+            "prev_low":    round(l, 2),
+            "source":      "yfinance ^NSEI",
+        }
+    except Exception as e:
+        logger.debug(f"Close strength fetch error: {e}")
+        return {"close_ratio": 0.5, "close_cat": "neutral",
+                "prev_close": 0, "prev_high": 0, "prev_low": 0, "source": "error"}
+
+
+def _fetch_preopen_imbalance_sync(gift_premium: float) -> Dict:
+    """
+    Determine Pre-open Order Imbalance (9:00-9:15 IST).
+
+    During pre-open hours: tries NSE pre-open market API.
+    Outside pre-open:     derived from GIFT Nifty premium direction.
+    """
+    ist = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    h, m = ist.hour, ist.minute
+    is_preopen = (h == 9 and 0 <= m <= 15)
+    is_market  = (h == 9 and m > 15) or (9 < h < 15) or (h == 15 and m <= 30)
+
+    # Try NSE pre-open API during pre-open window
+    if is_preopen:
+        try:
+            import curl_cffi.requests as creq
+            s = creq.Session(impersonate="chrome120")
+            s.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json",
+                "Referer": "https://www.nseindia.com/",
+            })
+            # Warm cookie
+            s.get("https://www.nseindia.com", timeout=5)
+            r = s.get(
+                "https://www.nseindia.com/api/market-status",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                mdata = r.json()
+                # marketState list – look for NIFTY or CM session
+                for mkt in mdata.get("marketState", []):
+                    if "NIFTY" in mdata.get("market", "") or "NSE" in mdata.get("market", ""):
+                        break
+        except Exception:
+            pass
+
+    # Derive from GIFT premium (works at all times)
+    if gift_premium >= 80:
+        label, raw = "Buy Heavy",  "buy_heavy"
+    elif gift_premium >= 40:
+        label, raw = "Mild Buy",   "buy_heavy"
+    elif gift_premium >= 15:
+        label, raw = "Mixed / Buy","sell_mixed"
+    elif gift_premium >= -15:
+        label, raw = "Mixed",      "any"
+    elif gift_premium >= -40:
+        label, raw = "Mixed / Sell","sell_mixed"
+    elif gift_premium >= -80:
+        label, raw = "Mild Sell",  "sell_mixed"
+    else:
+        label, raw = "Sell Heavy", "sell_heavy"
+
+    session_label = "Pre-open (9:00-9:15)" if is_preopen else ("Market Hours" if is_market else "After Hours")
+    return {
+        "label":         label,
+        "raw":           raw,
+        "session":       session_label,
+        "derived_from":  "GIFT Nifty Premium" if not is_preopen else "NSE Pre-open + GIFT",
+    }
+
+
+_gap_pred_cache: Dict[str, Any] = {}
+_GAP_PRED_TTL = 180   # 3 min cache
+
+
+async def fetch_gap_prediction() -> Dict:
+    """
+    Orchestrate all data sources → run Gap Prediction Matrix.
+    Cached for 3 minutes.
+    """
+    import time as _t
+    cached = _gap_pred_cache.get("gap")
+    if cached and (_t.time() - cached["ts"]) < _GAP_PRED_TTL:
+        return cached["data"]
+
+    loop = asyncio.get_event_loop()
+
+    # Parallel fetch: close strength + market intel (for GIFT, VIX, FII cache)
+    close_task   = loop.run_in_executor(None, _fetch_close_strength_sync)
+    intel_data   = await fetch_market_intel()          # uses its own cache
+    close_data   = await close_task
+
+    gift_premium = intel_data.get("gift_premium", 0.0)
+    vix          = intel_data.get("vix", 0.0)
+    prev_close   = close_data.get("prev_close", 0.0)
+
+    # GIFT vs actual prev close (not vs current spot)
+    gift_vs_prev = round(intel_data.get("gift_nifty", 0) - prev_close, 1) if prev_close else gift_premium
+
+    # FII net from gap prediction cache snapshot (populated when FII section is loaded)
+    fii_net = 0
+    fii_direction_label = "Unknown"
+    try:
+        fii_snapshot = _gap_pred_cache.get("fii_snapshot")
+        if fii_snapshot:
+            fii_net = fii_snapshot.get("net", 0)
+    except Exception:
+        fii_net = 0
+
+    fii_cat = _categorise_fii(fii_net)
+    fii_direction_label = {
+        "strong_buying":  "Strong Buying",
+        "buying":         "Buying",
+        "mixed":          "Mixed",
+        "selling":        "Selling",
+        "strong_selling": "Strong Selling",
+    }.get(fii_cat, "Unknown")
+
+    preopen_data = _fetch_preopen_imbalance_sync(gift_vs_prev)
+
+    match_result = _match_gap_matrix(
+        gift_premium  = gift_vs_prev,
+        fii_net       = fii_net,
+        close_ratio   = close_data.get("close_ratio", 0.5),
+        preopen_label = preopen_data["label"],
+        vix           = vix,
+    )
+
+    data = {
+        # Live input values
+        "gift_vs_prev":      gift_vs_prev,
+        "gift_premium":      gift_premium,
+        "gift_nifty":        intel_data.get("gift_nifty", 0),
+        "prev_close":        prev_close,
+        "fii_net":           fii_net,
+        "fii_direction":     fii_direction_label,
+        "close_ratio":       close_data.get("close_ratio", 0.5),
+        "close_cat":         close_data.get("close_cat", "neutral"),
+        "close_label":       close_data.get("close_cat", "neutral").title(),
+        "prev_high":         close_data.get("prev_high", 0),
+        "prev_low":          close_data.get("prev_low", 0),
+        "preopen":           preopen_data,
+        "vix":               vix,
+        # Prediction
+        "prediction":        match_result,
+        # Full matrix (for table display)
+        "matrix":            _GAP_MATRIX,
+        "updated_at":        datetime.now(timezone.utc).isoformat(),
+    }
+
+    _gap_pred_cache["gap"] = {"data": data, "ts": _t.time()}
+    return data
+
+
+
 def _fetch_fii_data_sync() -> Dict:
     """
     Fetch FII/DII activity from NSE F&O participant CSV archives.
@@ -1922,6 +2330,10 @@ async def fetch_fii_intel(db=None) -> Dict:
                 logger.debug(f"FII MongoDB persist failed: {ex}")
 
         _FII_CACHE["fii"] = {"data": data, "ts": now}
+        # Update gap-prediction FII snapshot
+        fii_section = data.get("fii", {})
+        if fii_section:
+            _gap_pred_cache["fii_snapshot"] = {"net": fii_section.get("net", 0)}
         data["availability"] = avail_info
         return data
 

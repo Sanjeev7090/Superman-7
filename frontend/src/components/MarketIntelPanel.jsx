@@ -9,6 +9,7 @@ import { CrudeSupplyCard } from './market-intel/CrudeSupplyCard';
 import { SectorBreadthCard } from './market-intel/SectorBreadthCard';
 import { BreadthCard } from './market-intel/BreadthCard';
 import { FiiSection } from './market-intel/FiiSection';
+import { GapPredictionSection } from './market-intel/GapPredictionSection';
 
 const API    = `${process.env.REACT_APP_BACKEND_URL || ''}/api`;
 const fmt    = (v, d = 2)   => v == null || isNaN(v) ? '—' : Number(v).toFixed(d);
@@ -1068,6 +1069,9 @@ const MarketIntelPanel = ({ onClose }) => {
                 </table>
               </div>
             </div>
+
+            {/* ── Gap Up / Gap Down Prediction ─────────────────────────── */}
+            <GapPredictionSection C={C} isDark={isDark} />
 
             {/* ── Market News Intelligence Card ───────────────────────── */}
             {data.market_news?.available && (

@@ -46,6 +46,22 @@ async def get_fii_intel():
         return {"source": "error", "message": str(e)}
 
 
+@router.get("/gap-prediction")
+async def get_gap_prediction():
+    """
+    Gap Up / Gap Down Prediction System.
+    Combines GIFT Nifty vs Prev Close, FII direction, Close Strength,
+    Pre-open Imbalance → matches 16-row decision matrix → Final Prediction.
+    Cached 3 minutes.
+    """
+    try:
+        from agents.market_intel import fetch_gap_prediction
+        return await fetch_gap_prediction()
+    except Exception as e:
+        logging.error(f"Gap prediction error: {e}")
+        return {"error": str(e)}
+
+
 @router.post("/news-refresh")
 async def refresh_market_news():
     """
