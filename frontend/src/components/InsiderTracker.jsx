@@ -359,6 +359,9 @@ export default function InsiderTracker({ onClose }) {
   const insiders   = insiderData?.detections || [];
   const patterns   = patternData?.results    || [];
   const hasError   = tab === 'insider' ? insiderData?.error : patternData?.error;
+  const fromHistory = insiderData?.from_history;
+  const historyDate = insiderData?.history_date;
+  const sourceLabel = insiderData?.source || '';
 
   return (
     <div
@@ -568,10 +571,28 @@ export default function InsiderTracker({ onClose }) {
                 ))}
                 {insiderData?.count !== undefined && (
                   <span style={{ marginLeft: 'auto', fontSize: 9, color: C.textSecond }}>
-                    {insiderData.count} detections · last 7 days
+                    {insiderData.count} detections · {sourceLabel}
                   </span>
                 )}
               </div>
+
+              {/* History banner */}
+              {fromHistory && historyDate && (
+                <div style={{
+                  margin: '0 14px 0 14px', padding: '8px 12px', borderRadius: 6,
+                  background: 'rgba(251,191,36,0.10)', border: '1px solid rgba(251,191,36,0.3)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <Warning size={13} color="#fbbf24" />
+                  <div>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24' }}>Last Saved History </span>
+                    <span style={{ fontSize: 9, color: '#94a3b8' }}>
+                      — Live sources unavailable. Showing data saved on{' '}
+                      {new Date(historyDate).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {insiders.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 40, color: C.textSecond }}>
@@ -643,7 +664,7 @@ export default function InsiderTracker({ onClose }) {
             Source: NSE SEBI Reg 7(2) · yfinance · 100% Legal
           </span>
           <span style={{ fontSize: 9, color: C.textSecond }}>
-            {tab === 'insider' ? 'Cache: 30 min' : 'Cache: 15 min'}
+            {tab === 'insider' ? 'Cache: 15 min' : 'Cache: 15 min'}
           </span>
         </div>
       </div>

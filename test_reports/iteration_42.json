@@ -1,0 +1,41 @@
+{
+  "summary": "Tested Insider Trading Detection feature - both backend APIs and frontend UI. All 17 backend tests passed. Frontend panel fully functional: opens on Eye icon click, shows 11 detections from yfinance Activity, row expansion works, Pattern Scanner tab shows 32 stocks with patterns, close button works.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "InsiderTracker panel footer",
+        "issues": ["Footer displays 'Cache: 30 min' for Insider tab but backend INSIDER_TTL=900 (15 min) - cosmetic label mismatch"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_insider_trading.py",
+    "/app/test_reports/pytest/test_insider_trading.xml"
+  ],
+  "action_items": [
+    "LOW: Fix footer cache label in InsiderTracker.jsx - shows 'Cache: 30 min' but backend TTL is 15 min (INSIDER_TTL=900)"
+  ],
+  "critical_code_review_comments": [
+    "yfinance is used as fallback ONLY when all NSE sources (arch_bulk, arch_block, live_bulk, pit_raw) are empty (line 478). This is correct fallback design.",
+    "MongoDB _id is properly excluded in find_one query with {'_id': 0} projection - no serialization issue.",
+    "Cache label in InsiderTracker footer says '30 min' but backend INSIDER_TTL=900 seconds = 15 min. Minor UI inaccuracy.",
+    "All in-memory cache + MongoDB persistence both work correctly - second API call returns cached=True with same 11 detections."
+  ],
+  "updated_files": ["/app/backend/tests/test_insider_trading.py"],
+  "success_rate": {
+    "backend": "100% (17/17 tests passed)",
+    "frontend": "100% (all tested flows working)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Insider Trading Detection feature fully tested and working. /api/insider/detections returns 11 detections (yfinance Activity source) with from_history=false. /api/insider/pattern-scan returns 32 pattern results across 35-36 scanned stocks. Frontend panel opens via data-testid='insider-tracker-btn' (Eye icon). Both tabs work. Row expansion shows INSIDER TRANSACTIONS. Pattern Scanner shows filters (TF/Bias/Pattern). Close button works. MongoDB persistence confirmed working (second call returns cached=True). from_history banner not triggered in this run (live data available). Test file at /app/backend/tests/test_insider_trading.py.",
+  "test_credentials": "None required",
+  "rca_of_issue": "Previous issue was /api/insider/detections returning count=0. Root cause: NSE APIs (archives, live bulk, PIT) are blocked from cloud environment. Fix applied: Added yfinance unusual activity detection as fallback source (always produces results by scanning SCAN_UNIVERSE for volume spikes and SMA20 breakouts). MongoDB persistence saves results for future fallback. Both mechanisms confirmed working in testing."
+}
