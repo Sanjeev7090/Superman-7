@@ -46,6 +46,22 @@ async def get_fii_intel():
         return {"source": "error", "message": str(e)}
 
 
+@router.get("/closing-prediction")
+async def get_closing_prediction():
+    """
+    Last 15-min (3:15–3:30) Prediction Logic.
+    Scores 5 live factors: Day Low distance, 45-min structure,
+    India VIX, Matrix Bias, GIFT cue → Total score → Signal + Action.
+    Cached 2 minutes. Pass ?force=true to bypass cache.
+    """
+    try:
+        from agents.market_intel import fetch_closing_prediction
+        return await fetch_closing_prediction()
+    except Exception as e:
+        logging.error(f"Closing prediction error: {e}")
+        return {"available": False, "error": str(e)}
+
+
 @router.get("/gap-prediction")
 async def get_gap_prediction():
     """

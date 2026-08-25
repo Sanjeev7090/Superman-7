@@ -661,10 +661,14 @@ _NEWS_MARKET_RSS = [
     ("LiveMint",     "https://www.livemint.com/rss/markets"),
     # Moneycontrol — market reports
     ("Moneycontrol", "https://www.moneycontrol.com/rss/marketreports.xml"),
-    # Google News — Nifty 50 specific
-    ("Google News",  "https://news.google.com/rss/search?q=Nifty+50+FII+DII+India+market&hl=en-IN&gl=IN&ceid=IN:en"),
-    # Google News — macro factors affecting Nifty
-    ("Google News",  "https://news.google.com/rss/search?q=India+VIX+RBI+crude+oil+rupee+Sensex&hl=en-IN&gl=IN&ceid=IN:en"),
+    # Google News — Nifty FII DII today (most real-time)
+    ("Google News",  "https://news.google.com/rss/search?q=Nifty+50+FII+DII+India+market+today&hl=en-IN&gl=IN&ceid=IN:en&tbs=qdr:d"),
+    # Google News — India VIX, RBI, crude oil (macro intraday)
+    ("Google News",  "https://news.google.com/rss/search?q=India+VIX+RBI+crude+oil+rupee+NSE+today&hl=en-IN&gl=IN&ceid=IN:en&tbs=qdr:d"),
+    # Google News — Sensex Nifty opening gap GIFT intraday
+    ("Google News",  "https://news.google.com/rss/search?q=Sensex+Nifty+opening+GIFT+SGX+gap+intraday&hl=en-IN&gl=IN&ceid=IN:en&tbs=qdr:d"),
+    # Google News — F&O expiry options activity
+    ("Google News",  "https://news.google.com/rss/search?q=Nifty+options+expiry+FnO+Bank+Nifty+put+call&hl=en-IN&gl=IN&ceid=IN:en&tbs=qdr:d"),
 ]
 
 # ── Nifty 50 Important Factors — HIGH IMPACT (direct market movers) ───────────
@@ -790,7 +794,7 @@ def _n50_context_sentiment(text_lower: str) -> Optional[str]:
     return None  # fallback to keyword counting
 
 _news_market_cache: Dict[str, Any] = {}
-_NEWS_MARKET_CACHE_TTL = 900  # 15 minutes
+_NEWS_MARKET_CACHE_TTL = 300   # 5 minutes — day trading needs fresh data
 
 
 # ── Geopolitical Risk Scoring ──────────────────────────────────────────────────
@@ -973,16 +977,118 @@ async def _fetch_regulatory_sentiment() -> str:
 
 # ── Market News Intelligence ────────────────────────────────────────────────────
 
+def _pub_to_epoch(pub_iso: str) -> float:
+    """Convert ISO / RFC-2822 date string → epoch seconds for reliable sorting."""
+    if not pub_iso:
+        return 0.0
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(pub_iso).timestamp()
+    except Exception:
+        pass
+    try:
+        return datetime.fromisoformat(pub_iso.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _intraday_tag_and_impact(title: str, desc: str, sentiment: str, impact_level: str) -> Dict:
+    """
+    Assign a day-trading specific tag + expected Nifty 50 point impact.
+
+    Tags: FII Flow | VIX Alert | Rate Decision | Crude Oil | GIFT Signal |
+          F&O Expiry | USD/INR | US Macro | Index Heavyweight | Budget/Policy | Benchmark
+    """
+    tl = (title + " " + desc).lower()
+
+    # ── Tag detection ──────────────────────────────────────────────────────────
+    if any(k in tl for k in ["fii", "dii", "foreign institutional", "domestic institutional", "fii buying", "fii selling"]):
+        tag      = "FII Flow"
+        tag_color= "#818cf8"
+        base_min, base_max = 100, 250
+    elif any(k in tl for k in ["india vix", "vix spike", "vix surges", "vix falls", "vix rise", "vix drop"]):
+        tag      = "VIX Alert"
+        tag_color= "#f97316"
+        base_min, base_max = 80, 180
+    elif any(k in tl for k in ["rbi", "repo rate", "monetary policy", "rate cut", "rate hike", "fomc", "us fed", "federal reserve"]):
+        tag      = "Rate Decision"
+        tag_color= "#f43f5e"
+        base_min, base_max = 150, 400
+    elif any(k in tl for k in ["gift nifty", "sgx nifty", "nifty premium", "nifty discount"]):
+        tag      = "GIFT Signal"
+        tag_color= "#22c55e"
+        base_min, base_max = 60, 150
+    elif any(k in tl for k in ["f&o expiry", "options expiry", "derivatives expiry", "monthly expiry", "weekly expiry", "put call", "max pain", "open interest"]):
+        tag      = "F&O Expiry"
+        tag_color= "#a78bfa"
+        base_min, base_max = 50, 120
+    elif any(k in tl for k in ["crude oil", "brent crude", "oil price", "wti", "petroleum"]):
+        tag      = "Crude Oil"
+        tag_color= "#f59e0b"
+        base_min, base_max = 40, 120
+    elif any(k in tl for k in ["rupee", "usd/inr", "dollar india", "inr weakens", "inr strengthens"]):
+        tag      = "USD/INR"
+        tag_color= "#06b6d4"
+        base_min, base_max = 30, 80
+    elif any(k in tl for k in ["budget", "union budget", "fiscal deficit", "sebi circular", "sebi ban", "sebi order"]):
+        tag      = "Budget/Policy"
+        tag_color= "#e11d48"
+        base_min, base_max = 100, 300
+    elif any(k in tl for k in ["us stocks", "wall street", "dow jones", "s&p 500", "nasdaq", "global market", "asian market"]):
+        tag      = "US Macro"
+        tag_color= "#60a5fa"
+        base_min, base_max = 50, 150
+    elif any(k in tl for k in _N50_TOP_COMPANIES):
+        tag      = "Index Heavyweight"
+        tag_color= "#34d399"
+        base_min, base_max = 20, 80
+    else:
+        tag      = "Benchmark"
+        tag_color= "#94a3b8"
+        base_min, base_max = 10, 50
+
+    # Scale by impact level
+    if impact_level == "HIGH":
+        mult = 1.0
+    else:
+        mult = 0.5
+        base_min = max(10, round(base_min * mult))
+        base_max = max(20, round(base_max * mult))
+
+    # Direction
+    if sentiment == "BULLISH":
+        pts_label = f"+{base_min} to +{base_max} pts"
+        pts_color = "#22c55e"
+    elif sentiment == "BEARISH":
+        pts_label = f"-{base_min} to -{base_max} pts"
+        pts_color = "#ef4444"
+    else:
+        half = max(10, base_min // 2)
+        pts_label = f"±{half} pts"
+        pts_color = "#94a3b8"
+
+    return {
+        "intraday_tag":       tag,
+        "intraday_tag_color": tag_color,
+        "nifty_pts_label":    pts_label,
+        "nifty_pts_color":    pts_color,
+    }
+
+
 def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
     """
     Fetch Nifty 50 market news — only important factors that directly impact
     Nifty 50 (FII/DII, VIX, RBI, GIFT Nifty, crude oil, rupee, top heavyweights).
 
+    NEW (day-trading focus):
+      - Only shows news from last 24 hours (48h on weekends)
+      - Sorted by actual publish date (most recent first), HIGH impact prioritised
+      - Each item has intraday_tag + nifty_pts_label for quick decision
+      - Cache TTL reduced to 5 min
+
     impact_level:
       HIGH   — direct Nifty movers (FII, VIX, RBI, crude, expiry, rupee, budget)
       MEDIUM — major Nifty 50 constituent company news
-
-    Returns: {items, outlook, outlook_color, outlook_label, confidence, ...}
     """
     import time as _time
     import requests
@@ -998,21 +1104,32 @@ def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
     _HEADERS = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         ),
         "Accept": "application/rss+xml, application/xml, text/xml, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
     }
+
+    now_epoch = _time.time()
+    # Day-trading cutoff: last 24h on weekdays, last 48h on weekends
+    from datetime import datetime as _dt
+    ist_now  = _dt.now(timezone(timedelta(hours=5, minutes=30)))
+    is_weekend = ist_now.weekday() >= 5
+    CUTOFF_HOURS  = 48 if is_weekend else 24
+    CUTOFF_EPOCH  = now_epoch - (CUTOFF_HOURS * 3600)
+    FALLBACK_EPOCH= now_epoch - (72 * 3600)   # 3-day fallback if 24h has 0 results
 
     all_items: List[Dict] = []
 
     for source_name, url in _NEWS_MARKET_RSS:
         try:
-            resp = requests.get(url, headers=_HEADERS, timeout=6)
+            resp = requests.get(url, headers=_HEADERS, timeout=8)
             if resp.status_code != 200:
                 continue
             root = ET.fromstring(resp.content)
             channel = root.find("channel") or root
-            for item in (channel.findall("item") or [])[:25]:
+            for item in (channel.findall("item") or [])[:30]:
                 title = (item.findtext("title") or "").strip()
                 link  = (item.findtext("link") or "").strip()
                 pub   = (item.findtext("pubDate") or "").strip()
@@ -1026,6 +1143,18 @@ def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
                 if impact_level is None:
                     continue
 
+                # Parse publish date to ISO + epoch
+                pub_iso   = ""
+                pub_epoch = 0.0
+                try:
+                    from email.utils import parsedate_to_datetime
+                    dt_obj   = parsedate_to_datetime(pub)
+                    pub_iso  = dt_obj.isoformat()
+                    pub_epoch= dt_obj.timestamp()
+                except Exception:
+                    pub_iso   = pub
+                    pub_epoch = _pub_to_epoch(pub)
+
                 # Context-aware sentiment (India-specific rules first)
                 text_lower = (title + " " + desc).lower()
                 ctx_sentiment = _n50_context_sentiment(text_lower)
@@ -1033,7 +1162,6 @@ def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
                     sentiment = ctx_sentiment
                     s_color = "#22c55e" if sentiment == "BULLISH" else "#ef4444"
                 else:
-                    # Fallback: keyword-based scoring
                     bull = sum(1 for kw in _N50_BULLISH_KW if kw in text_lower)
                     bear = sum(1 for kw in _N50_BEARISH_KW if kw in text_lower)
                     if bull > bear:
@@ -1043,47 +1171,56 @@ def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
                     else:
                         sentiment, s_color = "NEUTRAL", "#94a3b8"
 
-                # Parse pub date to ISO
-                pub_iso = ""
-                try:
-                    from email.utils import parsedate_to_datetime
-                    pub_iso = parsedate_to_datetime(pub).isoformat()
-                except Exception:
-                    pub_iso = pub
+                intraday = _intraday_tag_and_impact(title, desc, sentiment, impact_level)
 
                 all_items.append({
-                    "title":           title,
-                    "url":             link,
-                    "source":          source_name,
-                    "published":       pub_iso,
-                    "summary":         desc,
-                    "sentiment":       sentiment,
-                    "sentiment_color": s_color,
-                    "impact_level":    impact_level,
-                    "impact_color":    "#f97316" if impact_level == "HIGH" else "#eab308",
+                    "title":              title,
+                    "url":                link,
+                    "source":             source_name,
+                    "published":          pub_iso,
+                    "pub_epoch":          pub_epoch,
+                    "summary":            desc,
+                    "sentiment":          sentiment,
+                    "sentiment_color":    s_color,
+                    "impact_level":       impact_level,
+                    "impact_color":       "#f97316" if impact_level == "HIGH" else "#eab308",
+                    **intraday,
                 })
         except Exception as e:
             logger.debug(f"[MarketNews] {source_name} failed: {e}")
 
-    # Deduplicate by title prefix (first 55 chars)
+    # Deduplicate by title prefix (first 60 chars)
     seen: set = set()
     unique: List[Dict] = []
-    for item in all_items:
-        key = item["title"][:55].lower()
+    for item in sorted(all_items, key=lambda x: x.get("pub_epoch", 0), reverse=True):
+        key = item["title"][:60].lower()
         if key not in seen:
             seen.add(key)
             unique.append(item)
 
-    # Sort: HIGH impact first, then by recency within same impact tier
+    # ── Date filter: keep only last 24h (or 48h on weekends) ─────────────────
+    fresh = [i for i in unique if i.get("pub_epoch", 0) >= CUTOFF_EPOCH]
+
+    # If 0 fresh items (RSS feeds may be slow), fall back to 3-day window
+    if not fresh:
+        fresh = [i for i in unique if i.get("pub_epoch", 0) >= FALLBACK_EPOCH]
+
+    # If still empty, take all (better to show something than nothing)
+    if not fresh:
+        fresh = unique
+
+    # ── Sort: most-recent within HIGH tier first, then MEDIUM ────────────────
     def _sort_key(x):
         tier = 0 if x.get("impact_level") == "HIGH" else 1
-        return (tier, -(len(x.get("published", "") or "")))
+        return (tier, -x.get("pub_epoch", 0))   # ← correct: sort by epoch, not string length
 
-    # First sort by date to get most-recent per tier
-    unique.sort(key=lambda x: x.get("published", "") or "", reverse=True)
-    # Then stable-sort by impact tier (HIGH first)
-    unique.sort(key=lambda x: 0 if x.get("impact_level") == "HIGH" else 1)
-    top = unique[:20]
+    fresh.sort(key=_sort_key)
+    top = fresh[:20]
+
+    # Freshness warning flag
+    oldest_shown_hrs = 0
+    if top:
+        oldest_shown_hrs = round((now_epoch - min(i.get("pub_epoch", now_epoch) for i in top)) / 3600, 1)
 
     # Overall outlook (weight HIGH items more)
     bull_c = sum(2 if i["impact_level"] == "HIGH" else 1
@@ -1111,20 +1248,22 @@ def _fetch_nifty_market_news_sync(force: bool = False) -> Dict:
         confidence = 50
 
     result: Dict = {
-        "items":         top,
-        "outlook":       outlook,
-        "outlook_color": outlook_color,
-        "outlook_label": outlook_label,
-        "confidence":    confidence,
-        "bull_count":    raw_bull,
-        "bear_count":    raw_bear,
-        "high_count":    sum(1 for i in top if i["impact_level"] == "HIGH"),
-        "total":         total,
-        "fetched_at":    datetime.now(timezone.utc).isoformat(),
-        "available":     total > 0,
+        "items":             top,
+        "outlook":           outlook,
+        "outlook_color":     outlook_color,
+        "outlook_label":     outlook_label,
+        "confidence":        confidence,
+        "bull_count":        raw_bull,
+        "bear_count":        raw_bear,
+        "high_count":        sum(1 for i in top if i["impact_level"] == "HIGH"),
+        "total":             total,
+        "oldest_shown_hrs":  oldest_shown_hrs,
+        "cutoff_hours":      CUTOFF_HOURS,
+        "fetched_at":        datetime.now(timezone.utc).isoformat(),
+        "available":         total > 0,
     }
     _news_market_cache["news"] = {"data": result, "ts": _time.time()}
-    logger.info(f"[MarketNews] {total} items | HIGH={result['high_count']} | outlook={outlook}")
+    logger.info(f"[MarketNews] {total} items | HIGH={result['high_count']} | outlook={outlook} | oldest={oldest_shown_hrs}h")
     return result
 
 
@@ -2017,6 +2156,239 @@ def _fetch_preopen_imbalance_sync(gift_premium: float) -> Dict:
 
 _gap_pred_cache: Dict[str, Any] = {}
 _GAP_PRED_TTL = 180   # 3 min cache
+
+
+# ── Last 15-min (3:15–3:30) Closing Prediction System ─────────────────────────
+
+_CLOSING_PRED_CACHE: Dict[str, Any] = {}
+_CLOSING_PRED_TTL = 120   # 2-min cache (live market window)
+
+# Decision Rules table
+_CLOSING_DECISION_RULES = [
+    {"score_min": 6,   "score_max": 99,  "signal": "Strong Recovery",    "move": "+25 to +50 pts", "action": "Aggressive Long",         "color": "#22c55e"},
+    {"score_min": 3,   "score_max": 6,   "signal": "Mild–Good Recovery", "move": "+12 to +35 pts", "action": "Selective Long",           "color": "#86efac"},
+    {"score_min": 1,   "score_max": 3,   "signal": "Small Recovery / Mixed","move": "+5 to +20 pts","action": "Small size only",          "color": "#4ade80"},
+    {"score_min": 0,   "score_max": 1,   "signal": "No Clear Edge",       "move": "–10 to +10 pts","action": "Avoid",                    "color": "#94a3b8"},
+    {"score_min": -4,  "score_max": 0,   "signal": "Mild Selling",        "move": "–10 to –30 pts","action": "Avoid Long / Small Short",  "color": "#fca5a5"},
+    {"score_min": -99, "score_max": -4,  "signal": "Selling till Close",  "move": "–20 to –50 pts","action": "Short bias",               "color": "#ef4444"},
+]
+
+
+def _closing_decision(total_score: int) -> Dict:
+    for rule in _CLOSING_DECISION_RULES:
+        if rule["score_min"] <= total_score < rule["score_max"]:
+            return rule
+    return _CLOSING_DECISION_RULES[3]   # default: no edge
+
+
+def _fetch_closing_pred_sync() -> Dict:
+    """
+    Compute Last 15-min (3:15–3:30) Prediction Logic from live Nifty 50 data.
+
+    Factors scored:
+      1. Distance from Day Low          (+3 / +2 / +1 / -3)
+      2. Last 45-min Structure          (+2 / 0 / -2)
+      3. India VIX                      (+2 / +1 / -1)
+      4. Matrix Bias                    (+2 / +1 / 0 / -2)
+      5. GIFT / Closing Cue             (+1 / -1)
+    """
+    import time as _t
+    import yfinance as yf
+    from datetime import datetime as _dt
+
+    ist_tz   = timezone(timedelta(hours=5, minutes=30))
+    now_ist  = _dt.now(ist_tz)
+    h, m     = now_ist.hour, now_ist.minute
+
+    # Determine market session context
+    is_market_hours = (h == 9 and m >= 15) or (9 < h < 15) or (h == 15 and m <= 30)
+    is_closing_window = (h == 15 and 0 <= m <= 30)   # 3:00–3:30 PM
+
+    # ── Fetch 5-minute intraday Nifty 50 data ─────────────────────────────────
+    try:
+        df = yf.download("^NSEI", period="5d", interval="5m", progress=False, auto_adjust=True)
+    except Exception as e:
+        logger.debug(f"Closing pred yfinance error: {e}")
+        df = None
+
+    if df is None or df.empty:
+        return {
+            "available": False,
+            "message": "Intraday data unavailable",
+            "session": "error",
+        }
+
+    # Keep only today's bars
+    try:
+        today_str = now_ist.strftime("%Y-%m-%d")
+        # Filter to today's data (index is UTC, convert to IST)
+        df.index = df.index.tz_convert("Asia/Kolkata")
+        today_df  = df[df.index.strftime("%Y-%m-%d") == today_str]
+        if today_df.empty:
+            # Weekend / holiday — use last available trading day
+            last_date  = df.index[-1].strftime("%Y-%m-%d")
+            today_df   = df[df.index.strftime("%Y-%m-%d") == last_date]
+            today_str  = last_date
+            is_market_hours = False
+            is_closing_window = False
+    except Exception as e:
+        logger.debug(f"Closing pred date filter error: {e}")
+        today_df = df.tail(40)
+
+    if today_df.empty:
+        return {"available": False, "message": "No data for today", "session": "no_data"}
+
+    # Current price & day stats
+    curr_price  = float(today_df["Close"].iloc[-1])
+    day_high    = float(today_df["High"].max())
+    day_low     = float(today_df["Low"].min())
+    day_open    = float(today_df["Open"].iloc[0])
+    dist_from_low = round(curr_price - day_low, 1)
+
+    # ── Factor 1: Distance from Day Low ──────────────────────────────────────
+    if dist_from_low >= 70:
+        f1_score, f1_label = +3, "70+ pts above Day Low"
+    elif dist_from_low >= 40:
+        f1_score, f1_label = +2, "40–70 pts above Day Low"
+    elif dist_from_low >= 20:
+        f1_score, f1_label = +1, "20–40 pts above Day Low"
+    else:
+        f1_score, f1_label = -3, "Within 20 pts of Day Low"
+
+    # ── Factor 2: Last 45-min Structure ──────────────────────────────────────
+    # Use last 9 × 5-min bars = 45 min
+    last45 = today_df.tail(9)
+    struct_signal = "Sideways"
+    f2_score = 0
+
+    if len(last45) >= 6:
+        seg1 = last45.iloc[:3]    # oldest 15 min
+        seg2 = last45.iloc[3:6]   # middle 15 min
+        seg3 = last45.iloc[6:]    # latest 15 min
+
+        low1  = float(seg1["Low"].min())
+        low2  = float(seg2["Low"].min())
+        low3  = float(seg3["Low"].min()) if len(seg3) > 0 else low2
+        high1 = float(seg1["High"].max())
+        high2 = float(seg2["High"].max())
+        high3 = float(seg3["High"].max()) if len(seg3) > 0 else high2
+
+        # Higher Low pattern: lows rising
+        if low2 > low1 and (len(seg3) == 0 or low3 >= low2 * 0.999):
+            struct_signal = "Higher Low + bounce"
+            f2_score = +2
+        # Lower High + Lower Low: both highs and lows falling
+        elif high2 < high1 and low2 < low1:
+            struct_signal = "Lower High + Lower Low"
+            f2_score = -2
+        else:
+            struct_signal = "Sideways"
+            f2_score = 0
+
+    # ── Factor 3: India VIX ──────────────────────────────────────────────────
+    vix = 0.0
+    try:
+        vix_info = yf.Ticker("^INDIAVIX").fast_info
+        vix_raw  = getattr(vix_info, "last_price", None)
+        if vix_raw:
+            vix = float(vix_raw)
+    except Exception:
+        pass
+
+    # Try market intel cache if yfinance VIX unavailable
+    if vix == 0.0:
+        cached_intel = _cache.get("intel", {}).get("data", {})
+        vix = cached_intel.get("vix", 0.0)
+
+    if vix > 0 and vix < 11.5:
+        f3_score, f3_label = +2, f"VIX {vix:.1f} < 11.5"
+    elif vix > 0 and vix <= 13.0:
+        f3_score, f3_label = +1, f"VIX {vix:.1f} (11.5–13.0)"
+    elif vix > 14.0:
+        f3_score, f3_label = -1, f"VIX {vix:.1f} > 14.0"
+    else:
+        f3_score, f3_label = 0, f"VIX {vix:.1f} (Neutral)"
+
+    # ── Factor 4: Matrix Bias (from intel cache) ──────────────────────────────
+    cached_intel = _cache.get("intel", {}).get("data", {})
+    bias_label   = cached_intel.get("bias", "Neutral")
+
+    if "Strong Bullish" in bias_label or "Mild Bullish" in bias_label:
+        f4_score, f4_label = +2, f"Bias: {bias_label}"
+    elif "Neutral" in bias_label:
+        f4_score, f4_label = +1, f"Bias: {bias_label}"
+    elif "Mild Bearish" in bias_label:
+        f4_score, f4_label = 0, f"Bias: {bias_label}"
+    else:
+        f4_score, f4_label = -2, f"Bias: {bias_label}"
+
+    # ── Factor 5: GIFT / Closing Cue ─────────────────────────────────────────
+    gift_premium = cached_intel.get("gift_premium", 0.0)
+
+    if gift_premium >= -20:     # Flat to Positive
+        f5_score, f5_label = +1, f"GIFT Premium {gift_premium:+.0f} (Flat/Positive)"
+    else:                        # Clearly Negative
+        f5_score, f5_label = -1, f"GIFT Premium {gift_premium:+.0f} (Negative)"
+
+    # ── Total Score → Decision ────────────────────────────────────────────────
+    total_score = f1_score + f2_score + f3_score + f4_score + f5_score
+    decision    = _closing_decision(total_score)
+
+    # Factor breakdown for display
+    factors = [
+        {"name": "Distance from Day Low",   "value": f"{dist_from_low:+.0f} pts from low",
+         "label": f1_label, "score": f1_score},
+        {"name": "Last 45-min Structure",   "value": f"45-min: {struct_signal}",
+         "label": struct_signal,            "score": f2_score},
+        {"name": "India VIX",               "value": f"VIX {vix:.1f}" if vix else "VIX —",
+         "label": f3_label,                 "score": f3_score},
+        {"name": "Matrix Bias",             "value": bias_label,
+         "label": f4_label,                 "score": f4_score},
+        {"name": "GIFT / Closing Cue",      "value": f"Premium {gift_premium:+.0f}",
+         "label": f5_label,                 "score": f5_score},
+    ]
+
+    # Session description
+    if is_closing_window:
+        session_note = f"🟢 Live — {now_ist.strftime('%I:%M %p')} IST (Closing window)"
+    elif is_market_hours:
+        session_note = f"🟡 Market Hours — {now_ist.strftime('%I:%M %p')} IST"
+    else:
+        session_note = f"⚪ Market Closed — Last: {today_str}"
+
+    return {
+        "available":        True,
+        "curr_price":       round(curr_price, 1),
+        "day_high":         round(day_high, 1),
+        "day_low":          round(day_low, 1),
+        "day_open":         round(day_open, 1),
+        "dist_from_low":    dist_from_low,
+        "vix":              round(vix, 1),
+        "gift_premium":     gift_premium,
+        "bias":             bias_label,
+        "total_score":      total_score,
+        "factors":          factors,
+        "decision":         decision,
+        "session_note":     session_note,
+        "is_closing_window":is_closing_window,
+        "is_market_hours":  is_market_hours,
+        "updated_at":       datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def fetch_closing_prediction() -> Dict:
+    """Public API — cached 2 min, force-refreshable."""
+    import time as _t
+    cached = _CLOSING_PRED_CACHE.get("cp")
+    if cached and (_t.time() - cached["ts"]) < _CLOSING_PRED_TTL:
+        return cached["data"]
+
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, _fetch_closing_pred_sync)
+    _CLOSING_PRED_CACHE["cp"] = {"data": data, "ts": _t.time()}
+    return data
+
+
 
 
 async def fetch_gap_prediction() -> Dict:

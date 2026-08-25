@@ -722,6 +722,38 @@ frontend:
         agent: "main"
         comment: "Bug: MarketIntelPanel showed 'Failed to load market intelligence data'. Root cause: load() function used Promise.allSettled but destructured result as { data: d } (wrong - allSettled returns {status, value} not {data}). This caused d=undefined, d.status threw TypeError, caught as error. Fixed: changed destructuring to [marketRes, sbRes] and check marketRes.status correctly."
 
+
+  - task: "Nifty 50 News Intelligence - Old news bug fix + day trading focus"
+    implemented: true
+    working: true
+    file: "backend/agents/market_intel.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "Bug: News showing 10-day old articles. Root causes: (1) _sort_key used len(published) not actual date epoch, (2) No date cutoff - old RSS items passed through, (3) 15-min cache too stale. Fixes: Added _pub_to_epoch for correct sorting, 24h cutoff filter, TTL reduced to 5 min, 4 new Google News RSS feeds with tbs=qdr:d, intraday_tag and nifty_pts_label per item, frontend auto-refresh 5 min, freshness color-coding."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: All 6 tests PASSED. (1) GET /api/market-intel returns market_news with 20 items ✓ (2) All items have required fields: intraday_tag, nifty_pts_label, pub_epoch, published, title, url, sentiment, impact_level ✓ (3) All items are FRESH - oldest item is only 10.7 hours old (0.5 days), not 10 days old ✓ oldest_shown_hrs = 10.7h (well within 48h threshold) ✓ (4) Items correctly sorted: HIGH impact first (20 HIGH items), then by pub_epoch descending (most recent first) ✓ (5) fetched_at field is recent (4.5 minutes old) ✓ (6) POST /api/market-intel/news-refresh works correctly, returns fresh sorted data ✓ Bug fix fully verified - no 10-day old articles, correct date-based sorting, all required fields present."
+
+  - task: "Last 15-min (3:15-3:30) Closing Prediction Logic section"
+    implemented: true
+    working: true
+    file: "backend/agents/market_intel.py, frontend/src/components/market-intel/ClosingPredictionSection.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "main"
+        comment: "New feature: Added /api/market-intel/closing-prediction endpoint. Scores 5 factors from live yfinance intraday data: (1) Distance from Day Low +3/+2/+1/-3, (2) 45-min structure +2/0/-2, (3) India VIX +2/+1/-1, (4) Matrix Bias +2/+1/0/-2, (5) GIFT closing cue +1/-1. Total score -> 6-tier decision table. Frontend component ClosingPredictionSection.jsx placed just below Decision Matrix. Refresh button + auto-refresh every 2min."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: All 15 tests PASSED (100% success rate). ✅ (1) GET /api/market-intel/closing-prediction returns HTTP 200 ✓ (2) Response has 'available' field (true) ✓ (3) All 11 required fields present (curr_price, day_high, day_low, day_open, dist_from_low, vix, total_score, factors, decision, session_note, updated_at) ✓ (4) All field types correct ✓ (5) Factors list has exactly 5 items ✓ (6) Factor names match expected: 'Distance from Day Low', 'Last 45-min Structure', 'India VIX', 'Matrix Bias', 'GIFT / Closing Cue' ✓ (7) All factors have required fields (name, value, label, score) ✓ (8) All factor scores are numeric ✓ (9) total_score correctly equals sum of factor scores (10 = 3+2+2+2+1) ✓ (10) decision object has all required fields (signal, move, action, color) ✓ (11) decision.signal matches total_score per rules: score 10 → 'Strong Recovery' ✓ (12) decision.signal is valid (one of 6 expected signals) ✓ (13) updated_at is valid ISO datetime string ✓ (14) Cache behavior working: second call within 2 min is fast (245ms < 500ms threshold) ✓ (15) Cache consistency confirmed: updated_at unchanged on cache hit ✓ Test data: Current Price 24334.6, Distance from Low +219 pts, VIX 11.1, Total Score 10, Decision 'Strong Recovery' (+25 to +50 pts, Aggressive Long). Endpoint fully functional and production-ready."
+
+
 test_plan:
   current_focus: []
   stuck_tasks: []
@@ -733,3 +765,7 @@ agent_communication:
     message: "REJ Button Testing Complete. ✅ WORKING: (1) REJ button exists in chart toolbar with data-testid='rej-toggle', (2) Button positioned correctly AFTER VP button (VP x=741, REJ x=778), (3) Button is clickable and toggles on/off, (4) Button turns cyan (#06b6d4) when activated - verified in CSS classes, (5) REJ canvas overlay present in DOM, (6) REJ detection logic implemented (15m rejection + 1m confirmation with Entry/SL/Target), (7) Canvas drawing function renders overlay correctly. ❌ CRITICAL ISSUE FOUND (separate from REJ): Stock data API failing with 500 errors - 'ValueError: Out of range float values are not JSON compliant' in /api/stock/bars and /api/groww/candles endpoints when loading RELIANCE. This prevents chart from loading candles. REJ button implementation is 100% correct and working. Stock data API needs urgent fix - likely NaN/Inf values in yfinance response causing JSON serialization to fail."
   - agent: "testing"
     message: "REJ Button + Stock API Re-Test Complete (2026-07-28). ✅ ALL TESTS PASSING: (1) Stock data API FIXED - RELIANCE.NS chart loads successfully with candlestick data, price around 1278.00, no NaN errors ✓ (2) REJ button found at x=777.98, y=191.00 with data-testid='rej-toggle' ✓ (3) REJ positioned AFTER VP button (VP x=740.98, REJ x=777.98) ✓ (4) REJ button clickable and toggles on/off correctly ✓ (5) REJ button turns CYAN (#06b6d4) when activated - verified class change ✓ (6) 18 canvas elements present (16 visible) including REJ overlay ✓ (7) Chart renders with full candlestick data, Volume Profile, and Footprint panels ✓ All 10 test steps completed successfully. Both REJ button and stock data API are working perfectly. NaN fix has been successfully applied and verified."
+  - agent: "testing"
+    message: "Nifty 50 News Intelligence Bug Fix VERIFIED (2026-08-25). ✅ ALL 6 TESTS PASSED: (1) GET /api/market-intel returns market_news section with 20 items ✓ (2) All items have required fields (intraday_tag, nifty_pts_label, pub_epoch, published, title, url, sentiment, impact_level) ✓ (3) All items are FRESH - oldest item is only 10.7 hours old (0.5 days), NOT 10 days old ✓ oldest_shown_hrs = 10.7h (well within 48h threshold) ✓ (4) Items correctly sorted: HIGH impact first (20 HIGH items), then by pub_epoch descending (most recent first) ✓ (5) fetched_at field is recent (4.5 minutes old) ✓ (6) POST /api/market-intel/news-refresh works correctly, returns fresh sorted data ✓ Bug fix fully verified - the sort key bug has been fixed (_pub_to_epoch now used instead of len(published)), 24h date cutoff is working, all items have intraday_tag and nifty_pts_label fields. No 10-day old articles found."
+  - agent: "testing"
+    message: "Closing Prediction Logic Testing Complete (2026-08-25). ✅ ALL 15 TESTS PASSED (100% success rate). Endpoint /api/market-intel/closing-prediction is fully functional and production-ready. Verified: (1) HTTP 200 response, (2) All required fields present and correct types, (3) Exactly 5 factors with correct names, (4) Factor scoring logic working (total_score = sum of factors), (5) Decision rules correctly applied (score 10 → 'Strong Recovery'), (6) Cache behavior working (2-min TTL, second call 245ms < 500ms), (7) All 6 decision signals valid. Test data snapshot: Nifty 24334.6, Distance from Low +219 pts, VIX 11.1, 45-min structure 'Higher Low + bounce', Matrix Bias 'Mild Bullish', GIFT Premium +16, Total Score 10 (3+2+2+2+1), Decision 'Strong Recovery' with expected move +25 to +50 pts. No issues found. Ready for production use."
