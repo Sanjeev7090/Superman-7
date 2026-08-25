@@ -28,32 +28,6 @@ const MATRIX_ROWS = [
   { id:16, gift:'-80 ya zyada kam',fii:'Buying',     close:'Strong',       preopen:'Buy heavy',  prediction:'Mild Gap Down',         pts:'-40 to -90 pts',   prob:'72-75%', color:'#fca5a5' },
 ];
 
-const WORKFLOW_STEPS = [
-  {
-    time: '8:00 – 9:00 AM',
-    steps: [
-      'GIFT Nifty check karo',
-      'Last Day FII dekho',
-      'Previous Day Close Strength note karo',
-      'Matrix se bias nikaalo',
-    ],
-  },
-  {
-    time: '9:00 – 9:15 AM',
-    steps: [
-      'Pre-open Order Imbalance check karo',
-      'Agar same direction → Full confidence',
-      'Opposite ho → Size half ya wait',
-    ],
-  },
-  {
-    time: '9:15 AM ke baad',
-    steps: [
-      'Gap confirm hote hi trade plan banao',
-    ],
-  },
-];
-
 const CLOSE_CAT_LABEL = {
   strong:  { label: 'Strong',  color: '#22c55e' },
   neutral: { label: 'Neutral', color: '#94a3b8' },
@@ -359,28 +333,7 @@ export function GapPredictionSection({ C, isDark }) {
                 )}
               </div>
 
-              {/* ── Daily Workflow ────────────────────────────────────── */}
-              <div>
-                <div className="text-[9px] uppercase tracking-widest font-bold mb-2" style={{ color: C.textMuted }}>
-                  Daily Workflow
-                </div>
-                <div className="space-y-2">
-                  {WORKFLOW_STEPS.map((step, i) => (
-                    <div key={i} className="rounded-lg p-2.5"
-                      style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
-                      <div className="text-[9px] font-bold mb-1" style={{ color: '#818cf8' }}>
-                        {step.time}
-                      </div>
-                      {step.steps.map((s, j) => (
-                        <div key={j} className="flex gap-1.5 text-[9px] mb-0.5">
-                          <span style={{ color: '#818cf8' }}>→</span>
-                          <span style={{ color: C.textSecond }}>{s}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
+
 
               {/* ── Extra Filters ─────────────────────────────────────── */}
               <div className="rounded-lg p-2.5"
