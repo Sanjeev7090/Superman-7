@@ -15,11 +15,11 @@ const fmt    = (v, d = 2)   => v == null || isNaN(v) ? '—' : Number(v).toFixed
 const fmtPct = (v, pct = 2) => v == null || isNaN(v) ? '—' : `${v >= 0 ? '+' : ''}${Number(v).toFixed(pct)}%`;
 
 const ROWS = [
-  { label: 'Strong Bullish', brent: '< $82',  vix: '< 13.5', regulatory: 'Positive', gift: '+0.4%+',           breadth: '28+',  move: '+350 to +650 pts', prob: '95%+', action: 'Aggressive Long (Energy + Banking)', color: '#22c55e', bg: 'rgba(34,197,94,0.10)' },
-  { label: 'Mild Bullish',   brent: '$80-83', vix: '13.5-15', regulatory: 'Neutral',  gift: '+0.2% to +0.4%',  breadth: '22-27',move: '+180 to +380 pts', prob: '92%',  action: 'Selective Long',                       color: '#86efac', bg: 'rgba(134,239,172,0.10)' },
-  { label: 'Neutral',        brent: '$82-85', vix: '14-16',   regulatory: 'Neutral',  gift: '-0.2% to +0.2%',  breadth: '18-22',move: '-120 to +120 pts', prob: '94%',  action: 'Range trading, small positions',        color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' },
-  { label: 'Mild Bearish',   brent: '$85+',   vix: '15+',     regulatory: 'Neutral',  gift: '-0.2% to -0.4%',  breadth: '12-17',move: '-160 to -380 pts', prob: '93%',  action: 'Selective Energy Long, Profit booking', color: '#fca5a5', bg: 'rgba(252,165,165,0.10)' },
-  { label: 'Strong Bearish', brent: '$87+',   vix: '16+',     regulatory: 'Negative', gift: '-0.4% or less',   breadth: '<12',  move: '-450 to -850 pts', prob: '95%',  action: 'Hedging, Cash increase',                color: '#ef4444', bg: 'rgba(239,68,68,0.10)' },
+  { label: 'Strong Bullish', brent: '< $84',    vix: '< 11.5',      regulatory: 'Positive', gift: '+0.4% or more',   breadth: '28+ stocks',    move: '+300 to +600 pts', prob: '93%+', action: 'Aggressive Long (Banking + Energy)',          color: '#22c55e', bg: 'rgba(34,197,94,0.10)' },
+  { label: 'Mild Bullish',   brent: '$84 – 87', vix: '11.5 – 13.0', regulatory: 'Neutral',  gift: '+0.2% to +0.4%',  breadth: '22 – 27 stocks',move: '+150 to +350 pts', prob: '90%',  action: 'Selective Long',                               color: '#86efac', bg: 'rgba(134,239,172,0.10)' },
+  { label: 'Neutral',        brent: '$87 – 91', vix: '13.0 – 14.5', regulatory: 'Neutral',  gift: '-0.2% to +0.2%',  breadth: '17 – 22 stocks',move: '-150 to +150 pts', prob: '92%',  action: 'Range trading / Small positions',              color: '#94a3b8', bg: 'rgba(148,163,184,0.10)' },
+  { label: 'Mild Bearish',   brent: '$91 – 94', vix: '14.5 – 16.0', regulatory: 'Neutral',  gift: '-0.2% to -0.4%',  breadth: '12 – 17 stocks',move: '-150 to -350 pts', prob: '91%',  action: 'Selective Energy Long + Profit booking',       color: '#fca5a5', bg: 'rgba(252,165,165,0.10)' },
+  { label: 'Strong Bearish', brent: '$94+',     vix: '16.0+',        regulatory: 'Negative', gift: '-0.4% or less',   breadth: '< 12 stocks',   move: '-400 to -800 pts', prob: '94%',  action: 'Hedging / Increase Cash',                      color: '#ef4444', bg: 'rgba(239,68,68,0.10)' },
 ];
 
 const MarketIntelPanel = ({ onClose }) => {

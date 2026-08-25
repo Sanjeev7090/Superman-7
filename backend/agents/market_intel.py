@@ -292,81 +292,81 @@ BIAS_LEVELS = [
         "label": "Strong Bullish",
         "score_min": 2.5,
         "score_max": 99,
-        "move_label": "+350 to +650 pts",
-        "move_min": 350,
-        "move_max": 650,
-        "probability": "95%+",
-        "action": "Aggressive Long (Energy + Banking)",
+        "move_label": "+300 to +600 pts",
+        "move_min": 300,
+        "move_max": 600,
+        "probability": "93%+",
+        "action": "Aggressive Long (Banking + Energy)",
         "color": "#22c55e",
-        "gift_color": "+0.4%+",
-        "brent_ref": "< $82",
-        "vix_ref": "< 13.5",
+        "gift_color": "+0.4% or more",
+        "brent_ref": "< $84",
+        "vix_ref": "< 11.5",
         "regulatory_ref": "Positive",
-        "breadth_ref": "28+",
+        "breadth_ref": "28+ stocks",
     },
     {
         "label": "Mild Bullish",
         "score_min": 0.8,
         "score_max": 2.5,
-        "move_label": "+180 to +380 pts",
-        "move_min": 180,
-        "move_max": 380,
-        "probability": "92%",
+        "move_label": "+150 to +350 pts",
+        "move_min": 150,
+        "move_max": 350,
+        "probability": "90%",
         "action": "Selective Long",
         "color": "#86efac",
         "gift_color": "+0.2% to +0.4%",
-        "brent_ref": "$80-83",
-        "vix_ref": "13.5-15",
+        "brent_ref": "$84 – 87",
+        "vix_ref": "11.5 – 13.0",
         "regulatory_ref": "Neutral",
-        "breadth_ref": "22-27",
+        "breadth_ref": "22 – 27 stocks",
     },
     {
         "label": "Neutral",
         "score_min": -0.5,
         "score_max": 0.8,
-        "move_label": "-120 to +120 pts (Sideways)",
-        "move_min": -120,
-        "move_max": 120,
-        "probability": "94%",
-        "action": "Range trading, small positions",
+        "move_label": "-150 to +150 pts (Sideways)",
+        "move_min": -150,
+        "move_max": 150,
+        "probability": "92%",
+        "action": "Range trading / Small positions",
         "color": "#94a3b8",
         "gift_color": "-0.2% to +0.2%",
-        "brent_ref": "$82-85",
-        "vix_ref": "14-16",
+        "brent_ref": "$87 – 91",
+        "vix_ref": "13.0 – 14.5",
         "regulatory_ref": "Neutral",
-        "breadth_ref": "18-22",
+        "breadth_ref": "17 – 22 stocks",
     },
     {
         "label": "Mild Bearish",
         "score_min": -2.0,
         "score_max": -0.5,
-        "move_label": "-160 to -380 pts",
-        "move_min": -380,
-        "move_max": -160,
-        "probability": "93%",
-        "action": "Selective Energy Long, Profit booking",
+        "move_label": "-150 to -350 pts",
+        "move_min": -350,
+        "move_max": -150,
+        "probability": "91%",
+        "action": "Selective Energy Long + Profit booking",
         "color": "#fca5a5",
         "gift_color": "-0.2% to -0.4%",
-        "brent_ref": "$85+",
-        "vix_ref": "15+",
+        "brent_ref": "$91 – 94",
+        "vix_ref": "14.5 – 16.0",
         "regulatory_ref": "Neutral",
-        "breadth_ref": "12-17",
+        "breadth_ref": "12 – 17 stocks",
     },
     {
         "label": "Strong Bearish",
         "score_min": -99,
         "score_max": -2.0,
-        "move_label": "-450 to -850 pts",
-        "move_min": -850,
-        "move_max": -450,
-        "probability": "95%",
-        "action": "Hedging, Cash increase",
+        "move_label": "-400 to -800 pts",
+        "move_min": -800,
+        "move_max": -400,
+        "probability": "94%",
+        "action": "Hedging / Increase Cash",
         "color": "#ef4444",
         "gift_color": "-0.4% or less",
-        "brent_ref": "$87+",
-        "vix_ref": "16+",
+        "brent_ref": "$94+",
+        "vix_ref": "16.0+",
         "regulatory_ref": "Negative",
-        "breadth_ref": "<12",
+        "breadth_ref": "< 12 stocks",
     },
 ]
 
@@ -374,33 +374,27 @@ BIAS_LEVELS = [
 # ── Scoring ────────────────────────────────────────────────────────────────────
 
 def _score_brent(brent: float) -> float:
-    if brent < 80:
+    if brent < 84:
         return 2.5
-    elif brent < 82:
-        return 2.0
-    elif brent < 84:
+    elif brent < 87:
         return 1.0
-    elif brent < 86:
+    elif brent < 91:
         return 0.0
-    elif brent < 88:
+    elif brent < 94:
         return -1.0
     else:
         return -2.0
 
 
 def _score_vix(vix: float) -> float:
-    if vix < 12:
+    if vix < 11.5:
         return 1.5
-    elif vix < 14:
+    elif vix < 13.0:
         return 1.0
-    elif vix < 15:
-        return 0.5
-    elif vix < 16:
+    elif vix < 14.5:
         return 0.0
-    elif vix < 18:
-        return -0.5
-    elif vix < 20:
-        return -1.0
+    elif vix < 16.0:
+        return -0.8
     else:
         return -1.5
 
@@ -446,27 +440,27 @@ def _breadth_signal(advances: int, declines: int, total: int) -> Dict:
 
     if advances >= 35:
         return {"signal": "STRONG_BULL", "label": "Strong Bull Day", "color": "#22c55e",
-                "impact_label": "+220 to +420 pts", "description": "35+ stocks up — broad rally, heavy buying",
+                "impact_label": "+300 to +600 pts", "description": "35+ stocks up — broad rally, heavy buying",
                 "freq": "~7% days"}
     if advances >= 28:
         return {"signal": "BULL", "label": "Bull Breadth", "color": "#4ade80",
-                "impact_label": "+150 to +220 pts", "description": "28+ stocks up — broad participation in rally",
+                "impact_label": "+150 to +350 pts", "description": "28+ stocks up — broad participation in rally",
                 "freq": "~8% days"}
     if advances >= 22:
         return {"signal": "MILD_BULL", "label": "Mild Bullish", "color": "#86efac",
-                "impact_label": "+90 to +200 pts", "description": "22-27 stocks up — normal up day",
+                "impact_label": "+150 to +350 pts", "description": "22-27 stocks up — normal up day",
                 "freq": "~15% days"}
-    if advances >= 18:
+    if advances >= 17:
         return {"signal": "NEUTRAL", "label": "Balanced", "color": "#94a3b8",
-                "impact_label": "-30 to +30 pts", "description": "18-22 stocks up — sideways/choppy market",
+                "impact_label": "-150 to +150 pts", "description": "17-22 stocks up — sideways/choppy market",
                 "freq": "~28% days"}
     if advances >= 12:
         return {"signal": "MILD_BEAR", "label": "Mild Bearish", "color": "#fca5a5",
-                "impact_label": "-80 to -180 pts", "description": "12-17 stocks up — more declines, normal down day",
+                "impact_label": "-150 to -350 pts", "description": "12-17 stocks up — more declines, normal down day",
                 "freq": "~32% days"}
     # <12
     return {"signal": "STRONG_BEAR", "label": "Heavy Selling", "color": "#ef4444",
-            "impact_label": "-180 to -350 pts", "description": "< 12 stocks up — broad sell-off across board",
+            "impact_label": "-400 to -800 pts", "description": "< 12 stocks up — broad sell-off across board",
             "freq": "~18% days"}
 
 
