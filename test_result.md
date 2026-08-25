@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Clone https://github.com/Sanjeev7090/superman-5 AND add Options Paper Trade feature: Nifty 50/Sensex call/put buy/sell with entry, SL, auto-execute"
+user_problem_statement: "Clone https://github.com/Sanjeev7090/superman-5 same to same 100%"
 
 metadata:
   created_by: "main_agent"
