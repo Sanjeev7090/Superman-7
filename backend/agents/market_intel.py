@@ -1448,47 +1448,253 @@ def _parse_fii_row(row: dict) -> Optional[Dict]:
         return None
 
 
+def _activity_label(instrument: str, net: int) -> str:
+    """Return human-readable activity label based on instrument and net direction."""
+    if net == 0:
+        return "Neutral"
+    if instrument == "Future":
+        return "Bought Futures" if net > 0 else "Sold Futures"
+    if instrument == "CE":
+        return "Bought Calls" if net > 0 else "Sold Calls"
+    if instrument == "PE":
+        return "Bought Puts" if net > 0 else "Sold Puts"
+    return "Bought" if net > 0 else "Sold"
+
+
+def _activity_color(net: int) -> str:
+    if net > 0:
+        return "#22c55e"   # green
+    if net < 0:
+        return "#f43f5e"   # rose-red
+    return "#94a3b8"       # neutral gray
+
+
 def _parse_fao_csv(text: str) -> Optional[Dict]:
     """
     Parse NSE F&O participant CSV:
     archives.nseindia.com/content/nsccl/fao_participant_vol_{DDMMYYYY}.csv
-    Returns FII and DII index futures net-position summary.
+
+    Extracts all 4 participants (FII, PRO, DII, CLIENT/RETAIL) ×
+    3 instruments (Future Index, CE Index, PE Index) with Change + Activity.
     """
     try:
-        import csv, io
+        import csv
         lines = [l for l in text.splitlines() if l.strip() and not l.startswith('"')]
         reader = csv.DictReader(lines)
-        rows = {r.get("Client Type","").strip().upper(): r for r in reader}
+        rows = {}
+        for r in reader:
+            key = r.get("Client Type", "").strip().upper()
+            rows[key] = r
 
         def _n(row, key):
             val = row.get(key, "0") or "0"
-            return int(str(val).replace(",","").strip() or "0")
+            try:
+                return int(str(val).replace(",", "").strip() or "0")
+            except Exception:
+                return 0
+
+        # NSE CSV client types: FII, DII, PRO, CLIENT (= Retail)
+        PARTIES = [
+            ("FII",    "FII"),
+            ("PRO",    "PRO"),
+            ("DII",    "DII"),
+            ("CLIENT", "RETAIL"),
+        ]
 
         result = {}
-        for party in ("FII", "DII"):
-            row = rows.get(party)
-            if not row: continue
+        for csv_key, label in PARTIES:
+            row = rows.get(csv_key)
+            if not row:
+                continue
+
             fi_long  = _n(row, "Future Index Long")
             fi_short = _n(row, "Future Index Short")
-            fs_long  = _n(row, "Future Stock Long")
-            fs_short = _n(row, "Future Stock Short")
+            ce_long  = _n(row, "Option Index Call Long")
+            ce_short = _n(row, "Option Index Call Short")
+            pe_long  = _n(row, "Option Index Put Long")
+            pe_short = _n(row, "Option Index Put Short")
             opt_long = _n(row, "Total Long Contracts")
             opt_short= _n(row, "Total Short Contracts")
 
-            net_idx  = fi_long - fi_short
+            net_fut  = fi_long  - fi_short
+            net_ce   = ce_long  - ce_short
+            net_pe   = pe_long  - pe_short
             net_total= opt_long - opt_short
-            result[party.lower()] = {
+
+            result[label.lower()] = {
+                # Raw
                 "fi_long":   fi_long,
                 "fi_short":  fi_short,
-                "net_index": net_idx,
+                "net_index": net_fut,
                 "net_total": net_total,
                 "total_long": opt_long,
                 "total_short": opt_short,
+                # Full instrument breakdown
+                "instruments": [
+                    {
+                        "instrument": "Future",
+                        "change":     net_fut,
+                        "activity":   _activity_label("Future", net_fut),
+                        "color":      _activity_color(net_fut),
+                    },
+                    {
+                        "instrument": "CE",
+                        "change":     net_ce,
+                        "activity":   _activity_label("CE", net_ce),
+                        "color":      _activity_color(net_ce),
+                    },
+                    {
+                        "instrument": "PE",
+                        "change":     net_pe,
+                        "activity":   _activity_label("PE", net_pe),
+                        "color":      _activity_color(net_pe),
+                    },
+                ],
             }
+
         return result if result else None
     except Exception as e:
         logger.debug(f"FAO CSV parse error: {e}")
         return None
+
+
+def _compute_nifty_fo_impact(participants: Dict) -> Dict:
+    """
+    Estimate Nifty 50 point impact based on F&O participant activity.
+
+    Signals (weighted):
+      FII Future net  → strongest signal (each 1000 contracts ≈ 4-5 pts)
+      FII CE net      → sold calls = capping = mild bearish
+      FII PE net      → bought puts = hedging = mild bearish
+      DII Future net  → institutional support/selling
+      PRO CE/PE       → smart money positioning
+
+    Returns: {score, pts_estimate, direction, color, summary, signals[]}
+    """
+    fii  = participants.get("fii", {})
+    dii  = participants.get("dii", {})
+    pro  = participants.get("pro", {})
+
+    def _net(p, instrument):
+        for row in p.get("instruments", []):
+            if row["instrument"] == instrument:
+                return row["change"]
+        return 0
+
+    fii_fut = _net(fii, "Future")
+    fii_ce  = _net(fii, "CE")
+    fii_pe  = _net(fii, "PE")
+    dii_fut = _net(dii, "Future")
+    pro_ce  = _net(pro, "CE")
+
+    signals = []
+    score   = 0.0
+
+    # FII Futures: primary signal — each 10000 contracts ≈ 1 bias unit
+    if fii_fut != 0:
+        unit = fii_fut / 10000
+        score += unit * 1.5
+        signals.append({
+            "label":  f"FII {'Long' if fii_fut > 0 else 'Short'} Futures",
+            "change": fii_fut,
+            "impact": "Bullish" if fii_fut > 0 else "Bearish",
+            "weight": "HIGH",
+            "color":  "#22c55e" if fii_fut > 0 else "#ef4444",
+        })
+
+    # FII sold calls → expects market to stay below strikes (mildly bearish)
+    if fii_ce < -2000:
+        score -= 0.3
+        signals.append({
+            "label":  "FII Sold Calls",
+            "change": fii_ce,
+            "impact": "Capping Upside (Mild Bearish)",
+            "weight": "MEDIUM",
+            "color":  "#f97316",
+        })
+    elif fii_ce > 2000:
+        score += 0.2
+        signals.append({
+            "label":  "FII Bought Calls",
+            "change": fii_ce,
+            "impact": "Bullish Momentum Expected",
+            "weight": "MEDIUM",
+            "color":  "#22c55e",
+        })
+
+    # FII bought puts → hedging = cautious/bearish
+    if fii_pe > 2000:
+        score -= 0.4
+        signals.append({
+            "label":  "FII Bought Puts",
+            "change": fii_pe,
+            "impact": "Hedging / Cautious (Bearish)",
+            "weight": "MEDIUM",
+            "color":  "#f43f5e",
+        })
+    elif fii_pe < -2000:
+        score += 0.3
+        signals.append({
+            "label":  "FII Sold Puts",
+            "change": fii_pe,
+            "impact": "Confident (Bullish Support)",
+            "weight": "MEDIUM",
+            "color":  "#22c55e",
+        })
+
+    # DII futures support
+    if dii_fut > 5000:
+        score += 0.4
+        signals.append({
+            "label":  "DII Long Futures",
+            "change": dii_fut,
+            "impact": "Institutional Support (Bullish)",
+            "weight": "MEDIUM",
+            "color":  "#22c55e",
+        })
+    elif dii_fut < -5000:
+        score -= 0.3
+        signals.append({
+            "label":  "DII Short Futures",
+            "change": dii_fut,
+            "impact": "Institutional Selling (Bearish)",
+            "weight": "MEDIUM",
+            "color":  "#ef4444",
+        })
+
+    # Translate score → pts estimate
+    abs_s = abs(score)
+    if abs_s > 2.5:
+        pts_low, pts_high = 250, 500
+    elif abs_s > 1.5:
+        pts_low, pts_high = 150, 300
+    elif abs_s > 0.8:
+        pts_low, pts_high = 80, 200
+    elif abs_s > 0.3:
+        pts_low, pts_high = 40, 100
+    else:
+        pts_low, pts_high = 0, 50
+
+    if score > 0.3:
+        direction = "Bullish"
+        color     = "#22c55e"
+        pts_label = f"+{pts_low} to +{pts_high} pts"
+    elif score < -0.3:
+        direction = "Bearish"
+        color     = "#ef4444"
+        pts_label = f"-{pts_low} to -{pts_high} pts"
+    else:
+        direction = "Neutral / Sideways"
+        color     = "#94a3b8"
+        pts_label = f"±{pts_high} pts"
+
+    return {
+        "score":     round(score, 2),
+        "direction": direction,
+        "pts_label": pts_label,
+        "color":     color,
+        "signals":   signals,
+    }
 
 
 def _fetch_fii_data_sync() -> Dict:
@@ -1535,9 +1741,20 @@ def _fetch_fii_data_sync() -> Dict:
             parsed = _parse_fao_csv(r.text)
             if not parsed:
                 continue
-            fii = parsed.get("fii", {})
-            dii = parsed.get("dii", {})
+            fii    = parsed.get("fii",    {})
+            dii    = parsed.get("dii",    {})
+            pro    = parsed.get("pro",    {})
+            retail = parsed.get("retail", {})
             net_idx = fii.get("net_index", 0)
+
+            # Full participant breakdown for table display
+            participants = {
+                "FII":    fii,
+                "PRO":    pro,
+                "DII":    dii,
+                "RETAIL": retail,
+            }
+
             history.append({
                 "date": td.strftime("%d-%b-%Y"),
                 "fii":  {
@@ -1554,7 +1771,11 @@ def _fetch_fii_data_sync() -> Dict:
                     "net":  dii.get("net_index", 0),
                     "net_total": dii.get("net_total", 0),
                 },
+                "participants": participants,
                 "classification": _classify_fii_fo(net_idx),
+                "nifty_impact": _compute_nifty_fo_impact(
+                    {"fii": fii, "dii": dii, "pro": pro}
+                ),
             })
         except Exception as e:
             logger.debug(f"FAO CSV fetch failed for {ds}: {e}")
@@ -1581,6 +1802,8 @@ def _fetch_fii_data_sync() -> Dict:
         "date":           latest["date"],
         "fii":            latest["fii"],
         "dii":            latest["dii"],
+        "participants":   latest.get("participants", {}),
+        "nifty_impact":   latest.get("nifty_impact", {}),
         "classification": cls,
         "momentum":       momentum,
         "trend":          trend,
