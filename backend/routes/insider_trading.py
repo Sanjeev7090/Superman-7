@@ -987,6 +987,157 @@ async def get_pattern_scan(
         return {"results": [], "count": 0, "error": str(e), "updated_at": now.isoformat()}
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  STOCK NEWS FEED  —  Google News RSS + Headline Sentiment Impact
+# ═══════════════════════════════════════════════════════════════════════════
+
+_news_cache: dict = {"data": None, "ts": None}
+NEWS_TTL = 600  # 10-min cache
+
+_BULL_KW = {
+    'profit', 'surge', 'rally', 'buy', 'bullish', 'gain', 'growth', 'beat',
+    'strong', 'upgrade', 'positive', 'rise', 'record', 'high', 'outperform',
+    'order', 'win', 'award', 'deal', 'expansion', 'acquisition', 'dividend',
+    'launch', 'approval', 'clearance', 'revenue', 'margin', 'recovery',
+}
+_BEAR_KW = {
+    'loss', 'fall', 'sell', 'bearish', 'crash', 'pressure', 'miss', 'weak',
+    'downgrade', 'cut', 'negative', 'drop', 'decline', 'lower', 'concern',
+    'fraud', 'penalty', 'fine', 'investigation', 'default', 'debt', 'recall',
+    'layoff', 'shutdown', 'probe', 'ban', 'reject', 'disappoint', 'slump',
+}
+
+
+def _sentiment_impact(title: str) -> dict:
+    tl  = title.lower()
+    bull = sum(1 for kw in _BULL_KW if kw in tl)
+    bear = sum(1 for kw in _BEAR_KW if kw in tl)
+    if bull > bear:
+        return {"label": "POSITIVE",  "color": "#22c55e", "bg": "rgba(34,197,94,0.15)"}
+    if bear > bull:
+        return {"label": "NEGATIVE",  "color": "#ef4444", "bg": "rgba(239,68,68,0.15)"}
+    return     {"label": "NEUTRAL",   "color": "#94a3b8", "bg": "rgba(148,163,184,0.10)"}
+
+
+def _time_ago(ts: int) -> str:
+    diff = int(datetime.now(timezone.utc).timestamp()) - ts
+    if diff < 60:     return "just now"
+    if diff < 3600:   return f"{diff // 60}m ago"
+    if diff < 86400:  return f"{diff // 3600}h ago"
+    return f"{diff // 86400}d ago"
+
+
+_GNEWS_HDR = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)", "Accept": "*/*"}
+
+
+async def _fetch_rss_news(client: httpx.AsyncClient, meta: dict) -> list:
+    """Fetch Google News RSS for one stock; return list of news dicts."""
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+
+    query   = f"{meta['name']} NSE stock India"
+    url     = f"https://news.google.com/rss/search?q={httpx.URL(query).__str__()}&hl=en-IN&gl=IN&ceid=IN:en"
+    # httpx URL encoding for the query
+    encoded = query.replace(' ', '+')
+    url     = f"https://news.google.com/rss/search?q={encoded}&hl=en-IN&gl=IN&ceid=IN:en"
+
+    now_ts  = int(datetime.now(timezone.utc).timestamp())
+    cutoff  = now_ts - 7 * 86400
+
+    try:
+        r = await client.get(url, timeout=12)
+        if r.status_code != 200:
+            return []
+        root  = ET.fromstring(r.text)
+        items = root.findall('.//item')
+    except Exception:
+        return []
+
+    result = []
+    for it in items[:5]:
+        title = (it.findtext('title') or '').strip()
+        link  = (it.findtext('link')  or '').strip()
+        pub   = (it.findtext('pubDate') or '').strip()
+        src_el = it.find('source')
+        publisher = src_el.text if src_el is not None else ''
+        if not title:
+            continue
+        try:
+            pub_ts = int(parsedate_to_datetime(pub).timestamp()) if pub else 0
+        except Exception:
+            pub_ts = 0
+        if pub_ts and pub_ts < cutoff:
+            continue
+
+        imp = _sentiment_impact(title)
+        result.append({
+            "symbol":       meta["ticker"].replace(".NS", ""),
+            "name":         meta["name"],
+            "sector":       meta["sector"],
+            "title":        title,
+            "publisher":    publisher,
+            "link":         link,
+            "published_at": pub_ts,
+            "time_ago":     _time_ago(pub_ts) if pub_ts else "—",
+            "impact":       imp["label"],
+            "impact_color": imp["color"],
+            "impact_bg":    imp["bg"],
+        })
+    return result
+
+
+@router.get("/stock-news")
+async def get_stock_news(refresh: bool = False, sector: str = ""):
+    """Live news feed for F&O universe stocks — Google News RSS + sentiment impact."""
+    now = datetime.now(timezone.utc)
+
+    if not refresh and _news_cache["data"] is not None and _news_cache["ts"]:
+        if (now - _news_cache["ts"]).total_seconds() < NEWS_TTL:
+            data = _news_cache["data"]
+            if sector:
+                data = [n for n in data if n["sector"].lower() == sector.lower()]
+            return {
+                "news": data, "cached": True,
+                "updated_at": _news_cache["ts"].isoformat(),
+                "total": len(_news_cache["data"]),
+            }
+
+    # Fetch in parallel batches of 8 to avoid rate-limit
+    all_news: list = []
+    limits  = httpx.Limits(max_connections=8, max_keepalive_connections=4)
+    async with httpx.AsyncClient(headers=_GNEWS_HDR, follow_redirects=True, limits=limits) as client:
+        batch_size = 8
+        for i in range(0, len(SCAN_UNIVERSE), batch_size):
+            batch = SCAN_UNIVERSE[i: i + batch_size]
+            results = await asyncio.gather(*[_fetch_rss_news(client, m) for m in batch])
+            for r in results:
+                all_news.extend(r)
+            await asyncio.sleep(0.3)  # slight delay between batches
+
+    # Sort newest first + deduplicate by title prefix
+    all_news.sort(key=lambda x: x["published_at"], reverse=True)
+    seen:   set  = set()
+    unique: list = []
+    for n in all_news:
+        key = n["title"][:55].lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(n)
+
+    _news_cache["data"] = unique
+    _news_cache["ts"]   = now
+
+    if sector:
+        unique = [n for n in unique if n["sector"].lower() == sector.lower()]
+
+    return {
+        "news": unique, "cached": False,
+        "updated_at": now.isoformat(),
+        "total": len(_news_cache["data"]),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  ECONOMIC CALENDAR  —  Indian Market Monthly Events
 # ═══════════════════════════════════════════════════════════════════════════

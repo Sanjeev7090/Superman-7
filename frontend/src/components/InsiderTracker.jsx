@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Eye, X, ArrowClockwise, Warning, TrendUp, TrendDown,
   Minus, ChartBar, Users, CaretDown, CaretRight,
-  MagnifyingGlass, Funnel, CalendarBlank, CaretLeft, CaretRight as CaretRightIcon,
+  MagnifyingGlass, Funnel, CalendarBlank, CaretLeft,
+  CaretRight as CaretRightIcon, Newspaper, ArrowUp, ArrowDown,
 } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -276,6 +277,261 @@ function PatternRow({ item, C }) {
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  STOCK NEWS FEED
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SECTOR_COLORS = {
+  Banking:     '#818cf8', IT:          '#06b6d4', NBFC:        '#f59e0b',
+  Auto:        '#22c55e', Pharma:      '#ec4899', Energy:      '#f97316',
+  Metals:      '#94a3b8', FMCG:        '#a78bfa', Telecom:     '#34d399',
+  Power:       '#fbbf24', Infra:       '#60a5fa', Ports:       '#fb923c',
+  Realty:      '#e879f9', Retail:      '#4ade80', Internet:    '#38bdf8',
+  Electronics: '#facc15', Cables:      '#c084fc', Electricals: '#86efac',
+  'Agro Chem': '#6ee7b7', Chemicals:   '#fca5a5',
+};
+
+const ALL_SECTORS = ['All', ...Object.keys(SECTOR_COLORS)];
+
+function timeAgo(ts) {
+  const diff = Math.floor(Date.now() / 1000) - ts;
+  if (diff < 60)    return 'just now';
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function StockNewsFeed({ C, isDark }) {
+  const [newsData,    setNewsData]    = useState(null);
+  const [loading,     setLoading]     = useState(false);
+  const [sectorFilter, setSectorFilter] = useState('All');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const load = useCallback(async (force = false) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (force) params.set('refresh', 'true');
+      const res  = await fetch(`${API}/insider/stock-news?${params}`);
+      const json = await res.json();
+      setNewsData(json);
+    } catch {
+      setNewsData({ news: [], total: 0 });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    if (!autoRefresh) return;
+    const t = setInterval(() => load(), 10 * 60 * 1000); // auto-refresh 10 min
+    return () => clearInterval(t);
+  }, [load, autoRefresh]);
+
+  const news = newsData?.news || [];
+  const filtered = sectorFilter === 'All'
+    ? news
+    : news.filter(n => n.sector === sectorFilter);
+
+  const uniqueSectors = ['All', ...new Set(news.map(n => n.sector).filter(Boolean))];
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* ── Toolbar ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 14px', borderBottom: `1px solid ${C.border}`,
+        background: C.headerBg, flexShrink: 0, flexWrap: 'wrap',
+      }}>
+        <Newspaper size={13} color="#06b6d4" weight="bold" />
+        <span style={{ fontSize: 10, fontWeight: 800, color: C.textPrimary, letterSpacing: '0.04em' }}>
+          LIVE STOCK NEWS
+        </span>
+        {newsData?.updated_at && (
+          <span style={{ fontSize: 8, color: C.textSecond, marginLeft: 2 }}>
+            {newsData.cached ? 'Cached' : 'Live'} · {new Date(newsData.updated_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 8, color: C.textSecond }}>
+            {filtered.length} stories
+          </span>
+          <button
+            onClick={() => load(true)}
+            disabled={loading}
+            data-testid="news-refresh-btn"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, opacity: loading ? 0.4 : 1 }}
+          >
+            <ArrowClockwise size={13} color={C.textSecond} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Sector filter chips ── */}
+      <div style={{
+        display: 'flex', gap: 5, padding: '6px 14px',
+        borderBottom: `1px solid ${C.border}`, flexShrink: 0,
+        overflowX: 'auto', whiteSpace: 'nowrap',
+      }}>
+        {uniqueSectors.map(sec => {
+          const active = sectorFilter === sec;
+          const col = SECTOR_COLORS[sec] || '#06b6d4';
+          return (
+            <button
+              key={sec}
+              onClick={() => setSectorFilter(sec)}
+              data-testid={`news-sector-${sec.toLowerCase()}`}
+              style={{
+                fontSize: 8, fontWeight: 800, padding: '3px 8px', borderRadius: 20,
+                border: `1px solid ${active ? col : C.border}`,
+                background: active ? `${col}22` : 'transparent',
+                color: active ? col : C.textSecond,
+                cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s',
+              }}
+            >{sec}</button>
+          );
+        })}
+      </div>
+
+      {/* ── News list ── */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {loading && !newsData ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 200, gap: 10 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%',
+              border: '3px solid #27272a', borderTopColor: '#06b6d4',
+              animation: 'spin 0.8s linear infinite',
+            }} />
+            <div style={{ fontSize: 10, color: C.textSecond }}>
+              Fetching news for {35} F&O stocks…
+            </div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40, color: C.textSecond }}>
+            <Newspaper size={28} color={C.textSecond} style={{ marginBottom: 8 }} />
+            <div style={{ fontSize: 12 }}>No recent news found</div>
+            <button
+              onClick={() => load(true)}
+              style={{
+                marginTop: 12, padding: '6px 16px', borderRadius: 6, cursor: 'pointer',
+                background: 'rgba(6,182,212,0.15)', color: '#06b6d4',
+                border: '1px solid rgba(6,182,212,0.35)', fontSize: 11, fontWeight: 700,
+              }}
+            >Refresh Now</button>
+          </div>
+        ) : (
+          filtered.map((item, i) => {
+            const secColor = SECTOR_COLORS[item.sector] || '#94a3b8';
+            const pct      = item.price_change ?? 0;
+            const isPos    = pct > 0;
+            const isNeg    = pct < 0;
+            const PriceIco = isPos ? ArrowUp : isNeg ? ArrowDown : Minus;
+
+            return (
+              <div
+                key={`${item.symbol}-${item.published_at}-${i}`}
+                data-testid={`news-item-${i}`}
+                style={{
+                  padding: '10px 14px',
+                  borderBottom: `1px solid ${C.border}`,
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                {/* Row 1: symbol + time + price */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {/* Symbol badge */}
+                    <span style={{
+                      fontSize: 9, fontWeight: 900, padding: '2px 7px', borderRadius: 4,
+                      background: `${secColor}20`, color: secColor, border: `1px solid ${secColor}40`,
+                      letterSpacing: '0.05em',
+                    }}>{item.symbol}</span>
+                    {/* Sector tag */}
+                    <span style={{ fontSize: 8, color: C.textSecond }}>{item.sector}</span>
+                  </div>
+
+                  {/* Price impact */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    {item.current_price > 0 && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: C.textSecond, fontFamily: 'monospace' }}>
+                        ₹{item.current_price.toLocaleString('en-IN')}
+                      </span>
+                    )}
+                    <span style={{
+                      display: 'flex', alignItems: 'center', gap: 2,
+                      fontSize: 9, fontWeight: 800, padding: '2px 6px', borderRadius: 4,
+                      background: item.impact_bg,
+                      color: item.impact_color,
+                      border: `1px solid ${item.impact_color}40`,
+                    }}>
+                      <PriceIco size={8} weight="bold" />
+                      {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Row 2: headline */}
+                {item.link ? (
+                  <a
+                    href={item.link} target="_blank" rel="noopener noreferrer"
+                    style={{
+                      fontSize: 11, fontWeight: 600, color: C.textPrimary,
+                      lineHeight: 1.4, display: 'block', textDecoration: 'none',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = '#06b6d4'}
+                    onMouseLeave={e => e.currentTarget.style.color = C.textPrimary}
+                  >
+                    {item.title}
+                  </a>
+                ) : (
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.textPrimary, lineHeight: 1.4 }}>
+                    {item.title}
+                  </div>
+                )}
+
+                {/* Row 3: publisher + time + impact label */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 5 }}>
+                  <span style={{ fontSize: 9, color: C.textSecond }}>
+                    {item.publisher}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{
+                      fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 3,
+                      background: item.impact_bg, color: item.impact_color,
+                    }}>{item.impact}</span>
+                    <span style={{ fontSize: 8, color: C.textSecond }}>
+                      {timeAgo(item.published_at)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{
+        padding: '6px 14px', borderTop: `1px solid ${C.border}`,
+        background: C.headerBg, flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <span style={{ fontSize: 8, color: C.textSecond }}>
+          Source: yfinance · {35} F&O stocks · Cache: 10 min
+        </span>
+        <span style={{ fontSize: 8, color: C.textSecond }}>
+          {newsData?.total || 0} total stories
+        </span>
+      </div>
+    </div>
+  );
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  ECONOMIC CALENDAR
@@ -690,9 +946,10 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
           background: C.headerBg, flexShrink: 0,
         }}>
           {[
-            { id: 'insider',  label: 'Insider Buys',    icon: Users        },
-            { id: 'patterns', label: 'Pattern Scanner', icon: ChartBar     },
+            { id: 'insider',  label: 'Insider Buys',    icon: Users         },
+            { id: 'patterns', label: 'Pattern Scanner', icon: ChartBar      },
             { id: 'eco',      label: 'Eco Calendar',    icon: CalendarBlank },
+            { id: 'news',     label: 'Stock News',      icon: Newspaper     },
           ].map(t => {
             const Ico = t.icon;
             return (
@@ -923,10 +1180,13 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
           {/* ── ECO CALENDAR TAB ── */}
           {!loading && tab === 'eco' && <EconomicCalendar C={C} />}
 
+          {/* ── STOCK NEWS TAB ── */}
+          {tab === 'news' && <StockNewsFeed C={C} isDark={isDark} />}
+
         </div>
 
-        {/* ── Footer (hide for eco tab — it has its own footer) ── */}
-        {tab !== 'eco' && (
+        {/* ── Footer (hide for eco/news tab — they have their own) ── */}
+        {tab !== 'eco' && tab !== 'news' && (
         <div style={{
           padding: '8px 14px', borderTop: `1px solid ${C.border}`,
           background: C.headerBg, flexShrink: 0,
