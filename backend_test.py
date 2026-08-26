@@ -19,7 +19,7 @@ import sys
 from typing import Dict, Any
 
 # Backend URL from environment
-BACKEND_URL = "https://insider-detect-live.preview.emergentagent.com"
+BACKEND_URL = "https://insider-scan-live.preview.emergentagent.com"
 API_ENDPOINT = f"{BACKEND_URL}/api/market-intel/closing-prediction"
 
 # Expected factor names (exact match required)

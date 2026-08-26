@@ -15290,13 +15290,15 @@ async def get_oi_indicator():
     if cached and (now_ts - cached.get("_ts", 0)) < _OI_IND_TTL:
         return cached
 
-    # ── Spot price + change ───────────────────────────────────────────────────
+    # ── Spot price + change — with timeout to prevent hang ───────────────────────
     spot_price   = 0.0
     price_change = 0.0
     price_pct    = 0.0
     try:
         import yfinance as _yf
-        _nifty_hist = _yf.Ticker("^NSEI").history(period="2d", interval="1d", progress=False)
+        def _get_spot():
+            return _yf.Ticker("^NSEI").history(period="2d", interval="1d", progress=False)
+        _nifty_hist = await _asyncio.wait_for(_asyncio.to_thread(_get_spot), timeout=5.0)
         if len(_nifty_hist) >= 2:
             prev_close   = float(_nifty_hist["Close"].iloc[-2])
             curr_close   = float(_nifty_hist["Close"].iloc[-1])
@@ -15308,11 +15310,18 @@ async def get_oi_indicator():
     except Exception:
         pass
 
-    # ── Option chain ──────────────────────────────────────────────────────────
+    # ── Option chain — with timeout to prevent UI freeze ──────────────────────
     oc_data: dict = {}
     try:
-        oc_data = await _asyncio.to_thread(_fetch_nse_option_chain, "NIFTY")
+        oc_data = await _asyncio.wait_for(
+            _asyncio.to_thread(_fetch_nse_option_chain, "NIFTY"),
+            timeout=8.0
+        )
     except Exception:
+        # Return stale cache if NSE is slow/blocked, so UI never freezes
+        stale = _oi_indicator_cache.get("nifty")
+        if stale:
+            return stale
         pass
 
     records  = oc_data.get("records",  {})

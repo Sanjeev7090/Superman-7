@@ -8,7 +8,7 @@ import requests
 import time
 import sys
 
-BASE_URL = "https://insider-detect-live.preview.emergentagent.com"
+BASE_URL = "https://insider-scan-live.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 
 def log_test(name, success, details=""):

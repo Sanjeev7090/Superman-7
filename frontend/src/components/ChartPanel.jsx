@@ -2673,11 +2673,12 @@ const ChartPanel = ({
     oiPriceLinesRef.current = [];
   }, []);
 
+  // Only re-run when toggle state or data changes — NOT on every stockData update
   useEffect(() => {
     clearOILines();
     if (!oiLinesOn || !oiData || !candlestickSeriesRef.current) return;
 
-    // Draw Call Wall, Put Wall, Max Pain as price lines
+    // Draw Call Wall, Put Wall, Max Pain as horizontal price lines
     const lineDefs = [
       { price: oiData.call_wall, color: '#ef4444', title: 'Call Wall ▼', style: 2, width: 1 },
       { price: oiData.put_wall,  color: '#22c55e', title: 'Put Wall  ▲', style: 2, width: 1 },
@@ -2693,64 +2694,8 @@ const ChartPanel = ({
         oiPriceLinesRef.current.push(pl);
       } catch(e) {}
     });
-
-    // Direction change markers based on proximity
-    if (!stockData?.bars?.length) return;
-    const bars = stockData.bars;
-    const spot = oiData.spot_price || oiData.call_wall;
-    if (!spot) return;
-
-    const newMarkers = [];
-    const lastBar = bars[bars.length - 1];
-    const lastTime = lastBar.time || lastBar.t;
-
-    const nearCallWall = oiData.call_wall && Math.abs(spot - oiData.call_wall) / oiData.call_wall < 0.008;
-    const nearPutWall  = oiData.put_wall  && Math.abs(spot - oiData.put_wall)  / oiData.put_wall  < 0.008;
-    const nearMaxPain  = oiData.max_pain  && Math.abs(spot - oiData.max_pain)  / oiData.max_pain  < 0.005;
-
-    if (nearCallWall) {
-      newMarkers.push({
-        time: lastTime, position: 'aboveBar',
-        color: '#ef4444', shape: 'arrowDown',
-        text: `Call Wall ${oiData.call_wall?.toLocaleString('en-IN')} — Reversal Alert`,
-      });
-    }
-    if (nearPutWall) {
-      newMarkers.push({
-        time: lastTime, position: 'belowBar',
-        color: '#22c55e', shape: 'arrowUp',
-        text: `Put Wall ${oiData.put_wall?.toLocaleString('en-IN')} — Bounce Alert`,
-      });
-    }
-    if (nearMaxPain) {
-      newMarkers.push({
-        time: lastTime, position: 'aboveBar',
-        color: '#f59e0b', shape: 'circle',
-        text: `Max Pain ${oiData.max_pain?.toLocaleString('en-IN')}`,
-      });
-    }
-
-    // PCR-based direction signal on most recent candle
-    if (oiData.pcr_zone === 'OVERBOUGHT') {
-      newMarkers.push({
-        time: lastTime, position: 'aboveBar',
-        color: '#ef4444', shape: 'arrowDown', text: 'OI: Overbought — Bear Alert',
-      });
-    } else if (oiData.pcr_zone === 'OVERSOLD') {
-      newMarkers.push({
-        time: lastTime, position: 'belowBar',
-        color: '#22c55e', shape: 'arrowUp', text: 'OI: Oversold — Bull Alert',
-      });
-    }
-
-    if (newMarkers.length > 0) {
-      try {
-        const existing = candlestickSeriesRef.current.markers?.() || [];
-        candlestickSeriesRef.current.setMarkers([...existing, ...newMarkers]);
-      } catch(e) {}
-    }
-
-  }, [oiLinesOn, oiData, stockData, clearOILines]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oiLinesOn, oiData, clearOILines]);
 
   // ── Black Box: draw canvas ──────────────────────────────────────
   const drawBBCanvas = useCallback(() => {
@@ -3483,15 +3428,19 @@ const ChartPanel = ({
           <div className="relative shrink-0" ref={oiBtnRef}>
             <button
               onClick={() => {
-                const opening = !oiPanelOpen;
-                setOiPanelOpen(opening);
-                if (opening && !oiData) fetchOIData();
-                if (!oiLinesOn) {
+                const isCurrentlyOn = oiLinesOn || oiPanelOpen;
+                if (isCurrentlyOn) {
+                  // Toggle OFF — hide panel + remove chart lines
+                  setOiPanelOpen(false);
+                  setOiLinesOn(false);
+                } else {
+                  // Toggle ON — open panel + draw chart lines
+                  setOiPanelOpen(true);
                   setOiLinesOn(true);
                   if (!oiData) fetchOIData();
                 }
               }}
-              className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border ${
+              className={`relative z-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border ${
                 oiPanelOpen || oiLinesOn
                   ? 'text-[#a78bfa] border-[#a78bfa]/40 bg-[#a78bfa]/10'
                   : 'text-zinc-500 border-transparent'

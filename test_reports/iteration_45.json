@@ -1,0 +1,55 @@
+{
+  "summary": "Testing OI button toggle bug fix on ChartPanel. Found and fixed 1 critical z-index bug: OI button toggle (Turn OFF) was broken because backdrop (z-40 fixed inset-0) was covering the OI button (z-index: auto), intercepting the click. Fixed by adding 'relative z-50' to OI button className. All 9 backend tests + all 6 frontend OI tests now pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "rca_of_the_issue": {
+    "bug": "OI button second click (Toggle OFF) did not work — panel closed but price lines stayed on chart, button stayed purple",
+    "root_cause": "The OI panel's backdrop element ('fixed inset-0 z-40') covered the OI button (position:static, z-index:auto). When clicking OI button while panel was open, the backdrop intercepted the click (confirmed via document.elementFromPoint), firing only setOiPanelOpen(false) instead of the full toggle handler that also calls setOiLinesOn(false). This required 3 clicks to fully turn off instead of 2.",
+    "confirmation": "document.elementFromPoint(btn_center_x, btn_center_y) returned the backdrop DIV instead of the OI button. JS btn.click() bypassed z-index and worked correctly.",
+    "fix_applied": "Added 'relative z-50' to OI button className in ChartPanel.jsx line 3443. btn_zIndex now=50 (above backdrop z-40). element at btn center now correctly returns the OI button.",
+    "reproduction_steps": "1. Load NIFTY chart 2. Click OI button (turns ON — panel + lines) 3. Click OI button again — panel closes BUT lines remain and button stays purple (BUG) 4. After fix: second click correctly closes panel AND removes lines AND reverts button to grey"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_oi_indicator.py",
+    "/app/test_reports/pytest/test_oi_indicator.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FIXED: OI button z-index bug (relative z-50 added) — was z-index:auto, now z-50 above backdrop z-40",
+    "INFO: All OI features verified working: no freeze (0.69s), toggle ON/OFF cycle, panel data (PCR/MaxPain/CallWall/PutWall/Signal), Lines toggle, backdrop close"
+  ],
+  "updated_files": [
+    "/app/frontend/src/components/ChartPanel.jsx (line 3443: added 'relative z-50' to OI button className)"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (all 6 OI scenarios verified after fix)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 45: OI toggle bug fixed. Root cause: backdrop z-40 was covering OI button (z-auto), intercepting clicks. Fix: added 'relative z-50' to OI button className at ChartPanel.jsx line 3443. Verified: STATE0=off, CLICK1=on(panel+lines, 0.69s), CLICK2=off(panel+lines both off, 0.75s), CLICK3=on again. Backend OI endpoint working: 9/9 tests pass. No JS errors. Price lines (MaxPain/CallWall/PutWall) appear on chart when ON, removed when OFF.",
+  "verified_tests": {
+    "no_freeze": "PASS — 0.69s on first click, 0.75s on second click",
+    "click1_button_purple": "PASS",
+    "click1_panel_opens": "PASS",
+    "panel_data_pcr": "PASS — PCR: 0.733 NEUTRAL",
+    "panel_data_max_pain": "PASS — Max Pain: 24,500",
+    "panel_data_call_wall": "PASS — Call Wall: 24,500 Resistance",
+    "panel_data_put_wall": "PASS — Put Wall: 24,200 Support",
+    "panel_data_signal": "PASS — SHORT COVERING",
+    "lines_toggle_inside_panel": "PASS — Lines ON/OFF toggles correctly",
+    "backdrop_close": "PASS — Closes panel only (oiLinesOn preserved)",
+    "click2_panel_closes": "PASS — after z-50 fix",
+    "click2_button_grey": "PASS — after z-50 fix",
+    "click2_lines_removed": "PASS — price lines cleared from chart axis",
+    "toggle_cycle_complete": "PASS — OFF→ON→OFF→ON all work correctly"
+  }
+}

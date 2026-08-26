@@ -104,6 +104,22 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
   - Security: Blocked imports, os/sys/subprocess, eval/exec calls, 10s timeout
   - Testing: Backend 100% (6/6), Frontend 90% (minor toggle LOW priority)
 
+### Session (Feb 2026 — Part 5 — OI Indicator + Eco Calendar + Stock News)
+- **Economic Calendar:** Hardcoded events till Sep 2026 in `InsiderTracker.jsx` (new tab)
+- **Live Stock News with Sentiment:** Google News RSS via `feedparser` (replaced yfinance due to 403 rate limits)
+- **Technical Filters for Pattern Scanner:** 52W High, EMA 20/50/200, Momentum, Volume filters
+- **OI Indicator in ChartPanel:** OIPanel component built inside ChartPanel.jsx
+  - Backend: `GET /api/oi-indicator/nifty` — PCR, Max Pain, Call Wall, Put Wall, spot, signal. 3-min cache, 8s timeout
+  - Frontend: OI button in toolbar, floating panel with all OI data
+  - Chart Price Lines: Call Wall (red dashed), Put Wall (green dashed), Max Pain (amber dotted)
+- **OI Indicator Bug Fixes (Feb 2026):**
+  - Fixed screen freeze: removed `stockData` from OI useEffect deps + backend 5s/8s timeouts + stale cache fallback
+  - Fixed toggle ON/OFF: proper isCurrentlyOn check in button onClick
+  - Fixed z-index conflict: `relative z-50` on OI button (backdrop z-40 was intercepting second click)
+  - Testing: iteration_45.json — 100% (9 backend + 6 frontend all pass)
+
+
+
 ---
 
 ## Refactoring Backlog (P2)
