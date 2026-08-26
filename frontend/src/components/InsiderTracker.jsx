@@ -170,8 +170,22 @@ function InsiderRow({ item, C }) {
 
 // ── Pattern Scan Row ───────────────────────────────────────────────────────
 
+function TechBadge({ ok, label, color }) {
+  if (ok == null) return null;
+  return (
+    <span style={{
+      fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 3,
+      background: ok ? `${color}20` : 'rgba(100,116,139,0.12)',
+      color:      ok ? color         : '#64748b',
+      border:    `1px solid ${ok ? color + '40' : '#64748b30'}`,
+      letterSpacing: '0.04em',
+    }}>{label}</span>
+  );
+}
+
 function PatternRow({ item, C }) {
   const [expanded, setExpanded] = useState(false);
+  const emaOk = item.ema_score >= 2;
 
   return (
     <div style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -195,13 +209,32 @@ function PatternRow({ item, C }) {
           );
         })()}
 
-        {/* Symbol + name */}
+        {/* Symbol + name + indicator badges */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 700, fontSize: 13, color: C.textPrimary }}>{item.symbol}</span>
             <span style={{ fontSize: 9, color: C.textSecond }}>{item.sector}</span>
           </div>
           <div style={{ fontSize: 10, color: C.textSecond, marginTop: 1 }}>{item.top_pattern}</div>
+          {/* Indicator badges row */}
+          <div style={{ display: 'flex', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
+            <TechBadge ok={item.near_52w_high} label="52W HIGH" color="#f59e0b" />
+            <TechBadge
+              ok={emaOk}
+              label={`EMA ${item.ema_score ?? '?'}/3`}
+              color={item.ema_score >= 3 ? '#22c55e' : item.ema_score >= 2 ? '#86efac' : '#f87171'}
+            />
+            <TechBadge
+              ok={item.momentum_ok}
+              label={item.rsi != null ? `RSI ${item.rsi}` : 'MOMENTUM'}
+              color="#818cf8"
+            />
+            <TechBadge
+              ok={item.volume_ok}
+              label={item.vol_ratio != null ? `VOL ${item.vol_ratio}x` : 'VOLUME'}
+              color="#06b6d4"
+            />
+          </div>
         </div>
 
         {/* Timeframe badge + count */}
@@ -818,9 +851,14 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
   const [updatedAt, setUpdatedAt]   = useState(null);
 
   // Pattern filters
-  const [tfFilter,  setTfFilter]   = useState('');
-  const [biasFilter, setBiasFilter] = useState('');
-  const [patFilter,  setPatFilter] = useState('');
+  const [tfFilter,    setTfFilter]    = useState('');
+  const [biasFilter,  setBiasFilter]  = useState('');
+  const [patFilter,   setPatFilter]   = useState('');
+  // Technical filters
+  const [f52w,        setF52w]        = useState(false);
+  const [fEma,        setFEma]        = useState(0);    // 0=off, 1=1+, 2=2+, 3=all3
+  const [fMomentum,   setFMomentum]   = useState(false);
+  const [fVolume,     setFVolume]     = useState(false);
 
   const fetchInsider = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -840,10 +878,14 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (forceRefresh) params.set('refresh', 'true');
-      if (tfFilter)     params.set('timeframe', tfFilter);
-      if (biasFilter)   params.set('bias',      biasFilter);
-      if (patFilter)    params.set('pattern',   patFilter);
+      if (forceRefresh) params.set('refresh',   'true');
+      if (tfFilter)     params.set('timeframe',  tfFilter);
+      if (biasFilter)   params.set('bias',        biasFilter);
+      if (patFilter)    params.set('pattern',     patFilter);
+      if (f52w)         params.set('near_52w',   'true');
+      if (fEma > 0)     params.set('above_ema',  String(fEma));
+      if (fMomentum)    params.set('momentum',   'true');
+      if (fVolume)      params.set('vol_ok',     'true');
       const res  = await fetch(`${API}/insider/pattern-scan?${params}`);
       const json = await res.json();
       setPatternData(json);
@@ -853,7 +895,7 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
     } finally {
       setLoading(false);
     }
-  }, [tfFilter, biasFilter, patFilter]);
+  }, [tfFilter, biasFilter, patFilter, f52w, fEma, fMomentum, fVolume]);
 
   // Notify parent when pattern count loads
   useEffect(() => {
@@ -976,53 +1018,70 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
         {/* ── Pattern filters (only shown on patterns tab) ── */}
         {tab === 'patterns' && (
           <div style={{
-            display: 'flex', gap: 6, padding: '8px 12px',
+            display: 'flex', gap: 5, padding: '7px 12px',
             borderBottom: `1px solid ${C.border}`, flexShrink: 0, flexWrap: 'wrap',
             alignItems: 'center',
           }}>
             <Funnel size={12} color={C.textSecond} />
-            {/* Timeframe filter */}
-            <select
-              value={tfFilter}
-              onChange={e => setTfFilter(e.target.value)}
-              data-testid="pattern-tf-filter"
-              style={{
-                fontSize: 10, padding: '3px 7px', borderRadius: 4,
-                background: C.cardBg, color: C.textPrimary,
-                border: `1px solid ${C.border}`, cursor: 'pointer',
-              }}
-            >
+
+            {/* ── Row 1: existing dropdowns ── */}
+            <select value={tfFilter} onChange={e => setTfFilter(e.target.value)} data-testid="pattern-tf-filter"
+              style={{ fontSize: 10, padding: '3px 7px', borderRadius: 4, background: C.cardBg, color: C.textPrimary, border: `1px solid ${C.border}`, cursor: 'pointer' }}>
               <option value="">All TFs</option>
               {TF_OPTS.slice(1).map(o => <option key={o} value={o}>{o}</option>)}
             </select>
-            {/* Bias filter */}
-            <select
-              value={biasFilter}
-              onChange={e => setBiasFilter(e.target.value)}
-              data-testid="pattern-bias-filter"
-              style={{
-                fontSize: 10, padding: '3px 7px', borderRadius: 4,
-                background: C.cardBg, color: C.textPrimary,
-                border: `1px solid ${C.border}`, cursor: 'pointer',
-              }}
-            >
+
+            <select value={biasFilter} onChange={e => setBiasFilter(e.target.value)} data-testid="pattern-bias-filter"
+              style={{ fontSize: 10, padding: '3px 7px', borderRadius: 4, background: C.cardBg, color: C.textPrimary, border: `1px solid ${C.border}`, cursor: 'pointer' }}>
               <option value="">All Bias</option>
               {BIAS_OPTS.slice(1).map(o => <option key={o} value={o}>{o}</option>)}
             </select>
-            {/* Pattern filter */}
-            <select
-              value={patFilter}
-              onChange={e => setPatFilter(e.target.value)}
-              data-testid="pattern-name-filter"
-              style={{
-                fontSize: 10, padding: '3px 7px', borderRadius: 4,
-                background: C.cardBg, color: C.textPrimary,
-                border: `1px solid ${C.border}`, cursor: 'pointer',
-              }}
-            >
+
+            <select value={patFilter} onChange={e => setPatFilter(e.target.value)} data-testid="pattern-name-filter"
+              style={{ fontSize: 10, padding: '3px 7px', borderRadius: 4, background: C.cardBg, color: C.textPrimary, border: `1px solid ${C.border}`, cursor: 'pointer' }}>
               <option value="">All Patterns</option>
               {PAT_OPTS.slice(1).map(o => <option key={o} value={o}>{o}</option>)}
             </select>
+
+            {/* ── Technical filter toggles ── */}
+            {[
+              { label: '52W High',  active: f52w,      toggle: () => setF52w(v => !v),       color: '#f59e0b', testid: 'filter-52w'      },
+              { label: 'Momentum', active: fMomentum,  toggle: () => setFMomentum(v => !v),  color: '#818cf8', testid: 'filter-momentum' },
+              { label: 'Volume',   active: fVolume,    toggle: () => setFVolume(v => !v),    color: '#06b6d4', testid: 'filter-volume'   },
+            ].map(({ label, active, toggle, color, testid }) => (
+              <button
+                key={label}
+                onClick={toggle}
+                data-testid={testid}
+                style={{
+                  fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 4,
+                  background:  active ? `${color}22`     : 'transparent',
+                  color:       active ? color             : C.textSecond,
+                  border:     `1px solid ${active ? color + '50' : C.border}`,
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+              >{label}</button>
+            ))}
+
+            {/* EMA select */}
+            <select
+              value={fEma}
+              onChange={e => setFEma(Number(e.target.value))}
+              data-testid="filter-ema"
+              style={{
+                fontSize: 9, padding: '3px 7px', borderRadius: 4,
+                background: fEma > 0 ? 'rgba(34,197,94,0.12)' : C.cardBg,
+                color:      fEma > 0 ? '#22c55e'               : C.textSecond,
+                border:    `1px solid ${fEma > 0 ? '#22c55e50' : C.border}`,
+                cursor: 'pointer', fontWeight: 800,
+              }}
+            >
+              <option value={0}>EMA: Any</option>
+              <option value={1}>EMA: 1+ above</option>
+              <option value={2}>EMA: 2+ above</option>
+              <option value={3}>EMA: All 3</option>
+            </select>
+
             <button
               onClick={() => fetchPatterns(false)}
               style={{

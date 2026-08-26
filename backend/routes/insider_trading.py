@@ -791,6 +791,74 @@ def _sanitize_pattern(p: dict) -> dict:
     }
 
 
+def _compute_technicals(df) -> dict:
+    """Compute EMA 20/50/200, RSI 14, volume ratio, 52w-high from daily OHLCV."""
+    if df is None or len(df) < 20:
+        return {}
+    closes  = df["Close"].values.astype(float)
+    volumes = df["Volume"].values.astype(float)
+    curr    = closes[-1]
+
+    def _ema_arr(arr, n):
+        k, e = 2 / (n + 1), [float(arr[0])]
+        for v in arr[1:]:
+            e.append(float(v) * k + e[-1] * (1 - k))
+        return np.array(e)
+
+    ema20_val  = float(_ema_arr(closes, 20)[-1])  if len(closes) >= 20  else None
+    ema50_val  = float(_ema_arr(closes, 50)[-1])  if len(closes) >= 50  else None
+    ema200_val = float(_ema_arr(closes, 200)[-1]) if len(closes) >= 200 else None
+
+    above_ema20  = bool(curr > ema20_val)  if ema20_val  is not None else None
+    above_ema50  = bool(curr > ema50_val)  if ema50_val  is not None else None
+    above_ema200 = bool(curr > ema200_val) if ema200_val is not None else None
+    ema_score    = int(sum(1 for x in [above_ema20, above_ema50, above_ema200] if x))
+
+    # RSI-14
+    rsi = None
+    if len(closes) >= 16:
+        deltas = np.diff(closes)
+        gains  = np.maximum(deltas, 0.0)
+        losses = np.maximum(-deltas, 0.0)
+        ag = float(np.mean(gains[:14]))
+        al = float(np.mean(losses[:14]))
+        for i in range(14, len(gains)):
+            ag = (ag * 13 + gains[i]) / 14
+            al = (al * 13 + losses[i]) / 14
+        rsi = round(100 - 100 / (1 + ag / al), 1) if al > 0 else 100.0
+
+    momentum_ok = bool(rsi is not None and 50 <= rsi <= 75)
+
+    # 52-week high proximity (within 5% of max in last ~200 days)
+    high_200      = float(np.max(closes))
+    pct_from_52w  = round(float((high_200 - curr) / high_200 * 100), 2) if high_200 > 0 else 100.0
+    near_52w_high = bool(pct_from_52w <= 5.0)
+
+    # Volume: last bar vs 20-day avg (excluding last)
+    if len(volumes) >= 21:
+        vol_avg20 = float(np.mean(volumes[-21:-1]))
+    else:
+        vol_avg20 = float(np.mean(volumes[:-1])) if len(volumes) > 1 else 1.0
+    vol_ratio = round(float(volumes[-1]) / vol_avg20, 2) if vol_avg20 > 0 else 0.0
+    volume_ok = bool(vol_ratio >= 1.2)
+
+    return {
+        "above_ema20":   above_ema20,
+        "above_ema50":   above_ema50,
+        "above_ema200":  above_ema200,
+        "ema20":         round(ema20_val, 2)  if ema20_val  is not None else None,
+        "ema50":         round(ema50_val, 2)  if ema50_val  is not None else None,
+        "ema200":        round(ema200_val, 2) if ema200_val is not None else None,
+        "ema_score":     ema_score,
+        "rsi":           rsi,
+        "momentum_ok":   momentum_ok,
+        "near_52w_high": near_52w_high,
+        "pct_from_52w":  pct_from_52w,
+        "volume_ok":     volume_ok,
+        "vol_ratio":     vol_ratio,
+    }
+
+
 def _detect_patterns_for_df(df) -> list:
     # Drop rows with NaN in price columns to prevent NaN propagation
     df = df.dropna(subset=["Close", "High", "Low", "Open"])
@@ -823,28 +891,43 @@ def _scan_ticker_patterns(meta: dict):
     import math
     ticker_sym = meta["ticker"]
     detections = []
+    daily_df   = None   # reuse 1D data for technical indicators
+
     for tf_key, tf_cfg in TIMEFRAMES.items():
         try:
             hist = yf.Ticker(ticker_sym).history(period=tf_cfg["period"], interval=tf_cfg["interval"])
             if hist is None or len(hist) < tf_cfg["min_bars"]: continue
+            if tf_key == "1D":
+                daily_df = hist          # cache for later
             for p in _detect_patterns_for_df(hist):
                 p["timeframe"]         = tf_key
                 p["timeframe_display"] = tf_cfg["display"]
                 detections.append(p)
         except Exception as exc:
             logger.debug(f"Pattern {ticker_sym} {tf_key}: {exc}")
+
     if not detections: return None
+
+    # Price — prefer fast_info, fallback to last daily close
     try:
-        lp = yf.Ticker(ticker_sym).fast_info.last_price
-        price = _safe_float(lp)
+        price = _safe_float(yf.Ticker(ticker_sym).fast_info.last_price)
     except Exception:
-        price = 0.0
+        price = float(daily_df["Close"].iloc[-1]) if daily_df is not None and len(daily_df) else 0.0
+
+    tech = _compute_technicals(daily_df)
+
     return {
-        "symbol": meta["ticker"].replace(".NS", ""), "ticker": meta["ticker"],
-        "name": meta["name"], "sector": meta["sector"], "price": round(price, 2),
-        "patterns": detections, "pattern_count": len(detections),
-        "top_pattern": detections[0]["pattern"], "top_bias": detections[0]["bias"],
-        "top_tf": detections[0]["timeframe"],
+        "symbol":        meta["ticker"].replace(".NS", ""),
+        "ticker":        meta["ticker"],
+        "name":          meta["name"],
+        "sector":        meta["sector"],
+        "price":         round(price, 2),
+        "patterns":      detections,
+        "pattern_count": len(detections),
+        "top_pattern":   detections[0]["pattern"],
+        "top_bias":      detections[0]["bias"],
+        "top_tf":        detections[0]["timeframe"],
+        **tech,
     }
 
 
@@ -868,9 +951,19 @@ async def _build_pattern_scan(symbols=None) -> list:
     return results
 
 
-def _apply_filters(data, tf, pat, bias):
+def _apply_filters(data, tf, pat, bias,
+                   near_52w: bool = False,
+                   above_ema: int = 0,
+                   momentum: bool = False,
+                   vol_ok: bool = False):
     out = []
     for stock in data:
+        # ── Technical filters ──────────────────────────────────────────
+        if near_52w   and not stock.get("near_52w_high", False):  continue
+        if above_ema  and stock.get("ema_score", 0) < above_ema:  continue
+        if momentum   and not stock.get("momentum_ok",  False):   continue
+        if vol_ok     and not stock.get("volume_ok",    False):    continue
+        # ── Pattern filters ────────────────────────────────────────────
         patterns = stock["patterns"]
         if tf:   patterns = [p for p in patterns if p["timeframe"].lower() == tf.lower()]
         if pat:  patterns = [p for p in patterns if pat.lower() in p["pattern"].lower()]
@@ -959,11 +1052,14 @@ async def get_pattern_scan(
     timeframe: Optional[str] = Query(None),
     pattern:   Optional[str] = Query(None),
     bias:      Optional[str] = Query(None),
+    near_52w:  bool          = Query(False),
+    above_ema: int           = Query(0, ge=0, le=3),
+    momentum:  bool          = Query(False),
+    vol_ok:    bool          = Query(False),
 ):
     """
     Chart pattern detection across F&O stock universe.
-    Patterns: Double Top/Bottom, H&S, Inverse H&S, Bull/Bear Flag, Cup & Handle, Range.
-    Timeframes: 15m, 1H, 1D. Cache: 15 min.
+    Technical filters: near_52w, above_ema (0-3), momentum, vol_ok.
     """
     global _pattern_cache
     now      = datetime.now(timezone.utc)
@@ -971,7 +1067,8 @@ async def get_pattern_scan(
 
     if not refresh and not sym_list and _pattern_cache["data"] is not None and _pattern_cache["ts"]:
         if (now - _pattern_cache["ts"]).total_seconds() < PATTERN_TTL:
-            filtered = _apply_filters(_pattern_cache["data"], timeframe, pattern, bias)
+            filtered = _apply_filters(_pattern_cache["data"], timeframe, pattern, bias,
+                                      near_52w, above_ema, momentum, vol_ok)
             return {"results": filtered, "count": len(filtered), "cached": True,
                     "updated_at": _pattern_cache["ts"].isoformat(), "scanned_stocks": len(SCAN_UNIVERSE)}
 
@@ -979,7 +1076,7 @@ async def get_pattern_scan(
         raw = await _build_pattern_scan(sym_list)
         if not sym_list:
             _pattern_cache = {"data": raw, "ts": now}
-        filtered = _apply_filters(raw, timeframe, pattern, bias)
+        filtered = _apply_filters(raw, timeframe, pattern, bias, near_52w, above_ema, momentum, vol_ok)
         return {"results": filtered, "count": len(filtered), "cached": False,
                 "updated_at": now.isoformat(), "scanned_stocks": len(sym_list) if sym_list else len(SCAN_UNIVERSE)}
     except Exception as e:
