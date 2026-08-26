@@ -126,6 +126,13 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
   - Frontend: CriteriaRow updated with weight badge + smaller text (7.5px labels, 6.5px detail)
   - Testing: iteration_46.json — 100% (28 backend + all frontend verified)
 
+- **Market Closed Feedback (Feb 2026):**
+  - ClosingPredictionSection header: "MARKET CLOSED" red badge + verdict badge (✅ CORRECT / ❌ WRONG / 〰️ PARTIAL) after 3:30 PM IST
+  - Post-Market Feedback section: 2-column Prediction card vs Actual Result card side by side
+  - Shows: predicted signal/move/action vs actual pts, %, Close/Open, H/L/Range strip
+  - Backend: `market_feedback` object in `/api/market-intel/closing-prediction` response when `is_market_closed=true`
+  - Testing: iteration_47.json — 100% (25 backend + all frontend verified)
+
 
 
 ---

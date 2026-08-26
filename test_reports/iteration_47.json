@@ -1,0 +1,58 @@
+{
+  "summary": "Testing Market Intelligence ClosingPredictionSection: MARKET CLOSED badge, 〰️ PARTIAL verdict badge in header, Post-Market Feedback section with Prediction/Actual cards side by side, H/L strip. Backend: 25/25 tests passed. Frontend: All new features verified visually and via Playwright.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_market_closed_feedback.py",
+    "/app/test_reports/pytest/test_market_closed_feedback.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PASS: is_market_closed=True correctly computed outside 9:15AM–3:30PM IST window",
+    "PASS: market_feedback object contains all 15 required fields: actual_close, actual_open, actual_move, actual_pct, accuracy, verdict_icon, verdict_text, verdict_color, predicted_signal, predicted_move, predicted_action, score_at_close, day_high, day_low, actual_range",
+    "PASS: accuracy=PARTIAL, verdict_icon=〰️, verdict_color=#f59e0b for today's data (score=0, actual_move=-135.3pts)",
+    "PASS: ClosingPredictionSection header shows 'MARKET CLOSED' red badge when is_market_closed=True",
+    "PASS: ClosingPredictionSection header shows '〰️ PARTIAL' verdict badge from market_feedback",
+    "PASS: POST-MARKET FEEDBACK section renders after Decision Banner with Prediction and Actual Result cards side by side",
+    "PASS: Prediction card: No Clear Edge / –10 to +10 pts / Action: Avoid",
+    "PASS: Actual Result card: -135.3 pts / -0.56% | Range 170.2 pts / Close: 24207.8 | Open: 24343.1",
+    "PASS: H/L strip: H: 24378 L: 24207.8 Range: 170.2 pts",
+    "PASS: Existing features preserved — 5 factor score cards, Total Score, Decision Banner (No Clear Edge), Scoring Reference + Decision Rules collapsible table",
+    "INFO: Live data is dynamic — total_score can be 0 or -1 depending on when the 2-min cache refreshes. Tests written to handle this gracefully"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_market_closed_feedback.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 tests passed)",
+    "frontend": "100% (all new features visually verified)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 47: Market Intelligence ClosingPredictionSection fully verified for post-market state. Backend /api/market-intel/closing-prediction returns is_market_closed=true, market_feedback={actual_close:24207.8, actual_open:24343.1, actual_move:-135.3, accuracy:PARTIAL, verdict_icon:〰️, verdict_color:#f59e0b, score_at_close:0}. Frontend: MARKET CLOSED badge (red) in header, 〰️ PARTIAL verdict badge in header, Post-Market Feedback section with 2-column Prediction/Actual cards and H/L/Range strip all working. MarketIntelPanel opens via data-testid='news-btn' (newspaper icon button in top-right header). ClosingPredictionSection is inside MarketIntelPanel, requires scroll to find (near bottom of panel, above NIFTY 50 NEWS INTELLIGENCE). Section is collapsible — click header button to expand.",
+  "verified_tests": {
+    "is_market_closed_true": "PASS — API returns is_market_closed=True after 3:30PM IST",
+    "market_feedback_all_15_fields": "PASS — all required fields present",
+    "accuracy_partial": "PASS — accuracy=PARTIAL, verdict_icon=〰️",
+    "verdict_color_amber": "PASS — #f59e0b",
+    "actual_values_correct": "PASS — close=24207.8, open=24343.1, move=-135.3",
+    "market_closed_badge_header": "PASS — 'MARKET CLOSED' red badge visible in header",
+    "partial_verdict_badge_header": "PASS — '〰️ PARTIAL' badge visible in header",
+    "post_market_feedback_section": "PASS — section renders after decision banner",
+    "prediction_card_content": "PASS — No Clear Edge / –10 to +10 pts / Action: Avoid",
+    "actual_result_card_content": "PASS — -135.3 pts / -0.56% / Range 170.2 / Close: 24207.8 | Open: 24343.1",
+    "hl_range_strip": "PASS — H: 24378 L: 24207.8 Range: 170.2 pts",
+    "factor_score_cards_5": "PASS — 5 factors: dist_from_low(-3), 45min_struct(-2), vix(+2), matrix_bias(+2), gift(+1)",
+    "total_score": "PASS — 0 displayed correctly",
+    "decision_banner": "PASS — No Clear Edge signal with –10 to +10 pts / Avoid",
+    "scoring_reference_table": "PASS — collapsible button present"
+  }
+}

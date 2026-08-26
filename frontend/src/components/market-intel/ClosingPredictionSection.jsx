@@ -117,6 +117,20 @@ export function ClosingPredictionSection({ C, isDark }) {
           <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.textPrimary }}>
             Last 15-min Prediction (3:15–3:30)
           </span>
+          {/* MARKET CLOSED badge */}
+          {data?.is_market_closed && (
+            <span className="text-[7px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest"
+              style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}>
+              MARKET CLOSED
+            </span>
+          )}
+          {/* ACTIVE WINDOW badge (live) */}
+          {data?.is_closing_window && (
+            <span className="text-[7px] px-1.5 py-0.5 rounded font-bold animate-pulse"
+              style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+              ● LIVE
+            </span>
+          )}
           <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
             style={{ background: 'rgba(168,85,247,0.12)', color: '#a855f7' }}>
             Closing Logic
@@ -128,6 +142,13 @@ export function ClosingPredictionSection({ C, isDark }) {
             <span className="text-[9px] px-1.5 py-0.5 rounded font-bold"
               style={{ background: `${dec.color}20`, color: dec.color }}>
               {dec.signal}
+            </span>
+          )}
+          {/* Feedback verdict in header when closed */}
+          {data?.market_feedback && (
+            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
+              style={{ background: `${data.market_feedback.verdict_color}18`, color: data.market_feedback.verdict_color, border: `1px solid ${data.market_feedback.verdict_color}35` }}>
+              {data.market_feedback.verdict_icon} {data.market_feedback.accuracy}
             </span>
           )}
         </div>
@@ -280,6 +301,82 @@ export function ClosingPredictionSection({ C, isDark }) {
                   </button>
                 </div>
               )}
+
+              {/* ── Post-Market Feedback ─────────────────────────────── */}
+              {data.is_market_closed && data.market_feedback && (() => {
+                const fb = data.market_feedback;
+                const vc = fb.verdict_color;
+                return (
+                  <div className="rounded-xl overflow-hidden" style={{ border: `2px solid ${vc}40` }}>
+                    {/* Feedback header */}
+                    <div className="px-3 py-2 flex items-center justify-between"
+                      style={{ background: `${vc}12` }}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: vc }}>
+                          Post-Market Feedback
+                        </span>
+                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
+                          style={{ background: `${vc}20`, color: vc }}>
+                          {fb.verdict_icon} {fb.accuracy}
+                        </span>
+                      </div>
+                      <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>
+                        Score: {fb.score_at_close > 0 ? '+' : ''}{fb.score_at_close}
+                      </span>
+                    </div>
+
+                    <div className="px-3 pb-3 pt-2 space-y-2" style={{ background: C.panelBg }}>
+                      {/* Verdict text */}
+                      <div className="text-[9px] font-semibold leading-snug" style={{ color: vc }}>
+                        {fb.verdict_text}
+                      </div>
+
+                      {/* Actual vs Predicted cards */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {/* Predicted */}
+                        <div className="rounded-lg px-2.5 py-2" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+                          <div className="text-[7px] uppercase tracking-widest font-bold mb-1" style={{ color: C.textMuted }}>
+                            Prediction
+                          </div>
+                          <div className="text-[9px] font-bold" style={{ color: dec?.color || C.textPrimary }}>
+                            {fb.predicted_signal}
+                          </div>
+                          <div className="text-[8px] font-mono mt-0.5" style={{ color: C.textSecond }}>
+                            {fb.predicted_move}
+                          </div>
+                          <div className="text-[7px] mt-0.5" style={{ color: C.textMuted }}>
+                            Action: {fb.predicted_action}
+                          </div>
+                        </div>
+
+                        {/* Actual */}
+                        <div className="rounded-lg px-2.5 py-2" style={{ background: C.cardBg, border: `1px solid ${C.border}` }}>
+                          <div className="text-[7px] uppercase tracking-widest font-bold mb-1" style={{ color: C.textMuted }}>
+                            Actual Result
+                          </div>
+                          <div className="text-[9px] font-bold font-mono"
+                            style={{ color: fb.actual_move >= 0 ? '#22c55e' : '#ef4444' }}>
+                            {fb.actual_move >= 0 ? '+' : ''}{fb.actual_move} pts
+                          </div>
+                          <div className="text-[8px] font-mono mt-0.5" style={{ color: C.textSecond }}>
+                            {fb.actual_pct >= 0 ? '+' : ''}{fb.actual_pct}% | Range {fb.actual_range} pts
+                          </div>
+                          <div className="text-[7px] mt-0.5 font-mono" style={{ color: C.textMuted }}>
+                            Close: {fb.actual_close} | Open: {fb.actual_open}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* High / Low strip */}
+                      <div className="flex items-center gap-3 text-[8px] font-mono px-1">
+                        <span style={{ color: '#22c55e' }}>H: {fb.day_high}</span>
+                        <span style={{ color: '#ef4444' }}>L: {fb.day_low}</span>
+                        <span style={{ color: '#fbbf24' }}>Range: {fb.actual_range} pts</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* ── Reference Tables (collapsible) ──────────────────── */}
               <div>

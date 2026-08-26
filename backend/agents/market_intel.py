@@ -2356,23 +2356,107 @@ def _fetch_closing_pred_sync() -> Dict:
     else:
         session_note = f"⚪ Market Closed — Last: {today_str}"
 
+    # ── Post-Market Feedback (only when market is closed) ─────────────────────
+    market_feedback = None
+    is_market_closed = not is_market_hours
+
+    if is_market_closed and not today_df.empty:
+        try:
+            actual_close   = float(today_df["Close"].iloc[-1])
+            actual_open_p  = float(today_df["Open"].iloc[0])
+            actual_move    = round(actual_close - actual_open_p, 1)
+            actual_pct     = round((actual_close - actual_open_p) / actual_open_p * 100, 2) if actual_open_p else 0.0
+            actual_range   = round(day_high - day_low, 1)
+
+            # Parse predicted move direction from total_score
+            predicted_up   = total_score >= 1
+            predicted_dn   = total_score <= -2
+            predicted_ntrl = -1 <= total_score <= 0
+
+            actual_up      = actual_move > 5      # +5 pts = meaningful up
+            actual_dn      = actual_move < -5     # -5 pts = meaningful down
+            actual_flat    = not actual_up and not actual_dn
+
+            if predicted_up and actual_up:
+                accuracy = "CORRECT"
+                verdict_icon = "✅"
+                verdict_text = f"Bullish prediction sahi nikla! Market +{actual_move:.0f} pts upar gaya."
+                verdict_color = "#22c55e"
+            elif predicted_dn and actual_dn:
+                accuracy = "CORRECT"
+                verdict_icon = "✅"
+                verdict_text = f"Bearish prediction sahi nikla! Market {actual_move:.0f} pts neeche gaya."
+                verdict_color = "#22c55e"
+            elif predicted_ntrl and actual_flat:
+                accuracy = "CORRECT"
+                verdict_icon = "✅"
+                verdict_text = f"Neutral prediction sahi tha. Market sideways {actual_move:+.0f} pts raha."
+                verdict_color = "#94a3b8"
+            elif predicted_up and actual_dn:
+                accuracy = "WRONG"
+                verdict_icon = "❌"
+                verdict_text = f"Prediction miss! Bullish tha, lekin market {actual_move:.0f} pts neeche gaya."
+                verdict_color = "#ef4444"
+            elif predicted_dn and actual_up:
+                accuracy = "WRONG"
+                verdict_icon = "❌"
+                verdict_text = f"Prediction miss! Bearish tha, lekin market +{actual_move:.0f} pts upar gaya."
+                verdict_color = "#ef4444"
+            else:
+                accuracy = "PARTIAL"
+                verdict_icon = "〰️"
+                verdict_text = f"Mixed session. Market {actual_move:+.0f} pts shift hua (expected: {decision.get('move','—')})."
+                verdict_color = "#f59e0b"
+
+            # Practical analysis
+            predicted_move_str = decision.get("move", "—")
+            practical_note = (
+                f"Prediction: {decision.get('signal','—')} ({predicted_move_str}) | "
+                f"Actual: {'+' if actual_move >= 0 else ''}{actual_move:.0f} pts ({actual_pct:+.2f}%) | "
+                f"Range: {actual_range:.0f} pts | "
+                f"H: {round(day_high,1)} L: {round(day_low,1)}"
+            )
+
+            market_feedback = {
+                "actual_close":      round(actual_close, 1),
+                "actual_open":       round(actual_open_p, 1),
+                "actual_move":       actual_move,
+                "actual_pct":        actual_pct,
+                "actual_range":      actual_range,
+                "day_high":          round(day_high, 1),
+                "day_low":           round(day_low, 1),
+                "predicted_signal":  decision.get("signal", ""),
+                "predicted_move":    predicted_move_str,
+                "predicted_action":  decision.get("action", ""),
+                "accuracy":          accuracy,
+                "verdict_icon":      verdict_icon,
+                "verdict_text":      verdict_text,
+                "verdict_color":     verdict_color,
+                "practical_note":    practical_note,
+                "score_at_close":    total_score,
+            }
+        except Exception as _fe:
+            logger.debug(f"Market feedback error: {_fe}")
+
     return {
-        "available":        True,
-        "curr_price":       round(curr_price, 1),
-        "day_high":         round(day_high, 1),
-        "day_low":          round(day_low, 1),
-        "day_open":         round(day_open, 1),
-        "dist_from_low":    dist_from_low,
-        "vix":              round(vix, 1),
-        "gift_premium":     gift_premium,
-        "bias":             bias_label,
-        "total_score":      total_score,
-        "factors":          factors,
-        "decision":         decision,
-        "session_note":     session_note,
-        "is_closing_window":is_closing_window,
-        "is_market_hours":  is_market_hours,
-        "updated_at":       datetime.now(timezone.utc).isoformat(),
+        "available":         True,
+        "curr_price":        round(curr_price, 1),
+        "day_high":          round(day_high, 1),
+        "day_low":           round(day_low, 1),
+        "day_open":          round(day_open, 1),
+        "dist_from_low":     dist_from_low,
+        "vix":               round(vix, 1),
+        "gift_premium":      gift_premium,
+        "bias":              bias_label,
+        "total_score":       total_score,
+        "factors":           factors,
+        "decision":          decision,
+        "session_note":      session_note,
+        "is_closing_window": is_closing_window,
+        "is_market_hours":   is_market_hours,
+        "is_market_closed":  is_market_closed,
+        "market_feedback":   market_feedback,
+        "updated_at":        datetime.now(timezone.utc).isoformat(),
     }
 
 
