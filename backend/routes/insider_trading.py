@@ -105,14 +105,48 @@ def _prev_trading_day(d: datetime, skip: int = 0) -> datetime:
     return d2
 
 
+
+# Market open check (IST)
+def _ist_market_open() -> tuple:
+    from zoneinfo import ZoneInfo as _ZI
+    _IST = _ZI("Asia/Kolkata")
+    _now = datetime.now(_ZI("Asia/Kolkata"))
+    _wd  = _now.weekday() < 5
+    _mo  = _now.replace(hour=9, minute=15, second=0, microsecond=0)
+    _mc  = _now.replace(hour=15, minute=30, second=0, microsecond=0)
+    is_open = _wd and _mo <= _now <= _mc
+    after_close = _wd and _now > _mc
+    return is_open, after_close, _now
+
+
 def _fetch_nse_archives_bulk_sync(days_back: int = 5) -> list:
     """
-    Fetch bulk deals from NSE archives static CSV.
-    URL: https://archives.nseindia.com/archives/equities/bulkdeals/bulk_deals_DDMMYYYY.csv
-    Tries last `days_back` trading days until data found.
+    Fetch bulk deals from NSE archives CSV.
+    After market close (>4:30 PM IST): tries today's CSV first.
+    Else: falls back through last `days_back` trading days.
     """
+    _, after_close, now_ist = _ist_market_open()
     results = []
     today = datetime.now(timezone.utc)
+
+    # After market close, today's CSV may be published — try it first
+    if after_close and now_ist.hour >= 16:
+        date_str = now_ist.strftime("%d%m%Y")
+        url = f"https://archives.nseindia.com/archives/equities/bulkdeals/bulk_deals_{date_str}.csv"
+        try:
+            r = httpx.get(url, timeout=8, headers={"User-Agent": _NSE_HDRS["User-Agent"],
+                          "Accept": "text/csv,*/*", "Referer": "https://www.nseindia.com/"}, follow_redirects=True)
+            if r.status_code == 200 and "symbol" in r.text.lower():
+                reader = csv.DictReader(io.StringIO(r.text))
+                for row in reader:
+                    row_n = {k.strip().upper(): v.strip() for k, v in row.items()}
+                    results.append({**row_n, "_date_str": now_ist.strftime("%d-%m-%Y"), "_source": "NSE_ARCHIVE_BULK"})
+                if results:
+                    logger.info(f"NSE archive bulk (TODAY): {len(results)} rows")
+                    return results
+        except Exception as e:
+            logger.debug(f"Archive bulk today: {e}")
+
     for skip in range(days_back):
         dt = _prev_trading_day(today, skip)
         date_str = dt.strftime("%d%m%Y")
@@ -126,7 +160,6 @@ def _fetch_nse_archives_bulk_sync(days_back: int = 5) -> list:
             if r.status_code == 200 and "symbol" in r.text.lower():
                 reader = csv.DictReader(io.StringIO(r.text))
                 for row in reader:
-                    # Normalize keys (NSE CSVs vary in header casing)
                     row_n = {k.strip().upper(): v.strip() for k, v in row.items()}
                     results.append({**row_n, "_date_str": dt.strftime("%d-%m-%Y"), "_source": "NSE_ARCHIVE_BULK"})
                 if results:
@@ -740,7 +773,29 @@ def detect_range(closes, highs_arr, lows_arr):
             "description": f"Range {round(rlo,2)}–{round(rhi,2)} ({round(w*100,1)}% wide) | Res {rt}x | Sup {st}x"}
 
 
+def _safe_float(v, fallback=0.0) -> float:
+    """Return a JSON-safe float (no NaN/Inf)."""
+    import math
+    try:
+        f = float(v)
+        return fallback if (math.isnan(f) or math.isinf(f)) else f
+    except Exception:
+        return fallback
+
+
+def _sanitize_pattern(p: dict) -> dict:
+    """Replace any NaN/Inf float values in a pattern dict with 0.0."""
+    return {
+        k: (_safe_float(v) if isinstance(v, (float, int, np.floating)) else v)
+        for k, v in p.items()
+    }
+
+
 def _detect_patterns_for_df(df) -> list:
+    # Drop rows with NaN in price columns to prevent NaN propagation
+    df = df.dropna(subset=["Close", "High", "Low", "Open"])
+    if df.empty or len(df) < 10:
+        return []
     closes = df["Close"].values.astype(float)
     highs  = df["High"].values.astype(float)
     lows   = df["Low"].values.astype(float)
@@ -759,12 +814,13 @@ def _detect_patterns_for_df(df) -> list:
     ]:
         try:
             r = fn()
-            if r: found.append(r)
+            if r: found.append(_sanitize_pattern(r))
         except Exception: pass
     return found
 
 
 def _scan_ticker_patterns(meta: dict):
+    import math
     ticker_sym = meta["ticker"]
     detections = []
     for tf_key, tf_cfg in TIMEFRAMES.items():
@@ -778,8 +834,11 @@ def _scan_ticker_patterns(meta: dict):
         except Exception as exc:
             logger.debug(f"Pattern {ticker_sym} {tf_key}: {exc}")
     if not detections: return None
-    try: price = float(yf.Ticker(ticker_sym).fast_info.last_price or 0)
-    except Exception: price = 0.0
+    try:
+        lp = yf.Ticker(ticker_sym).fast_info.last_price
+        price = _safe_float(lp)
+    except Exception:
+        price = 0.0
     return {
         "symbol": meta["ticker"].replace(".NS", ""), "ticker": meta["ticker"],
         "name": meta["name"], "sector": meta["sector"], "price": round(price, 2),

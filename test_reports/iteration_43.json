@@ -1,0 +1,71 @@
+{
+  "summary": "Tested 3 new features: (1) Sensex OI Integration - GET /api/rej/sensex-option-flow now returns is_real_oi/total_ce_oi/total_pe_oi/pcr_oi fields - all passing. (2) Pattern Alert Badge - Eye icon shows orange badge with count after 6s (fixed 500 error bug blocking this). (3) SensexRejOptionsSection OI display - BS-derived text works when pick loaded; fixed stray )} JSX rendering artifact.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/insider/pattern-scan?symbols=RELIANCE,HDFCBANK,INFY,TATAMOTORS,SBIN",
+        "issue": "500 error - ValueError: Out of range float values are not JSON compliant. NaN values from yfinance data (specifically INFY.NS) propagated into response. FIXED: Added _safe_float() helper, _sanitize_pattern() function, and df.dropna() call in _detect_patterns_for_df().",
+        "priority": "CRITICAL",
+        "status": "FIXED"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "SensexRejOptionsSection",
+        "issue": "Stray )} literal text rendering on screen due to missing {loading && (} wrapper around loading spinner div. FIXED: Added {loading && (} conditional wrapper.",
+        "selector": "text=')}' in body",
+        "priority": "MEDIUM",
+        "status": "FIXED"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "SensexRejOptionsSection LIVE OI badge",
+        "issue": "The /api/rej/sensex-option-pick POST endpoint does NOT include is_real_oi, total_ce_oi, total_pe_oi, pcr_oi fields in its response. The frontend checks pick.is_real_oi but pick never has this field. LIVE OI badge will NEVER show. BS-derived shows only because pick.is_real_oi=undefined (falsy). In cloud env (BSE API blocked), end result is correct (BS-derived shows), but code is wrong - should use flowData.is_real_oi instead of pick.is_real_oi.",
+        "affected_selectors": ["pick.is_real_oi check in SensexRejOptionsSection.jsx line 334"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_new_features_iter43.py",
+    "/app/test_reports/pytest/test_new_features_iter43.xml"
+  ],
+  "action_items": [
+    "MEDIUM: Fix /api/rej/sensex-option-pick to include is_real_oi, total_ce_oi, total_pe_oi, pcr_oi from BSE OI fetch. OR use flowData.is_real_oi in SensexRejOptionsSection.jsx (lines 334, 343) instead of pick.is_real_oi. The LIVE OI badge can never show with current design since pick endpoint doesn't fetch BSE OI (uses {} for bse_oi_map on line 14980)."
+  ],
+  "critical_code_review_comments": [
+    "CRITICAL FIXED: Pattern scan API returning 500 on INFY due to NaN numpy floats in JSON response. Root cause: yfinance history data has NaN in Close/High/Low columns; these propagate through pattern detection algorithms. Also fast_info.last_price returning NaN - `NaN or 0` returns NaN (NaN is truthy in Python). Fix applied: added _safe_float(), _sanitize_pattern(), df.dropna() in insider_trading.py.",
+    "MEDIUM FIXED: JSX rendering bug in SensexRejOptionsSection.jsx line 348-351 - loading spinner div was unconditional and followed by stray )} which rendered as literal text on screen.",
+    "DESIGN ISSUE: /api/rej/sensex-option-pick (line 14980) uses empty dict {} for bse_oi_map in _fetch_sensex_live_options - this means pick response never has is_real_oi. OI display in frontend uses pick.is_real_oi instead of flowData.is_real_oi. LIVE OI badge feature is effectively broken (never shows). Fix: use flowData.is_real_oi and flowData.total_ce_oi etc. in JSX conditions.",
+    "MINOR: confidence field type changed from int to float (95 -> 95.0) due to _sanitize_pattern applying float conversion to all numeric values. Not breaking but different from original."
+  ],
+  "updated_files": [
+    "/app/backend/routes/insider_trading.py",
+    "/app/frontend/src/components/SensexRejOptionsSection.jsx"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed after NaN fix)",
+    "frontend": "90% (all major flows working; LIVE OI badge never shows due to design issue)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 43: 3 new features tested. Backend: /api/rej/sensex-option-flow has is_real_oi(bool)/total_ce_oi(int)/total_pe_oi(int)/pcr_oi(float) - all working. Pattern scan 5-stock badge fetch: fixed NaN 500 error (INFY.NS had NaN in yfinance data). Badge shows correctly after 6s (count=4 observed). InsiderTracker fully working. SensexRejOptionsSection: fixed )} JSX bug. Remaining: LIVE OI badge can't show because pick endpoint doesn't include OI fields - E1 should either fix pick endpoint or change JSX to use flowData.is_real_oi. Test file: /app/backend/tests/test_new_features_iter43.py (13 tests).",
+  "test_credentials": "None required",
+  "rca_of_issues": {
+    "pattern_scan_500": {
+      "root_cause": "yfinance history DataFrame contains NaN values in Close/High/Low columns for some stocks (INFY.NS observed). These NaN values propagate through numpy array operations in pattern detection functions (detect_double_top, detect_range etc.). Additionally, yf.Ticker.fast_info.last_price returns NaN for some stocks, and `NaN or 0` in Python evaluates to NaN (not 0) because NaN is truthy. Python's json.dumps raises ValueError for NaN/Inf floats by default.",
+      "fix_applied": "Added _safe_float() helper to convert NaN/Inf to 0.0, _sanitize_pattern() to sanitize all pattern dict values, df.dropna(subset=['Close','High','Low','Open']) at start of _detect_patterns_for_df to remove NaN rows, and fixed fast_info.last_price to use _safe_float() instead of `or 0`.",
+      "reproduction": "GET /api/insider/pattern-scan?symbols=INFY returned 500 before fix, 200 after fix."
+    },
+    "stray_jsx_text": {
+      "root_cause": "In SensexRejOptionsSection.jsx lines 348-351, the loading spinner div was placed OUTSIDE the {!pick?.is_real_oi && pick && ()} conditional block, and followed by a stray )} character. This caused React to render )} as literal text on the page and the loading spinner to always show (not just when loading=true).",
+      "fix_applied": "Wrapped the loading div with {loading && ()} conditional.",
+      "reproduction": "INTEL tab showed literal )} text between SENSEX REJ OPTION PICKS and SENSEX GAMMA BLAST sections."
+    }
+  }
+}

@@ -281,7 +281,7 @@ function PatternRow({ item, C }) {
 //  MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
 
-export default function InsiderTracker({ onClose }) {
+export default function InsiderTracker({ onClose, onPatternLoad }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
@@ -339,6 +339,13 @@ export default function InsiderTracker({ onClose }) {
       setLoading(false);
     }
   }, [tfFilter, biasFilter, patFilter]);
+
+  // Notify parent when pattern count loads
+  useEffect(() => {
+    if (patternData?.count != null && onPatternLoad) {
+      onPatternLoad(patternData.count);
+    }
+  }, [patternData, onPatternLoad]);
 
   // Fetch on tab switch
   useEffect(() => {

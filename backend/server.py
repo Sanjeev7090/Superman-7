@@ -1388,7 +1388,86 @@ def _sensex_expiry_dates(n_weeks: int = 4) -> list:
     return [d.strftime("%d-%b-%Y") for d in sorted_expiries]
 
 
-def _fetch_sensex_live_options(spot: float, sigma: float, expiry_str: str) -> list:
+def _fetch_bse_sensex_oi_sync() -> dict:
+    """
+    Fetch real BSE Sensex options OI from BSE public API.
+    Returns: {strike_type_key: {"oi": int, "vol": int, "ltp": float}}
+    e.g. {"74000_CE": {"oi": 500000, "vol": 12000, "ltp": 245.5}}
+    Falls back to {} if BSE API unreachable.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Origin":   "https://www.bseindia.com",
+        "Referer":  "https://www.bseindia.com/markets/Derivatives/DerivativesHome.aspx",
+    }
+    # Multiple BSE endpoint candidates
+    endpoints = [
+        "https://api.bseindia.com/BseIndiaAPI/api/SensexOptions/w",
+        "https://api.bseindia.com/BseIndiaAPI/api/IndicesOptions/w?Id=16435&ExchangeSegment=0&strSel=all",
+        "https://api.bseindia.com/BseIndiaAPI/api/SensexOIAndPremium/w",
+    ]
+    data = None
+    for url in endpoints:
+        try:
+            r = httpx.get(url, timeout=8, headers=headers, follow_redirects=True)
+            if r.status_code == 200 and len(r.content) > 100:
+                data = r.json()
+                if data:
+                    logging.info(f"BSE Sensex OI: got data from {url[:60]}")
+                    break
+        except Exception as e:
+            logging.debug(f"BSE OI {url[:50]}: {e}")
+
+    if not data:
+        return {}
+
+    oi_map: dict = {}
+
+    def _parse_record(rec: dict, type_hint: str = ""):
+        strike = float(rec.get("StrikePrice") or rec.get("strikePrice") or rec.get("strike") or 0)
+        opt_t  = (rec.get("OptionType") or rec.get("optionType") or rec.get("type") or type_hint).upper()
+        oi     = int(float(rec.get("OI") or rec.get("openInterest") or rec.get("oi") or 0))
+        vol    = int(float(rec.get("Volume") or rec.get("totalTradedVolume") or rec.get("volume") or 0))
+        ltp    = float(rec.get("LTP") or rec.get("lastPrice") or rec.get("ltp") or 0)
+        norm_t = "CE" if opt_t in ("CE", "C", "CALL") else "PE" if opt_t in ("PE", "P", "PUT") else ""
+        if strike and norm_t:
+            oi_map[f"{int(strike)}_{norm_t}"] = {"oi": oi, "vol": vol, "ltp": ltp}
+
+    if isinstance(data, list):
+        for rec in data:
+            _parse_record(rec)
+    elif isinstance(data, dict):
+        # Nested CE/PE structure: [{strikePrice:X, CE:{...}, PE:{...}}]
+        for key in ("optionData", "Options", "data", "records", "strikes"):
+            recs = data.get(key, [])
+            if not recs:
+                continue
+            if isinstance(recs, list):
+                for rec in recs:
+                    if "CE" in rec and "PE" in rec:
+                        strike = float(rec.get("strikePrice") or rec.get("strike") or 0)
+                        if strike:
+                            ce, pe = rec["CE"], rec["PE"]
+                            oi_map[f"{int(strike)}_CE"] = {
+                                "oi":  int(ce.get("openInterest") or ce.get("OI") or 0),
+                                "vol": int(ce.get("totalTradedVolume") or ce.get("volume") or 0),
+                                "ltp": float(ce.get("lastPrice") or ce.get("ltp") or 0),
+                            }
+                            oi_map[f"{int(strike)}_PE"] = {
+                                "oi":  int(pe.get("openInterest") or pe.get("OI") or 0),
+                                "vol": int(pe.get("totalTradedVolume") or pe.get("volume") or 0),
+                                "ltp": float(pe.get("lastPrice") or pe.get("ltp") or 0),
+                            }
+                    else:
+                        _parse_record(rec)
+            break
+
+    logging.info(f"BSE Sensex OI parsed: {len(oi_map)} strikes")
+    return oi_map
+
+
+def _fetch_sensex_live_options(spot: float, sigma: float, expiry_str: str, bse_oi_map: dict = None) -> list:
     """Generate SENSEX option prices using Black-Scholes with live India VIX.
     Strike interval: 100 pts (actual BSE SENSEX options market structure).
     """
@@ -1454,6 +1533,8 @@ def _fetch_sensex_live_options(spot: float, sigma: float, expiry_str: str) -> li
         put_price  = bs_price(spot, k, T, r, iv_put,  False)
 
         if call_price > 0.5:
+            real_ce  = (bse_oi_map or {}).get(f"{int(k)}_CE", {})
+            use_live = bool(real_ce and real_ce.get("oi", 0) > 0)
             options.append({
                 "instrument":    f"SENSEX {int(k)} CE",
                 "underlying":    "SENSEX",
@@ -1461,18 +1542,20 @@ def _fetch_sensex_live_options(spot: float, sigma: float, expiry_str: str) -> li
                 "type":          "CE",
                 "expiry":        expiry_str,
                 "expiry_display": expiry_str,
-                "last_price":    round(call_price, 2),
+                "last_price":    round(real_ce.get("ltp", call_price) or call_price, 2),
                 "change":        0.0,
                 "change_pct":    0.0,
-                "volume":        base_vol,
-                "oi":            base_oi,
+                "volume":        real_ce.get("vol", base_vol) or base_vol,
+                "oi":            real_ce.get("oi",  base_oi)  or base_oi,
                 "iv":            round(iv_call * 100, 1),
                 "delta":         round(bs_delta(spot, k, T, r, iv_call, True),  3),
                 "theta":         round(bs_theta(spot, k, T, r, iv_call, True),  2),
                 "is_live_derived": True,
+                "is_live_oi":    use_live,
             })
         if put_price > 0.5:
-            # Puts have ~1.15x higher OI than calls (realistic Indian index skew)
+            real_pe   = (bse_oi_map or {}).get(f"{int(k)}_PE", {})
+            use_live_pe = bool(real_pe and real_pe.get("oi", 0) > 0)
             options.append({
                 "instrument":    f"SENSEX {int(k)} PE",
                 "underlying":    "SENSEX",
@@ -1480,18 +1563,17 @@ def _fetch_sensex_live_options(spot: float, sigma: float, expiry_str: str) -> li
                 "type":          "PE",
                 "expiry":        expiry_str,
                 "expiry_display": expiry_str,
-                "last_price":    round(put_price, 2),
+                "last_price":    round(real_pe.get("ltp", put_price) or put_price, 2),
                 "change":        0.0,
                 "change_pct":    0.0,
-                "volume":        int(base_vol * 1.12),
-                "oi":            int(base_oi  * 1.15),
+                "volume":        real_pe.get("vol", int(base_vol * 1.12)) or int(base_vol * 1.12),
+                "oi":            real_pe.get("oi",  int(base_oi  * 1.15)) or int(base_oi  * 1.15),
                 "iv":            round(iv_put * 100, 1),
                 "delta":         round(bs_delta(spot, k, T, r, iv_put, False), 3),
                 "theta":         round(bs_theta(spot, k, T, r, iv_put, False), 2),
                 "is_live_derived": True,
+                "is_live_oi":    use_live_pe,
             })
-
-    # Sort by proximity to ATM
     options.sort(key=lambda x: abs(x["strike"] - spot))
     return options
 
@@ -14690,9 +14772,12 @@ async def rej_sensex_option_flow():
     """
     loop = asyncio.get_event_loop()
     try:
-        spot_data      = await asyncio.wait_for(loop.run_in_executor(None, _sensex_spot_and_change), timeout=12.0)
-        sigma          = await asyncio.wait_for(loop.run_in_executor(None, _fetch_live_india_vix), timeout=8.0)
-        vix_change_pct = await asyncio.wait_for(loop.run_in_executor(None, _india_vix_change_pct), timeout=8.0)
+        spot_data, sigma, vix_change_pct, bse_oi_map = await asyncio.gather(
+            asyncio.wait_for(loop.run_in_executor(None, _sensex_spot_and_change), timeout=12.0),
+            asyncio.wait_for(loop.run_in_executor(None, _fetch_live_india_vix),    timeout=8.0),
+            asyncio.wait_for(loop.run_in_executor(None, _india_vix_change_pct),    timeout=8.0),
+            asyncio.wait_for(loop.run_in_executor(None, _fetch_bse_sensex_oi_sync), timeout=10.0),
+        )
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"SENSEX data error: {e}")
 
@@ -14707,9 +14792,16 @@ async def rej_sensex_option_flow():
     if not nearest_expiry:
         raise HTTPException(status_code=503, detail="No SENSEX expiries found")
 
-    options = await loop.run_in_executor(None, _fetch_sensex_live_options, spot, sigma, nearest_expiry)
+    options = await loop.run_in_executor(None, _fetch_sensex_live_options, spot, sigma, nearest_expiry, bse_oi_map or {})
     if not options:
         raise HTTPException(status_code=503, detail="SENSEX option generation failed")
+
+    # ── Use real BSE OI if available ─────────────────────────────────
+    is_real_oi  = any(o.get("is_live_oi") for o in options)
+    total_ce_oi = int(sum(o.get("oi", 0) for o in options if o["type"] == "CE"))
+    total_pe_oi = int(sum(o.get("oi", 0) for o in options if o["type"] == "PE"))
+    pcr_oi      = round(total_pe_oi / max(total_ce_oi, 1), 2)
+
 
     T_years = 7 / 365.0
     try:
@@ -14753,11 +14845,17 @@ async def rej_sensex_option_flow():
 
     # C1: Future ↑ + OI proxy ≥ +1.5L + CE vol ≥ 1.3× PE vol
     #     (OI +1.5L proxy = spot move ≥ 0.5% = high conviction move)
-    c1_spot_up     = spot_change > 0
-    c1_oi_proxy    = spot_change >= 0.5           # proxy for Future OI ≥ +1.5L
-    c1_vol_ok      = total_ce_vol >= total_pe_vol * 1.3   # strict: CE ≥ 1.3× PE
-    call_c1        = c1_spot_up and c1_oi_proxy and c1_vol_ok
-    c1d = (f"Spot +{spot_change}% {'≥0.5% ✓' if c1_oi_proxy else '<0.5% ✗'} (OI proxy) | "
+    # C1: Real BSE OI (if available) OR spot proxy fallback
+    c1_spot_up  = spot_change > 0
+    if is_real_oi:
+        c1_oi_proxy = pcr_oi < 1.0 and total_ce_oi > total_pe_oi * 0.7
+    else:
+        c1_oi_proxy = spot_change >= 0.5
+    c1_vol_ok   = total_ce_vol >= total_pe_vol * 1.3
+    call_c1     = c1_spot_up and c1_oi_proxy and c1_vol_ok
+    oi_note_c   = (f"PCR-OI {pcr_oi} {'<1 ✓' if pcr_oi < 1 else '≥1 ✗'} (Real OI)" if is_real_oi
+                   else f"Spot +{spot_change}% {'≥0.5% ✓' if c1_oi_proxy else '<0.5% ✗'} (OI proxy)")
+    c1d = (f"{oi_note_c} | "
            f"CE {int(total_ce_vol//1000)}K {'≥1.3x' if c1_vol_ok else '<1.3x'} PE {int(total_pe_vol//1000)}K")
 
     # C2: IV Rising / Stable
@@ -14783,12 +14881,17 @@ async def rej_sensex_option_flow():
     # PUT BUY — STRICT criteria
     # ════════════════════════════════════════════════════════════════
 
-    # C1: Future ↓ + OI proxy ≥ +1.5L + PE vol ≥ 1.3× CE vol
+    # C1 PUT: Real BSE OI (if available) OR spot proxy
     p1_spot_dn  = spot_change < 0
-    p1_oi_proxy = spot_change <= -0.5             # proxy for Future OI ≥ +1.5L
-    p1_vol_ok   = total_pe_vol >= total_ce_vol * 1.3   # strict: PE ≥ 1.3× CE
+    if is_real_oi:
+        p1_oi_proxy = pcr_oi > 1.0 and total_pe_oi > total_ce_oi * 0.7
+    else:
+        p1_oi_proxy = spot_change <= -0.5
+    p1_vol_ok   = total_pe_vol >= total_ce_vol * 1.3
     put_c1      = p1_spot_dn and p1_oi_proxy and p1_vol_ok
-    p1d = (f"Spot {spot_change}% {'≤-0.5% ✓' if p1_oi_proxy else '>-0.5% ✗'} (OI proxy) | "
+    oi_note_p   = (f"PCR-OI {pcr_oi} {'>1 ✓' if pcr_oi > 1 else '≤1 ✗'} (Real OI)" if is_real_oi
+                   else f"Spot {spot_change}% {'≤-0.5% ✓' if p1_oi_proxy else '>-0.5% ✗'} (OI proxy)")
+    p1d = (f"{oi_note_p} | "
            f"PE {int(total_pe_vol//1000)}K {'≥1.3x' if p1_vol_ok else '<1.3x'} CE {int(total_ce_vol//1000)}K")
 
     # C2: IV Rising (stricter for put buy)
@@ -14828,6 +14931,10 @@ async def rej_sensex_option_flow():
         "recommended": str(recommended),
         "strict_mode": True,          # flag for frontend badge
         "is_derived":  True,
+        "is_real_oi":    bool(is_real_oi),
+        "total_ce_oi":   int(total_ce_oi),
+        "total_pe_oi":   int(total_pe_oi),
+        "pcr_oi":        float(pcr_oi),
         "call_buy": {"score": call_score, "signal": call_signal, "criteria": {
             "future_oi_vol":           {"pass": bool(call_c1), "label": "Future ↑ · OI+1.5L · CE≥1.3×PE", "detail": str(c1d)},
             "iv_ok":                   {"pass": bool(call_c2), "label": "IV Rising / Stable",               "detail": str(c2d)},
@@ -14870,7 +14977,7 @@ async def rej_sensex_option_pick(req: SensexRejPickRequest):
     if not nearest_expiry:
         raise HTTPException(status_code=503, detail="No SENSEX expiry found")
 
-    options = await loop.run_in_executor(None, _fetch_sensex_live_options, spot, sigma, nearest_expiry)
+    options = await loop.run_in_executor(None, _fetch_sensex_live_options, spot, sigma, nearest_expiry, {})
     if not options:
         raise HTTPException(status_code=503, detail="SENSEX option generation failed")
 

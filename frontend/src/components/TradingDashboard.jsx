@@ -104,7 +104,22 @@ const TradingDashboard = () => {
   const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
   const [strategyMarkers, setStrategyMarkers] = useState([]); // Strategy overlay markers from Vibe Research
   const [showInsider, setShowInsider] = useState(false); // Insider Tracker
+  const [patternCount, setPatternCount] = useState(0);  // Pattern alert badge
   const { theme, toggleTheme } = useTheme();
+
+  // Background pattern count fetch (quick 5-stock sample) on mount
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const base = process.env.REACT_APP_BACKEND_URL || '';
+        const res  = await fetch(`${base}/api/insider/pattern-scan?symbols=RELIANCE,HDFCBANK,INFY,TATAMOTORS,SBIN`);
+        const data = await res.json();
+        if (data.count > 0) setPatternCount(data.count);
+      } catch (_) {}
+    };
+    const t = setTimeout(fetchCount, 6000);   // delayed so it doesn't slow initial load
+    return () => clearTimeout(t);
+  }, []);
   const wsRef = useRef(null);
   const rlPollRef = useRef(null);
 
@@ -662,12 +677,30 @@ const TradingDashboard = () => {
 
           {/* Insider Tracker button */}
           <button
-            onClick={() => setShowInsider(true)}
+            onClick={() => { setShowInsider(true); setPatternCount(0); }}
             className="p-1.5 rounded-md border border-slate-200 dark:border-white/10 text-amber-400 hover:bg-slate-100 dark:hover:bg-white/10 transition-all"
             title="Insider Tracker — NSE SEBI Reg 7(2) + Pattern Scanner"
             data-testid="insider-tracker-btn"
+            style={{ position: 'relative' }}
           >
             <Eye size={15} />
+            {patternCount > 0 && (
+              <span
+                data-testid="pattern-count-badge"
+                style={{
+                  position: 'absolute', top: -5, right: -5,
+                  minWidth: 14, height: 14, borderRadius: 7,
+                  background: '#f59e0b', color: '#000',
+                  fontSize: 7, fontWeight: 900, letterSpacing: '-0.02em',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0 2px', lineHeight: 1,
+                  boxShadow: '0 0 0 2px var(--bg-base, #0f1117)',
+                  pointerEvents: 'none',
+                }}
+              >
+                {patternCount > 9 ? '9+' : patternCount}
+              </span>
+            )}
           </button>
 
           {/* RL AGENT BACKGROUND TRAINING INDICATOR — jumps into Settings drawer */}
@@ -1002,7 +1035,10 @@ const TradingDashboard = () => {
 
       {/* Insider Tracker Panel */}
       {showInsider && (
-        <InsiderTracker onClose={() => setShowInsider(false)} />
+        <InsiderTracker
+          onClose={() => setShowInsider(false)}
+          onPatternLoad={(count) => setPatternCount(count)}
+        />
       )}
 
       {/* Voice Command System */}
