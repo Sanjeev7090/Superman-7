@@ -82,7 +82,11 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
 - **Backend Refactor:** server.py partially split into route modules (crude, metals, market_intel)
 - **Timeframe Bug Fix:** METAL type timeframe switching fixed in MultiChartLayout
 
-### Session (Feb 2026 — Part 3 — Insider Tracker)
+### Session (Feb 2026 — Part 4 — GEX Workflow)
+- **GEX (Gamma Exposure) Workflow Process:** (COMPLETED)
+  - Backend: `GET /api/gex/nifty` — Live NSE option chain se Net GEX calculate karta hai (Call OI × Gamma × Lot × Spot²). Gamma Flip, Call Wall, Put Wall bhi return karta hai. VIX-based fallback agar NSE blocked ho. 5-min cache. 121+ strikes analysed.
+  - Frontend: `GexWorkflowSection.jsx` — Decision Matrix ke bilkul neche. 4 Data Cards (Net GEX, Gamma Flip, Call Wall, Put Wall), Regime Badge (Strong Positive/Negative), Expected Move Reference Table (6 regimes), 4-Step Workflow guide (Subah Check Karo → Bias Set Karo → Levels Identify Karo → Intraday Use Karo), Quick Reference (Positive vs Negative GEX logic). Live NSE / VIX Est badge.
+- **LIVE OI Badge Fix (P1):** `SensexRejOptionsSection.jsx` — `pick.is_real_oi` ki jagah `flowData.is_real_oi` use kiya. CE OI, PE OI, PCR-OI bhi `flowData` se aata hai ab (isse LIVE OI badge sahi show hoga jab BSE OI available ho).
 - **Insider Tracker Feature:** (COMPLETED)
   - Backend: `GET /api/insider/detections` — NSE SEBI Reg 7(2) insider buy disclosures, last 7 days, priority score (8+=HIGH, 5-7=WATCHLIST, <5=MONITOR), 30-min cache
   - Backend: `GET /api/insider/pattern-scan` — Chart pattern detection across 36 F&O stocks across 3 timeframes (15m, 1H, 1D). Patterns: Double Top/Bottom, H&S, Inverse H&S, Bull/Bear Flag, Cup & Handle, Range. Filters: timeframe, bias, pattern name. 15-min cache.

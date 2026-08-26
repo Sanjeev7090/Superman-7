@@ -331,16 +331,16 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
             >{loading ? '⟳' : '↻ Refresh'}</button>
           </div>
 
-          {pick?.is_real_oi && (
+          {flowData?.is_real_oi && pick && (
             <div className="flex items-center gap-3 rounded-lg px-2.5 py-1.5 text-[8px]"
               style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)' }}>
               <span className="font-bold text-green-400">LIVE OI</span>
-              <span className="text-zinc-400">CE OI: <span className="text-white font-mono font-semibold">{((pick.total_ce_oi||0)/1e5).toFixed(1)}L</span></span>
-              <span className="text-zinc-400">PE OI: <span className="text-white font-mono font-semibold">{((pick.total_pe_oi||0)/1e5).toFixed(1)}L</span></span>
-              <span className="text-zinc-400">PCR-OI: <span className={`font-bold ${pick.pcr_oi < 1 ? 'text-green-400' : 'text-red-400'}`}>{pick.pcr_oi}</span></span>
+              <span className="text-zinc-400">CE OI: <span className="text-white font-mono font-semibold">{((flowData.total_ce_oi||0)/1e5).toFixed(1)}L</span></span>
+              <span className="text-zinc-400">PE OI: <span className="text-white font-mono font-semibold">{((flowData.total_pe_oi||0)/1e5).toFixed(1)}L</span></span>
+              <span className="text-zinc-400">PCR-OI: <span className={`font-bold ${flowData.pcr_oi < 1 ? 'text-green-400' : 'text-red-400'}`}>{flowData.pcr_oi}</span></span>
             </div>
           )}
-          {!pick?.is_real_oi && pick && (
+          {!flowData?.is_real_oi && pick && (
             <div className="text-[8px] text-zinc-600 px-1">
               OI: BS-derived (BSE API unavailable)
             </div>

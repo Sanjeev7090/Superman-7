@@ -15057,6 +15057,202 @@ async def rej_sensex_option_pick(req: SensexRejPickRequest):
 app.include_router(_rej_router)
 
 
+# ═══════════════════════════════════════════════════════════════════
+#   GEX (Gamma Exposure) — Net GEX Calculator for Nifty
+# ═══════════════════════════════════════════════════════════════════
+_gex_router = APIRouter(prefix="/api/gex")
+
+_GEX_CACHE: dict = {}
+_GEX_CACHE_TTL = 300  # 5-min cache
+_NIFTY_LOT = 25       # NSE Nifty lot size
+
+
+def _calc_gex_for_chain(rows: list, spot: float, T_years: float, r: float = 0.065) -> dict:
+    """Compute Net GEX, Call Wall, Put Wall, Gamma Flip from parsed option rows."""
+    by_strike: dict = {}
+    for row in rows:
+        strike = float(row["strike"])
+        oi     = float(row.get("oi", 0))
+        if oi <= 0:
+            continue
+        iv_raw = float(row.get("iv", 0) or 15.0)
+        sigma  = max(iv_raw / 100.0, 0.05)
+        g      = _rej_bs_greeks(spot, strike, T_years, r, sigma, row["type"])
+        gamma  = g["gamma"]
+        # GEX in ₹ Crore: OI * Lot * Gamma * Spot²  / 1e7
+        gex_val = (oi * _NIFTY_LOT * gamma * spot * spot) / 1e7
+        if strike not in by_strike:
+            by_strike[strike] = {"ce_gex": 0.0, "pe_gex": 0.0}
+        if row["type"] == "CE":
+            by_strike[strike]["ce_gex"] += gex_val
+        else:
+            by_strike[strike]["pe_gex"] += gex_val
+
+    if not by_strike:
+        return {"total_net_gex": 0.0, "call_wall": None, "put_wall": None,
+                "gamma_flip": None, "by_strike_count": 0}
+
+    for s in by_strike:
+        by_strike[s]["net_gex"] = by_strike[s]["ce_gex"] - by_strike[s]["pe_gex"]
+
+    total_net_gex = sum(v["net_gex"] for v in by_strike.values())
+    call_wall = max(by_strike, key=lambda s: by_strike[s]["ce_gex"])
+    put_wall  = max(by_strike, key=lambda s: by_strike[s]["pe_gex"])
+
+    # Gamma Flip = strike where cumulative GEX crosses zero
+    sorted_strikes = sorted(by_strike.keys())
+    cumulative = 0.0
+    gamma_flip = None
+    for st in sorted_strikes:
+        prev = cumulative
+        cumulative += by_strike[st]["net_gex"]
+        if prev != 0 and prev * cumulative < 0:
+            gamma_flip = st
+            break
+    if gamma_flip is None:
+        gamma_flip = min(sorted_strikes, key=lambda s: abs(s - spot))
+
+    # Round gamma_flip to nearest 50
+    gamma_flip = round(gamma_flip / 50) * 50
+
+    return {
+        "total_net_gex":    round(total_net_gex, 2),
+        "call_wall":        int(call_wall),
+        "put_wall":         int(put_wall),
+        "gamma_flip":       int(gamma_flip),
+        "by_strike_count":  len(by_strike),
+    }
+
+
+def _gex_regime(net_gex: float) -> dict:
+    """Classify net GEX into a regime with label and expected move."""
+    if net_gex is None:
+        return {"regime": "UNKNOWN", "regime_label": "Data Unavailable",
+                "regime_color": "#64748b", "expected_move": "—", "is_positive": None}
+    is_positive = net_gex >= 0
+    abs_gex     = abs(net_gex)
+    if is_positive:
+        if abs_gex > 500:
+            return {"regime": "STRONG_POSITIVE", "regime_label": "Strong Positive GEX",
+                    "regime_color": "#22c55e", "expected_move": "±50 – 120 pts", "is_positive": True}
+        elif abs_gex > 100:
+            return {"regime": "POSITIVE", "regime_label": "Positive GEX",
+                    "regime_color": "#86efac", "expected_move": "±80 – 180 pts", "is_positive": True}
+        else:
+            return {"regime": "WEAK_POSITIVE", "regime_label": "Weak Positive GEX",
+                    "regime_color": "#fbbf24", "expected_move": "±100 – 250 pts", "is_positive": True}
+    else:
+        if abs_gex > 500:
+            return {"regime": "STRONG_NEGATIVE", "regime_label": "Strong Negative GEX",
+                    "regime_color": "#dc2626", "expected_move": "±250 – 500 pts", "is_positive": False}
+        elif abs_gex > 100:
+            return {"regime": "NEGATIVE", "regime_label": "Negative GEX",
+                    "regime_color": "#ef4444", "expected_move": "±150 – 300 pts", "is_positive": False}
+        else:
+            return {"regime": "WEAK_NEGATIVE", "regime_label": "Weak Negative GEX",
+                    "regime_color": "#f97316", "expected_move": "±100 – 200 pts", "is_positive": False}
+
+
+@_gex_router.get("/nifty")
+async def get_nifty_gex():
+    """
+    Net GEX for Nifty from live NSE option chain.
+    Falls back to VIX-based estimate if NSE is blocked.
+    5-min cache.
+    """
+    cache_key = "nifty_gex"
+    now = datetime.now()
+    if cache_key in _GEX_CACHE:
+        cached_data, cached_ts = _GEX_CACHE[cache_key]
+        if (now - cached_ts).seconds < _GEX_CACHE_TTL:
+            return cached_data
+
+    loop   = asyncio.get_event_loop()
+    result = {}
+
+    # ── Try live NSE option chain ────────────────────────────────────
+    try:
+        oi_data = await asyncio.wait_for(
+            loop.run_in_executor(None, _fetch_nse_option_chain, "NIFTY"),
+            timeout=12.0
+        )
+        rows, spot, nearest_expiry, _ = _extract_option_rows(oi_data, "NIFTY")
+        if rows and spot > 0:
+            T_years = 7 / 365.0
+            if nearest_expiry:
+                try:
+                    from datetime import date as _gd, datetime as _gdt
+                    exp_dt = _gdt.strptime(nearest_expiry, "%d-%b-%Y").date()
+                    days   = max(1, (exp_dt - _gd.today()).days)
+                    T_years = days / 365.0
+                except Exception:
+                    pass
+            gex  = _calc_gex_for_chain(rows, spot, T_years)
+            reg  = _gex_regime(gex["total_net_gex"])
+            net  = gex["total_net_gex"]
+            sign = "+" if net >= 0 else "-"
+            result = {
+                "source":           "live_nse",
+                "spot":             round(spot, 2),
+                "net_gex":          net,
+                "net_gex_display":  f"{sign} ₹{abs(net):.0f} Cr",
+                "call_wall":        gex["call_wall"],
+                "put_wall":         gex["put_wall"],
+                "gamma_flip":       gex["gamma_flip"],
+                "expiry":           nearest_expiry,
+                "strikes_analyzed": gex["by_strike_count"],
+                **reg,
+            }
+    except Exception as e:
+        logging.warning(f"GEX live fetch failed: {e}")
+
+    # ── Fallback: VIX-based estimate ─────────────────────────────────
+    if not result:
+        try:
+            import yfinance as _yf
+            spot_tick = _yf.Ticker("^NSEI")
+            vix_tick  = _yf.Ticker("^INDIAVIX")
+            spot  = float(spot_tick.fast_info.last_price or 24000)
+            vix   = float(vix_tick.fast_info.last_price  or 14.0)
+            is_pos = vix < 15.0
+            atm    = int(round(spot / 50) * 50)
+            reg    = {
+                "regime":        "POSITIVE"     if is_pos else "NEGATIVE",
+                "regime_label":  "Positive GEX (VIX Estimate)" if is_pos else "Negative GEX (VIX Estimate)",
+                "regime_color":  "#86efac"       if is_pos else "#ef4444",
+                "expected_move": "±80 – 180 pts" if is_pos else "±150 – 300 pts",
+                "is_positive":   is_pos,
+            }
+            result = {
+                "source":           "vix_estimate",
+                "spot":             round(spot, 2),
+                "net_gex":          None,
+                "net_gex_display":  "VIX Estimate",
+                "call_wall":        atm + 200,
+                "put_wall":         atm - 200,
+                "gamma_flip":       atm,
+                "expiry":           None,
+                "strikes_analyzed": 0,
+                **reg,
+            }
+        except Exception as ef:
+            logging.warning(f"GEX VIX fallback failed: {ef}")
+            result = {
+                "source": "fallback", "spot": 24000, "net_gex": None,
+                "net_gex_display": "—", "is_positive": None,
+                "regime": "UNKNOWN", "regime_label": "Data Unavailable",
+                "regime_color": "#64748b", "expected_move": "—",
+                "call_wall": None, "put_wall": None, "gamma_flip": None,
+                "expiry": None, "strikes_analyzed": 0,
+            }
+
+    _GEX_CACHE[cache_key] = (result, now)
+    return result
+
+
+app.include_router(_gex_router)
+
+
 #   Sensex Expiry Day Gamma Blast Strategy — ATM Straddle picks
 # ═══════════════════════════════════════════════════════════════════
 @app.get("/api/gamma-blast/sensex-picks")

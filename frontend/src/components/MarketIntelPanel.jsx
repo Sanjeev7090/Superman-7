@@ -11,6 +11,7 @@ import { BreadthCard } from './market-intel/BreadthCard';
 import { FiiSection } from './market-intel/FiiSection';
 import { GapPredictionSection } from './market-intel/GapPredictionSection';
 import { ClosingPredictionSection } from './market-intel/ClosingPredictionSection';
+import { GexWorkflowSection } from './market-intel/GexWorkflowSection';
 
 const API    = `${process.env.REACT_APP_BACKEND_URL || ''}/api`;
 const fmt    = (v, d = 2)   => v == null || isNaN(v) ? '—' : Number(v).toFixed(d);
@@ -1070,6 +1071,9 @@ const MarketIntelPanel = ({ onClose }) => {
                 </table>
               </div>
             </div>
+
+            {/* ── GEX (Gamma Exposure) Workflow Process ─────────────────── */}
+            <GexWorkflowSection C={C} isDark={isDark} />
 
             {/* ── Gap Up / Gap Down Prediction ─────────────────────────── */}
             <GapPredictionSection C={C} isDark={isDark} />
