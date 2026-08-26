@@ -78,7 +78,8 @@ export function GexWorkflowSection({ C, isDark }) {
         </div>
         <div className="flex items-center gap-2">
           {ts && (
-            <span className="text-[9px]" style={{ color: C.textMuted }}>
+            <span className="text-[9px] font-mono" style={{ color: C.textMuted }}>
+              {ts.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}{' '}
               {ts.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
