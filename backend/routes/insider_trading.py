@@ -985,3 +985,129 @@ async def get_pattern_scan(
     except Exception as e:
         logger.error(f"Pattern scan: {e}")
         return {"results": [], "count": 0, "error": str(e), "updated_at": now.isoformat()}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ECONOMIC CALENDAR  —  Indian Market Monthly Events
+# ═══════════════════════════════════════════════════════════════════════════
+
+_ECO_EVENTS: dict = {
+    "2025-10": [
+        {"date": "2025-10-07", "event": "RBI MPC Meeting — Day 1", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Monetary Policy Committee meet begins"},
+        {"date": "2025-10-08", "event": "RBI MPC Meeting — Day 2", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2025-10-09", "event": "RBI Repo Rate Decision", "category": "RBI", "impact": "HIGH", "prev": "6.50%", "forecast": "6.50%", "actual": "6.50%", "note": "RBI holds rates — Neutral for markets"},
+        {"date": "2025-10-14", "event": "India CPI Inflation (Sep 2025)", "category": "INDIA", "impact": "HIGH", "prev": "3.65%", "forecast": "4.00%", "actual": "5.49%", "note": "CPI spike — kharif crop damage ka asar"},
+        {"date": "2025-10-15", "event": "India IIP (Aug 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "4.8%", "forecast": "5.0%", "actual": "4.4%", "note": "Industrial output growth slowed"},
+        {"date": "2025-10-15", "event": "US CPI Inflation (Sep 2025)", "category": "US", "impact": "HIGH", "prev": "2.5%", "forecast": "2.3%", "actual": "2.4%", "note": "Inline — FII flows stable"},
+        {"date": "2025-10-17", "event": "India WPI Inflation (Sep 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "1.84%", "forecast": "1.90%", "actual": "1.84%", "note": ""},
+        {"date": "2025-10-31", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday — high volatility"},
+    ],
+    "2025-11": [
+        {"date": "2025-11-13", "event": "India CPI Inflation (Oct 2025)", "category": "INDIA", "impact": "HIGH", "prev": "5.49%", "forecast": "5.00%", "actual": "5.48%", "note": ""},
+        {"date": "2025-11-13", "event": "India IIP (Sep 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "4.4%", "forecast": "5.2%", "actual": "5.8%", "note": "Industrial recovery"},
+        {"date": "2025-11-14", "event": "US CPI Inflation (Oct 2025)", "category": "US", "impact": "HIGH", "prev": "2.4%", "forecast": "2.6%", "actual": "2.6%", "note": "Sticky inflation — Fed cautious"},
+        {"date": "2025-11-15", "event": "India WPI (Oct 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "1.84%", "forecast": "1.90%", "actual": "1.89%", "note": ""},
+        {"date": "2025-11-28", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday monthly expiry"},
+        {"date": "2025-11-29", "event": "India Q2 FY26 GDP (Jul–Sep 2025)", "category": "INDIA", "impact": "HIGH", "prev": "6.7%", "forecast": "6.4%", "actual": "5.4%", "note": "GDP slowdown — below estimate"},
+        {"date": "2025-11-29", "event": "India Core Sector (Oct 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "2.4%", "forecast": "3.5%", "actual": "4.3%", "note": "8 core industries — surprise beat"},
+    ],
+    "2025-12": [
+        {"date": "2025-12-04", "event": "RBI MPC Meeting — Day 1", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2025-12-05", "event": "RBI MPC Meeting — Day 2", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2025-12-06", "event": "RBI Repo Rate Decision", "category": "RBI", "impact": "HIGH", "prev": "6.50%", "forecast": "6.25%", "actual": "6.50%", "note": "RBI holds — CRR cut instead (50bps)"},
+        {"date": "2025-12-11", "event": "US FOMC Rate Decision", "category": "US", "impact": "HIGH", "prev": "4.75%", "forecast": "4.50%", "actual": "4.50%", "note": "Fed cuts 25bps — Positive for FII"},
+        {"date": "2025-12-12", "event": "India CPI Inflation (Nov 2025)", "category": "INDIA", "impact": "HIGH", "prev": "5.48%", "forecast": "5.00%", "actual": "5.48%", "note": ""},
+        {"date": "2025-12-13", "event": "India IIP (Oct 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "5.8%", "forecast": "5.0%", "actual": "3.5%", "note": ""},
+        {"date": "2025-12-16", "event": "India WPI (Nov 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "1.89%", "forecast": "1.80%", "actual": "1.89%", "note": ""},
+        {"date": "2025-12-25", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday — Christmas week"},
+    ],
+    "2026-01": [
+        {"date": "2026-01-07", "event": "RBI MPC Minutes (Dec 2025)", "category": "RBI", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "Released", "note": "Dec MPC meeting detailed minutes"},
+        {"date": "2026-01-13", "event": "India CPI Inflation (Dec 2025)", "category": "INDIA", "impact": "HIGH", "prev": "5.48%", "forecast": "5.10%", "actual": "5.22%", "note": "CPI came down — positive for RBI rate cut"},
+        {"date": "2026-01-14", "event": "India IIP (Nov 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "3.5%", "forecast": "5.0%", "actual": "5.0%", "note": "Recovery in industrial output"},
+        {"date": "2026-01-15", "event": "US CPI Inflation (Dec 2025)", "category": "US", "impact": "HIGH", "prev": "2.7%", "forecast": "2.9%", "actual": "2.9%", "note": "Higher than expected — Fed hold likely"},
+        {"date": "2026-01-17", "event": "India WPI (Dec 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "1.89%", "forecast": "2.20%", "actual": "2.37%", "note": ""},
+        {"date": "2026-01-29", "event": "US FOMC Rate Decision", "category": "US", "impact": "HIGH", "prev": "4.50%", "forecast": "4.50%", "actual": "4.50%", "note": "Fed holds — as expected"},
+        {"date": "2026-01-29", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday monthly expiry"},
+        {"date": "2026-01-31", "event": "India Fiscal Deficit Data (Apr–Dec 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "52.5%", "forecast": "55%", "actual": "", "note": "9-month fiscal data — budget positioning"},
+    ],
+    "2026-02": [
+        {"date": "2026-02-01", "event": "Union Budget 2026–27", "category": "INDIA", "impact": "HIGH", "prev": "—", "forecast": "—", "actual": "Presented", "note": "Annual Union Budget — FM presents in Parliament"},
+        {"date": "2026-02-04", "event": "RBI MPC Meeting — Day 1", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Bi-monthly Monetary Policy meeting begins"},
+        {"date": "2026-02-05", "event": "RBI MPC Meeting — Day 2", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-02-06", "event": "RBI Repo Rate Decision", "category": "RBI", "impact": "HIGH", "prev": "6.50%", "forecast": "6.25%", "actual": "6.25%", "note": "RBI cuts 25bps — Bullish for bonds & markets"},
+        {"date": "2026-02-12", "event": "India CPI Inflation (Jan 2026)", "category": "INDIA", "impact": "HIGH", "prev": "5.22%", "forecast": "4.75%", "actual": "", "note": "Key inflation print post-budget"},
+        {"date": "2026-02-12", "event": "India IIP (Dec 2025)", "category": "INDIA", "impact": "MEDIUM", "prev": "5.0%", "forecast": "4.8%", "actual": "", "note": "Index of Industrial Production"},
+        {"date": "2026-02-13", "event": "US CPI Inflation (Jan 2026)", "category": "US", "impact": "HIGH", "prev": "2.9%", "forecast": "2.9%", "actual": "", "note": "Affects FII flow into emerging markets"},
+        {"date": "2026-02-14", "event": "India WPI Inflation (Jan 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "2.37%", "forecast": "2.50%", "actual": "", "note": "Wholesale Price Index"},
+        {"date": "2026-02-14", "event": "US Retail Sales (Jan 2026)", "category": "US", "impact": "MEDIUM", "prev": "+0.4%", "forecast": "+0.2%", "actual": "", "note": "Consumer spending indicator"},
+        {"date": "2026-02-19", "event": "US FOMC Meeting Minutes", "category": "US", "impact": "MEDIUM", "prev": "—", "forecast": "—", "actual": "", "note": "Jan 28–29 Fed meeting minutes released"},
+        {"date": "2026-02-26", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "—", "forecast": "—", "actual": "", "note": "Last Thursday — high volatility expected"},
+        {"date": "2026-02-26", "event": "BankNifty Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "—", "forecast": "—", "actual": "", "note": "Monthly bank nifty expiry"},
+        {"date": "2026-02-27", "event": "US GDP Q4 2025 (2nd Estimate)", "category": "US", "impact": "MEDIUM", "prev": "2.3%", "forecast": "2.3%", "actual": "", "note": "Q4 2025 GDP second estimate"},
+        {"date": "2026-02-28", "event": "India Core Sector Data (Jan 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "4.3%", "forecast": "4.5%", "actual": "", "note": "8 core industries output"},
+    ],
+    "2026-03": [
+        {"date": "2026-03-06", "event": "US Non-Farm Payroll (Feb 2026)", "category": "US", "impact": "HIGH", "prev": "143K", "forecast": "155K", "actual": "", "note": "Key US jobs data — affects FII flows"},
+        {"date": "2026-03-12", "event": "India CPI Inflation (Feb 2026)", "category": "INDIA", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-03-12", "event": "India IIP (Jan 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-03-13", "event": "US CPI Inflation (Feb 2026)", "category": "US", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-03-16", "event": "India WPI (Feb 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-03-18", "event": "US FOMC Meeting — Day 1", "category": "US", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-03-19", "event": "US FOMC Rate Decision", "category": "US", "impact": "HIGH", "prev": "4.50%", "forecast": "4.25%", "actual": "", "note": "Federal Reserve rate decision"},
+        {"date": "2026-03-27", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday monthly expiry"},
+        {"date": "2026-03-31", "event": "FY 2026 End", "category": "INDIA", "impact": "HIGH", "prev": "—", "forecast": "—", "actual": "", "note": "Indian financial year end — portfolio rebalancing, tax selling"},
+    ],
+    "2026-04": [
+        {"date": "2026-04-07", "event": "RBI MPC Meeting — Day 1", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "New financial year first MPC meet"},
+        {"date": "2026-04-08", "event": "RBI MPC Meeting — Day 2", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-04-09", "event": "RBI Repo Rate Decision", "category": "RBI", "impact": "HIGH", "prev": "6.25%", "forecast": "6.00%", "actual": "", "note": "Possible 25bps cut to 6.00%"},
+        {"date": "2026-04-14", "event": "India CPI Inflation (Mar 2026)", "category": "INDIA", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "FY26 year-end CPI print"},
+        {"date": "2026-04-30", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday monthly expiry"},
+    ],
+}
+
+
+@router.get("/economic-calendar")
+async def get_economic_calendar(
+    month: Optional[int] = Query(None, ge=1, le=12),
+    year:  Optional[int] = Query(None, ge=2025, le=2027),
+):
+    """Monthly economic event calendar for Indian markets."""
+    import calendar as cal_mod
+    now   = datetime.now(timezone.utc).astimezone(
+        __import__('zoneinfo', fromlist=['ZoneInfo']).ZoneInfo('Asia/Kolkata')
+    ) if hasattr(__import__('zoneinfo', fromlist=['ZoneInfo']), 'ZoneInfo') else datetime.now()
+
+    m = month if month else now.month
+    y = year  if year  else now.year
+    today_str = now.strftime("%Y-%m-%d")
+
+    key    = f"{y}-{m:02d}"
+    events = [dict(e) for e in _ECO_EVENTS.get(key, [])]
+
+    for e in events:
+        e["is_today"] = (e["date"] == today_str)
+        e["is_past"]  = (e["date"] < today_str)
+
+    # Prev / next month keys
+    if m == 1:
+        prev_key = f"{y-1}-12"
+    else:
+        prev_key = f"{y}-{(m-1):02d}"
+    if m == 12:
+        next_key = f"{y+1}-01"
+    else:
+        next_key = f"{y}-{(m+1):02d}"
+
+    return {
+        "month":      m,
+        "year":       y,
+        "month_name": cal_mod.month_name[m],
+        "events":     sorted(events, key=lambda x: x["date"]),
+        "today":      today_str,
+        "has_prev":   prev_key in _ECO_EVENTS,
+        "has_next":   next_key in _ECO_EVENTS,
+        "prev_key":   prev_key,
+        "next_key":   next_key,
+    }

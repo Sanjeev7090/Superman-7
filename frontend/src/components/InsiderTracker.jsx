@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Eye, X, ArrowClockwise, Warning, TrendUp, TrendDown,
   Minus, ChartBar, Users, CaretDown, CaretRight,
-  MagnifyingGlass, Funnel,
+  MagnifyingGlass, Funnel, CalendarBlank, CaretLeft, CaretRight as CaretRightIcon,
 } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -278,6 +278,265 @@ function PatternRow({ item, C }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  ECONOMIC CALENDAR
+// ═══════════════════════════════════════════════════════════════════════════
+
+const IMPACT_STYLE = {
+  HIGH:   { bg: 'rgba(239,68,68,0.15)',   border: '#ef4444', text: '#f87171'  },
+  MEDIUM: { bg: 'rgba(245,158,11,0.12)',  border: '#f59e0b', text: '#fbbf24'  },
+  LOW:    { bg: 'rgba(148,163,184,0.10)', border: '#64748b', text: '#94a3b8'  },
+};
+
+const CAT_META = {
+  RBI:   { color: '#818cf8', label: 'RBI'   },
+  INDIA: { color: '#22c55e', label: 'INDIA' },
+  US:    { color: '#f97316', label: 'US'    },
+  FNO:   { color: '#06b6d4', label: 'F&O'  },
+};
+
+function EconomicCalendar({ C }) {
+  const now = new Date();
+  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
+  const [viewYear,  setViewYear]  = useState(now.getFullYear());
+  const [ecoData,   setEcoData]   = useState(null);
+  const [loading,   setLoading]   = useState(false);
+
+  const load = useCallback(async (m, y) => {
+    setLoading(true);
+    try {
+      const res  = await fetch(`${API}/insider/economic-calendar?month=${m}&year=${y}`);
+      const json = await res.json();
+      setEcoData(json);
+    } catch {
+      setEcoData({ events: [], month_name: '' });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(viewMonth, viewYear); }, [viewMonth, viewYear, load]);
+
+  const goPrev = () => {
+    if (!ecoData?.has_prev) return;
+    if (viewMonth === 1) { setViewMonth(12); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  };
+
+  const goNext = () => {
+    if (!ecoData?.has_next) return;
+    if (viewMonth === 12) { setViewMonth(1); setViewYear(y => y + 1); }
+    else setViewMonth(m => m + 1);
+  };
+
+  const events  = ecoData?.events || [];
+  const today   = ecoData?.today  || '';
+
+  // Group by date
+  const grouped = events.reduce((acc, e) => {
+    acc[e.date] = acc[e.date] || [];
+    acc[e.date].push(e);
+    return acc;
+  }, {});
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* ── Month navigator ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
+        background: C.headerBg, flexShrink: 0,
+      }}>
+        <button
+          onClick={goPrev}
+          disabled={!ecoData?.has_prev}
+          style={{ background: 'none', border: 'none', cursor: ecoData?.has_prev ? 'pointer' : 'default',
+            opacity: ecoData?.has_prev ? 1 : 0.3, color: C.textSecond, padding: '2px 6px' }}
+          data-testid="eco-prev-month"
+        >
+          <CaretLeft size={14} weight="bold" />
+        </button>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.textPrimary, letterSpacing: '0.04em' }}>
+            {ecoData?.month_name || '—'} {viewYear}
+          </div>
+          <div style={{ fontSize: 9, color: C.textSecond, marginTop: 1 }}>
+            Indian Market Economic Events
+          </div>
+        </div>
+
+        <button
+          onClick={goNext}
+          disabled={!ecoData?.has_next}
+          style={{ background: 'none', border: 'none', cursor: ecoData?.has_next ? 'pointer' : 'default',
+            opacity: ecoData?.has_next ? 1 : 0.3, color: C.textSecond, padding: '2px 6px' }}
+          data-testid="eco-next-month"
+        >
+          <CaretRightIcon size={14} weight="bold" />
+        </button>
+      </div>
+
+      {/* ── Category + Impact legend ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px',
+        borderBottom: `1px solid ${C.border}`, flexWrap: 'wrap',
+      }}>
+        {Object.entries(CAT_META).map(([cat, m]) => (
+          <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <div style={{ width: 6, height: 6, borderRadius: 2, background: m.color }} />
+            <span style={{ fontSize: 8, color: C.textSecond, fontWeight: 700 }}>{m.label}</span>
+          </div>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 5 }}>
+          {[['HIGH', '#ef4444'], ['MED', '#f59e0b'], ['LOW', '#64748b']].map(([l, c]) => (
+            <span key={l} style={{
+              fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 3,
+              background: `${c}20`, color: c, border: `1px solid ${c}40`,
+            }}>{l}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Events list ── */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+        {loading ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160 }}>
+            <div style={{
+              width: 26, height: 26, borderRadius: '50%',
+              border: '3px solid #27272a', borderTopColor: '#06b6d4',
+              animation: 'spin 0.8s linear infinite',
+            }} />
+          </div>
+        ) : Object.keys(grouped).length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 40, color: C.textSecond }}>
+            <CalendarBlank size={28} color={C.textSecond} style={{ marginBottom: 8 }} />
+            <div style={{ fontSize: 12 }}>Is month ke events available nahi hain</div>
+          </div>
+        ) : (
+          Object.entries(grouped)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([date, dayEvents]) => {
+              const isPast  = date < today;
+              const isToday = date === today;
+              const d = new Date(date + 'T00:00:00');
+              const dayLabel = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+
+              return (
+                <div key={date} style={{
+                  padding: '8px 14px',
+                  borderBottom: `1px solid ${C.border}`,
+                  opacity: isPast ? 0.62 : 1,
+                }}>
+                  {/* Date pill */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                    <span style={{
+                      fontSize: 9, fontWeight: 800, padding: '2px 9px', borderRadius: 20,
+                      background: isToday ? 'rgba(6,182,212,0.18)' : (isPast ? 'rgba(148,163,184,0.08)' : 'rgba(255,255,255,0.05)'),
+                      color:  isToday ? '#06b6d4' : C.textSecond,
+                      border: isToday ? '1px solid rgba(6,182,212,0.40)' : `1px solid ${C.border}`,
+                    }}>{dayLabel}</span>
+                    {isToday && (
+                      <span style={{ fontSize: 8, fontWeight: 800, color: '#06b6d4', letterSpacing: '0.12em' }}>
+                        TODAY
+                      </span>
+                    )}
+                    {isPast && (
+                      <span style={{ fontSize: 7, color: C.textSecond, letterSpacing: '0.06em' }}>PAST</span>
+                    )}
+                  </div>
+
+                  {/* Events for this day */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingLeft: 2 }}>
+                    {dayEvents.map((ev, i) => {
+                      const imp  = IMPACT_STYLE[ev.impact] || IMPACT_STYLE.LOW;
+                      const catC = CAT_META[ev.category]?.color || '#94a3b8';
+                      const hasNum = ev.prev || ev.forecast || (ev.actual && ev.actual !== 'Released' && ev.actual !== 'Presented');
+
+                      return (
+                        <div
+                          key={i}
+                          data-testid={`eco-event-${date}-${i}`}
+                          style={{
+                            padding: '8px 10px', borderRadius: 7,
+                            background: C.cardBg,
+                            border: `1px solid ${C.border}`,
+                            borderLeft: `3px solid ${catC}`,
+                          }}
+                        >
+                          {/* Event name + badges */}
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: C.textPrimary, lineHeight: 1.35 }}>
+                                {ev.event}
+                              </div>
+                              {ev.note && (
+                                <div style={{ fontSize: 9, color: C.textSecond, marginTop: 2, lineHeight: 1.3 }}>
+                                  {ev.note}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flexShrink: 0, alignItems: 'flex-end' }}>
+                              <span style={{
+                                fontSize: 7, fontWeight: 800, padding: '2px 5px', borderRadius: 3,
+                                background: `${catC}20`, color: catC, border: `1px solid ${catC}40`,
+                              }}>{CAT_META[ev.category]?.label || ev.category}</span>
+                              <span style={{
+                                fontSize: 7, fontWeight: 800, padding: '2px 5px', borderRadius: 3,
+                                background: imp.bg, color: imp.text, border: `1px solid ${imp.border}50`,
+                              }}>{ev.impact}</span>
+                            </div>
+                          </div>
+
+                          {/* Prev / Forecast / Actual */}
+                          {(hasNum || ev.actual === 'Released' || ev.actual === 'Presented') && (
+                            <div style={{
+                              display: 'flex', gap: 14, marginTop: 7, paddingTop: 6,
+                              borderTop: `1px solid ${C.border}`,
+                            }}>
+                              {[
+                                ['Prev',     ev.prev,     C.textSecond],
+                                ['Forecast', ev.forecast, '#60a5fa'   ],
+                                ['Actual',   ev.actual,   ev.actual && ev.actual !== '' && ev.actual !== '—' ? '#4ade80' : C.textSecond],
+                              ].map(([label, val, color]) => val && val !== '' ? (
+                                <div key={label}>
+                                  <div style={{ fontSize: 7, color: C.textSecond, letterSpacing: '0.06em', marginBottom: 1 }}>
+                                    {label.toUpperCase()}
+                                  </div>
+                                  <div style={{ fontSize: 10, fontWeight: 700, color, fontFamily: 'monospace' }}>
+                                    {val}
+                                  </div>
+                                </div>
+                              ) : null)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+        )}
+      </div>
+
+      {/* Footer note */}
+      <div style={{
+        padding: '6px 14px', borderTop: `1px solid ${C.border}`,
+        background: C.headerBg, flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <span style={{ fontSize: 8, color: C.textSecond }}>
+          Source: RBI, NSE, MoSPI, US BLS · Curated for Indian traders
+        </span>
+        <span style={{ fontSize: 8, color: C.textSecond }}>IST</span>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -431,8 +690,9 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
           background: C.headerBg, flexShrink: 0,
         }}>
           {[
-            { id: 'insider',  label: 'Insider Buys',    icon: Users    },
-            { id: 'patterns', label: 'Pattern Scanner', icon: ChartBar },
+            { id: 'insider',  label: 'Insider Buys',    icon: Users        },
+            { id: 'patterns', label: 'Pattern Scanner', icon: ChartBar     },
+            { id: 'eco',      label: 'Eco Calendar',    icon: CalendarBlank },
           ].map(t => {
             const Ico = t.icon;
             return (
@@ -523,8 +783,8 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
         {/* ── Content ── */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
 
-          {/* Loading spinner */}
-          {loading && (
+          {/* Loading spinner — only for insider/patterns tabs (eco has its own) */}
+          {loading && tab !== 'eco' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 200, gap: 12 }}>
               <div style={{
                 width: 32, height: 32, borderRadius: '50%',
@@ -659,9 +919,14 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
               )}
             </>
           )}
+
+          {/* ── ECO CALENDAR TAB ── */}
+          {!loading && tab === 'eco' && <EconomicCalendar C={C} />}
+
         </div>
 
-        {/* ── Footer ── */}
+        {/* ── Footer (hide for eco tab — it has its own footer) ── */}
+        {tab !== 'eco' && (
         <div style={{
           padding: '8px 14px', borderTop: `1px solid ${C.border}`,
           background: C.headerBg, flexShrink: 0,
@@ -674,6 +939,7 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
             {tab === 'insider' ? 'Cache: 15 min' : 'Cache: 15 min'}
           </span>
         </div>
+        )}
       </div>
 
       <style>{`
