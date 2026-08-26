@@ -6,44 +6,12 @@ const API = `${process.env.REACT_APP_BACKEND_URL || ''}/api`;
 
 // ── Expected Move Reference Table ────────────────────────────────────────
 const GEX_MOVE_TABLE = [
-  { regime: 'STRONG_POSITIVE', label: 'Strong Positive GEX',  pts: '±50 – 120 pts',  bias: 'Pinning / Range-bound', color: '#22c55e', bg: 'rgba(34,197,94,0.08)'  },
-  { regime: 'POSITIVE',        label: 'Positive GEX',         pts: '±80 – 180 pts',  bias: 'Mild Range / Mean Revert', color: '#86efac', bg: 'rgba(134,239,172,0.06)' },
-  { regime: 'WEAK_POSITIVE',   label: 'Weak Positive GEX',    pts: '±100 – 250 pts', bias: 'Transition Zone',     color: '#fbbf24', bg: 'rgba(251,191,36,0.06)'  },
-  { regime: 'WEAK_NEGATIVE',   label: 'Weak Negative GEX',    pts: '±100 – 200 pts', bias: 'Low Trending',       color: '#f97316', bg: 'rgba(249,115,22,0.06)'  },
-  { regime: 'NEGATIVE',        label: 'Negative GEX',         pts: '±150 – 300 pts', bias: 'Trending / Directional', color: '#ef4444', bg: 'rgba(239,68,68,0.06)'  },
-  { regime: 'STRONG_NEGATIVE', label: 'Strong Negative GEX',  pts: '±250 – 500 pts', bias: 'High Volatile / Breakout', color: '#dc2626', bg: 'rgba(220,38,38,0.10)'  },
-];
-
-// ── Workflow Steps ────────────────────────────────────────────────────────
-const WORKFLOW_STEPS = [
-  {
-    step: '01',
-    title: 'Subah Check Karo',
-    subtitle: 'Before 9:15 AM',
-    desc: 'Market open hone se pehle Net GEX dekho. Positive hai ya Negative? Yahi aapka din ka framework decide karega.',
-    color: '#60a5fa',
-  },
-  {
-    step: '02',
-    title: 'GEX Bias Set Karo',
-    subtitle: 'Direction Logic',
-    desc: 'Positive GEX → Market makers buy dips, sell rallies → Range-bound day.\nNegative GEX → Market makers amplify moves → Trending/Volatile day.',
-    color: '#a78bfa',
-  },
-  {
-    step: '03',
-    title: 'Levels Identify Karo',
-    subtitle: 'Key GEX Zones',
-    desc: 'Call Wall = Strong Resistance (CE ka max OI × Gamma).\nPut Wall = Strong Support (PE ka max OI × Gamma).\nGamma Flip = Pivot — iske upar Bullish, neeche Bearish.',
-    color: '#34d399',
-  },
-  {
-    step: '04',
-    title: 'Intraday Use Karo',
-    subtitle: 'Trade Execution',
-    desc: 'Positive GEX mein: Put Wall se buy, Call Wall se sell karo (range trade).\nNegative GEX mein: Gamma Flip toot jaaye toh breakout/breakdown ka direction follow karo.',
-    color: '#fb923c',
-  },
+  { regime: 'STRONG_POSITIVE', label: 'Strong Positive GEX',  pts: '±50 – 120 pts',  bias: 'Pinning / Range-bound',     color: '#22c55e', bg: 'rgba(34,197,94,0.08)'  },
+  { regime: 'POSITIVE',        label: 'Positive GEX',         pts: '±80 – 180 pts',  bias: 'Mild Range / Mean Revert',  color: '#86efac', bg: 'rgba(134,239,172,0.06)' },
+  { regime: 'WEAK_POSITIVE',   label: 'Weak Positive GEX',    pts: '±100 – 250 pts', bias: 'Transition Zone',           color: '#fbbf24', bg: 'rgba(251,191,36,0.06)'  },
+  { regime: 'WEAK_NEGATIVE',   label: 'Weak Negative GEX',    pts: '±100 – 200 pts', bias: 'Low Trending',              color: '#f97316', bg: 'rgba(249,115,22,0.06)'  },
+  { regime: 'NEGATIVE',        label: 'Negative GEX',         pts: '±150 – 300 pts', bias: 'Trending / Directional',    color: '#ef4444', bg: 'rgba(239,68,68,0.06)'  },
+  { regime: 'STRONG_NEGATIVE', label: 'Strong Negative GEX',  pts: '±250 – 500 pts', bias: 'High Volatile / Breakout',  color: '#dc2626', bg: 'rgba(220,38,38,0.10)'  },
 ];
 
 export function GexWorkflowSection({ C, isDark }) {
@@ -284,80 +252,6 @@ export function GexWorkflowSection({ C, isDark }) {
             </div>
           </>
         )}
-
-        {/* ── 4-Step Workflow Cards ─────────────────────────────────────── */}
-        <div>
-          <div className="text-[8px] uppercase tracking-widest font-bold mb-2" style={{ color: C.textMuted }}>
-            GEX Trading Workflow — 4 Steps
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" data-testid="gex-workflow-steps">
-            {WORKFLOW_STEPS.map(({ step, title, subtitle, desc, color }) => (
-              <div
-                key={step}
-                className="rounded-xl p-3 flex gap-3"
-                style={{ background: C.cardBg, border: `1px solid ${C.borderSubtle}` }}
-              >
-                {/* Step number */}
-                <div
-                  className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black"
-                  style={{ background: `${color}20`, color, border: `1px solid ${color}40` }}
-                >
-                  {step}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-[10px] font-bold" style={{ color }}>{title}</span>
-                    <span className="text-[7px] px-1 py-0.5 rounded" style={{ background: `${color}15`, color }}>{subtitle}</span>
-                  </div>
-                  <div className="text-[8px] leading-relaxed whitespace-pre-line" style={{ color: C.textSecond }}>
-                    {desc}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── Quick Reference: Positive vs Negative ────────────────────── */}
-        <div
-          className="rounded-xl p-3 grid grid-cols-2 gap-3"
-          style={{ background: C.cardBg, border: `1px solid ${C.borderSubtle}` }}
-        >
-          <div>
-            <div className="text-[8px] font-black mb-1.5 flex items-center gap-1" style={{ color: '#22c55e' }}>
-              <span className="w-2 h-2 rounded-full inline-block" style={{ background: '#22c55e' }} />
-              Positive GEX (Range Day)
-            </div>
-            {[
-              'Market makers long gamma hote hain',
-              'High se sell, low se buy karte hain',
-              'Market mean-revert karta hai',
-              'Call Wall = Resistance / Put Wall = Support',
-              'Safe to sell options (premium decay fast)',
-            ].map((t, i) => (
-              <div key={i} className="text-[7px] flex gap-1 mb-0.5" style={{ color: C.textSecond }}>
-                <span style={{ color: '#22c55e' }}>+</span> {t}
-              </div>
-            ))}
-          </div>
-          <div>
-            <div className="text-[8px] font-black mb-1.5 flex items-center gap-1" style={{ color: '#ef4444' }}>
-              <span className="w-2 h-2 rounded-full inline-block" style={{ background: '#ef4444' }} />
-              Negative GEX (Trending Day)
-            </div>
-            {[
-              'Market makers short gamma hote hain',
-              'Moves ko amplify karte hain',
-              'Momentum follow karta hai',
-              'Gamma Flip toot jaaye → breakout/breakdown',
-              'Option buying zyada beneficial hoti hai',
-            ].map((t, i) => (
-              <div key={i} className="text-[7px] flex gap-1 mb-0.5" style={{ color: C.textSecond }}>
-                <span style={{ color: '#ef4444' }}>-</span> {t}
-              </div>
-            ))}
-          </div>
-        </div>
 
         {/* Data attribution */}
         {gexData && (
