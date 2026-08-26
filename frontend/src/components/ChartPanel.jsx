@@ -1,13 +1,179 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 import { createChart } from 'lightweight-charts';
-import { ChartLine, TrendUp, TrendDown, PencilLine, Trash, Lightning, ArrowsOut, ArrowsIn } from '@phosphor-icons/react';
+import { ChartLine, TrendUp, TrendDown, PencilLine, Trash, Lightning, ArrowsOut, ArrowsIn, ArrowClockwise, ArrowUp, ArrowDown, Minus as MinusIco } from '@phosphor-icons/react';
 import GrowwTradeModal from './GrowwTradeModal';
 import StrategyOverlay from './StrategyOverlay';
 import TimeframeLevels from './TimeframeLevels';
 import { useTheme } from '../context/ThemeContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// ── OI Panel — rendered inside ChartPanel toolbar popup ──────────────
+function fmtOI(n) {
+  if (!n || n === 0) return '—';
+  if (n >= 1e7) return `${(n / 1e7).toFixed(2)}Cr`;
+  if (n >= 1e5) return `${(n / 1e5).toFixed(1)}L`;
+  return n.toLocaleString('en-IN');
+}
+
+function OIPanel({ data, loading, isDark, onRefresh }) {
+  const C = {
+    bg:     isDark ? '#111117' : '#fff',
+    card:   isDark ? '#18181e' : '#f8fafc',
+    border: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+    text:   isDark ? '#f1f5f9' : '#0f172a',
+    muted:  isDark ? '#64748b' : '#94a3b8',
+    sub:    isDark ? '#94a3b8' : '#64748b',
+  };
+  const SigIco = !data ? MinusIco : (
+    data.signal?.includes('BULLISH') || data.signal?.includes('COVERING') ? ArrowUp
+    : data.signal?.includes('BEARISH') || data.signal?.includes('UNWINDING') ? ArrowDown
+    : MinusIco
+  );
+
+  return (
+    <div style={{ fontSize: 11, color: C.text }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 14px', borderBottom: `1px solid ${C.border}`,
+        background: isDark ? '#141418' : '#f1f5f9',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <SigIco size={13} color={data?.signal_color || '#94a3b8'} weight="bold" />
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em' }}>OI INDICATOR</span>
+          <span style={{
+            fontSize: 8, fontWeight: 800, padding: '1px 6px', borderRadius: 4,
+            background: 'rgba(167,139,250,0.15)', color: '#a78bfa',
+          }}>NIFTY 50</span>
+        </div>
+        <button onClick={onRefresh} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: loading ? 0.4 : 0.7, padding: 2 }}>
+          <ArrowClockwise size={12} color={C.sub} />
+        </button>
+      </div>
+
+      {loading && !data ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 28 }}>
+          <div style={{ width: 22, height: 22, borderRadius: '50%', border: '3px solid #27272a', borderTopColor: '#a78bfa', animation: 'spin 0.8s linear infinite' }} />
+        </div>
+      ) : !data ? (
+        <div style={{ padding: 20, textAlign: 'center', color: C.muted }}>Data unavailable</div>
+      ) : (
+        <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+          {/* Signal */}
+          <div style={{
+            padding: '8px 10px', borderRadius: 8,
+            background: `${data.signal_color}12`, border: `1px solid ${data.signal_color}35`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: data.signal_color }}>{data.signal}</div>
+                <div style={{ fontSize: 9, color: C.sub, marginTop: 2 }}>{data.signal_desc}</div>
+              </div>
+              {data.spot_price > 0 && (
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, fontFamily: 'monospace', color: C.text }}>
+                    {data.spot_price.toLocaleString('en-IN')}
+                  </div>
+                  {data.price_pct !== 0 && (
+                    <div style={{ fontSize: 9, fontFamily: 'monospace', color: data.price_pct >= 0 ? '#22c55e' : '#ef4444' }}>
+                      {data.price_pct >= 0 ? '+' : ''}{data.price_pct}%
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* PCR + Max Pain + Put OI row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+            {[
+              { label: 'PCR',      val: data.pcr?.toFixed(3), sub: data.pcr_zone, subColor: data.pcr_zone_color },
+              { label: 'Max Pain', val: data.max_pain?.toLocaleString('en-IN'), sub: 'Expiry target' },
+              { label: 'Put OI',   val: fmtOI(data.total_put_oi), sub: 'Total', subColor: '#22c55e' },
+            ].map(({ label, val, sub, subColor }) => (
+              <div key={label} style={{ padding: '6px 8px', borderRadius: 7, background: C.card, border: `1px solid ${C.border}`, textAlign: 'center' }}>
+                <div style={{ fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.06em', color: C.muted, marginBottom: 3 }}>{label}</div>
+                <div style={{ fontSize: 11, fontWeight: 800, fontFamily: 'monospace', color: C.text }}>{val || '—'}</div>
+                {sub && <div style={{ fontSize: 7, fontWeight: 700, marginTop: 2, color: subColor || C.muted }}>{sub}</div>}
+              </div>
+            ))}
+          </div>
+
+          {/* Call Wall / Put Wall */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+            {[
+              { label: 'Call Wall',  val: data.call_wall, note: 'Resistance', color: '#ef4444' },
+              { label: 'Put Wall',   val: data.put_wall,  note: 'Support',    color: '#22c55e' },
+            ].map(({ label, val, note, color }) => (
+              <div key={label} style={{
+                padding: '8px 10px', borderRadius: 7, textAlign: 'center',
+                background: `${color}08`, border: `1px solid ${color}25`,
+              }}>
+                <div style={{ fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.06em', color: C.muted, marginBottom: 3 }}>{label}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, fontFamily: 'monospace', color }}>{val ? val.toLocaleString('en-IN') : '—'}</div>
+                <div style={{ fontSize: 8, color: C.sub, marginTop: 2 }}>{note}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Strike OI mini bars */}
+          {data.top_strikes?.length > 0 && (
+            <div>
+              <div style={{ fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em', color: C.muted, marginBottom: 5, fontWeight: 700 }}>
+                Strike-wise OI
+              </div>
+              {data.top_strikes.sort((a, b) => a.strike - b.strike).map(row => {
+                const maxV = Math.max(...data.top_strikes.map(r => Math.max(r.call_oi, r.put_oi)));
+                const cPct = maxV > 0 ? (row.call_oi / maxV * 100) : 0;
+                const pPct = maxV > 0 ? (row.put_oi  / maxV * 100) : 0;
+                const isSpot = data.spot_price > 0 && Math.abs(row.strike - data.spot_price) < 75;
+                return (
+                  <div key={row.strike} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <div style={{ width: 44, fontSize: 8, fontFamily: 'monospace', textAlign: 'right', color: isSpot ? '#a78bfa' : C.sub, fontWeight: isSpot ? 800 : 400 }}>
+                      {row.strike.toLocaleString('en-IN')}{isSpot ? '●' : ''}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+                        <div style={{ width: `${Math.max(cPct, 2)}%`, height: 4, background: '#ef4444', borderRadius: 2, minWidth: 4 }} />
+                        <span style={{ fontSize: 7, color: '#ef4444', fontFamily: 'monospace' }}>{fmtOI(row.call_oi)}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <div style={{ width: `${Math.max(pPct, 2)}%`, height: 4, background: '#22c55e', borderRadius: 2, minWidth: 4 }} />
+                        <span style={{ fontSize: 7, color: '#22c55e', fontFamily: 'monospace' }}>{fmtOI(row.put_oi)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                {[['#ef4444','Call OI (Resistance)'],['#22c55e','Put OI (Support)']].map(([c,l]) => (
+                  <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <div style={{ width: 10, height: 4, background: c, borderRadius: 2 }} />
+                    <span style={{ fontSize: 8, color: C.sub }}>{l}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* PCR guide */}
+          <div style={{ fontSize: 8, color: C.muted, padding: '4px 8px', borderRadius: 6, background: C.card, border: `1px solid ${C.border}` }}>
+            PCR &lt;0.7 = Overbought · PCR &gt;1.3 = Oversold · {data.pcr_zone && <span style={{ color: data.pcr_zone_color, fontWeight: 700 }}>{data.pcr_zone}</span>}
+          </div>
+
+          {data.updated_at && (
+            <div style={{ fontSize: 8, color: C.muted, textAlign: 'right' }}>
+              {new Date(data.updated_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} IST
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 const VP_WIDTH  = 100;   // 84px bars + 6px gap + 10px heatmap
 const VP_BARS_W = 84;    // actual bar area width
 const HEAT_X    = 90;    // heatmap column start
@@ -1151,6 +1317,10 @@ const ChartPanel = ({
   const bbDataRef   = useRef(null);
   // REJ — 15m Rejection + 1m Confirmation
   const [rejActive, setRejActive] = useState(false);
+  const [oiPanelOpen, setOiPanelOpen] = useState(false);
+  const [oiData,      setOiData]      = useState(null);
+  const [oiLoading,   setOiLoading]   = useState(false);
+  const oiBtnRef = useRef(null);
   const rejCanvasRef = useRef(null);
   const rejAnimRef   = useRef(null);
   const rejDataRef   = useRef(null);
@@ -2459,6 +2629,21 @@ const ChartPanel = ({
     rejDataRef.current = detectRejectionConfirmSetup(stockData.bars);
   }, [stockData, rejActive]);
 
+  // ── OI Indicator: fetch data ─────────────────────────────────────
+  const fetchOIData = useCallback(async () => {
+    setOiLoading(true);
+    try {
+      const res  = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/oi-indicator/nifty`);
+      const json = await res.json();
+      setOiData(json);
+    } catch { setOiData(null); }
+    finally  { setOiLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (oiPanelOpen && !oiData) fetchOIData();
+  }, [oiPanelOpen, oiData, fetchOIData]);
+
   // ── Black Box: draw canvas ──────────────────────────────────────
   const drawBBCanvas = useCallback(() => {
     const canvas = bbCanvasRef.current;
@@ -3185,6 +3370,51 @@ const ChartPanel = ({
           >
             REJ
           </button>
+
+          {/* OI Indicator — Nifty Open Interest Dashboard */}
+          <div className="relative shrink-0" ref={oiBtnRef}>
+            <button
+              onClick={() => setOiPanelOpen(v => !v)}
+              className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border ${
+                oiPanelOpen
+                  ? 'text-[#a78bfa] border-[#a78bfa]/40 bg-[#a78bfa]/10'
+                  : 'text-zinc-500 border-transparent'
+              }`}
+              data-testid="oi-indicator-btn"
+              title="OI Indicator — Nifty 50 PCR, Max Pain, Call/Put Wall"
+            >
+              OI
+            </button>
+
+            {/* ── OI Floating Panel ── */}
+            {oiPanelOpen && (
+              <>
+                {/* Backdrop */}
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setOiPanelOpen(false)}
+                />
+                {/* Panel */}
+                <div
+                  className="absolute z-50 mt-1 rounded-xl shadow-2xl overflow-hidden"
+                  style={{
+                    top: '100%',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: 300,
+                    background: isDark ? '#111117' : '#ffffff',
+                    border: `1px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
+                    maxHeight: '80vh',
+                    overflowY: 'auto',
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  data-testid="oi-panel"
+                >
+                  <OIPanel data={oiData} loading={oiLoading} isDark={isDark} onRefresh={fetchOIData} />
+                </div>
+              </>
+            )}
+          </div>
           {/* SMC toggle + Multi-Timeframe layers dropdown */}
           <div className="flex items-stretch shrink-0 relative">
             <button

@@ -25,7 +25,6 @@ import SectorRotationPicker from './SectorRotationPicker';
 import MoneycontrolMovers from './MoneycontrolMovers';
 import NiftyRejOptionsSection  from './NiftyRejOptionsSection';
 import SensexRejOptionsSection from './SensexRejOptionsSection';
-import NiftyOIIndicator        from './NiftyOIIndicator';
 import SensexGammaBlastSection from './SensexGammaBlastSection';
 import HybridDashboard from './hybrid/HybridDashboard';
 import GannQSCPanel from './GannQSCPanel';
@@ -879,7 +878,6 @@ const TradingDashboard = () => {
             {activeTab === 'market' && (
               <div className="divide-y divide-white/10">
                 <NiftyRejOptionsSection  onStrikeSelect={handleOptionSelect} />
-                <NiftyOIIndicator isDark={isDark} />
              <SensexRejOptionsSection onStrikeSelect={handleOptionSelect} />
                 <SensexGammaBlastSection onStrikeSelect={handleOptionSelect} />
                 <RegulatoryWatchdogPanel />
