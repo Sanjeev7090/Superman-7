@@ -1065,6 +1065,33 @@ _ECO_EVENTS: dict = {
         {"date": "2026-04-14", "event": "India CPI Inflation (Mar 2026)", "category": "INDIA", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "FY26 year-end CPI print"},
         {"date": "2026-04-30", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday monthly expiry"},
     ],
+    "2026-05": [
+        {"date": "2026-05-07", "event": "US FOMC Rate Decision", "category": "US", "impact": "HIGH", "prev": "4.50%", "forecast": "4.25%", "actual": "", "note": "Fed May meeting — rate cut possible"},
+        {"date": "2026-05-08", "event": "US Non-Farm Payroll (Apr 2026)", "category": "US", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Key US jobs data — affects FII flows"},
+        {"date": "2026-05-13", "event": "India CPI Inflation (Apr 2026)", "category": "INDIA", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Post-budget first quarter CPI"},
+        {"date": "2026-05-14", "event": "India IIP (Mar 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "", "note": "FY26 full year industrial output"},
+        {"date": "2026-05-14", "event": "US CPI Inflation (Apr 2026)", "category": "US", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Emerging market FII flow indicator"},
+        {"date": "2026-05-15", "event": "India WPI Inflation (Apr 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "", "note": "Wholesale Price Index"},
+        {"date": "2026-05-20", "event": "India Q4 FY26 GDP Advance Est.", "category": "INDIA", "impact": "HIGH", "prev": "6.4%", "forecast": "6.6%", "actual": "", "note": "Jan–Mar 2026 GDP first estimate"},
+        {"date": "2026-05-28", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday — May monthly expiry"},
+        {"date": "2026-05-28", "event": "BankNifty Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-05-29", "event": "India FY26 Full Year GDP (Final)", "category": "INDIA", "impact": "HIGH", "prev": "6.4%", "forecast": "6.5%", "actual": "", "note": "Full FY 2025–26 GDP estimate"},
+        {"date": "2026-05-29", "event": "India Core Sector Data (Apr 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "", "note": "8 core industries output"},
+    ],
+    "2026-06": [
+        {"date": "2026-06-03", "event": "RBI MPC Meeting — Day 1", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Q1 FY27 monetary policy review"},
+        {"date": "2026-06-04", "event": "RBI MPC Meeting — Day 2", "category": "RBI", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-06-05", "event": "RBI Repo Rate Decision", "category": "RBI", "impact": "HIGH", "prev": "6.00%", "forecast": "5.75%", "actual": "", "note": "Possible further 25bps cut"},
+        {"date": "2026-06-11", "event": "India CPI Inflation (May 2026)", "category": "INDIA", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-06-12", "event": "India IIP (Apr 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-06-12", "event": "US CPI Inflation (May 2026)", "category": "US", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Fed rate path ke liye critical"},
+        {"date": "2026-06-16", "event": "India WPI (May 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-06-17", "event": "US FOMC Meeting — Day 1", "category": "US", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-06-18", "event": "US FOMC Rate Decision", "category": "US", "impact": "HIGH", "prev": "4.25%", "forecast": "4.00%", "actual": "", "note": "Fed June meeting — FII flow impact"},
+        {"date": "2026-06-25", "event": "Nifty 50 Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": "Last Thursday — June monthly expiry"},
+        {"date": "2026-06-25", "event": "BankNifty Monthly F&O Expiry", "category": "FNO", "impact": "HIGH", "prev": "", "forecast": "", "actual": "", "note": ""},
+        {"date": "2026-06-30", "event": "India Core Sector Data (May 2026)", "category": "INDIA", "impact": "MEDIUM", "prev": "", "forecast": "", "actual": "", "note": "8 core industries May output"},
+    ],
 }
 
 
