@@ -15253,7 +15253,163 @@ async def get_nifty_gex():
 app.include_router(_gex_router)
 
 
-#   Sensex Expiry Day Gamma Blast Strategy — ATM Straddle picks
+# ═══════════════════════════════════════════════════════════════════
+#   OI INDICATOR  — Nifty 50 Open Interest Dashboard
+# ═══════════════════════════════════════════════════════════════════
+
+_oi_indicator_cache: dict = {}
+_OI_IND_TTL = 180  # 3-min cache
+
+
+def _compute_max_pain(rows: list) -> float:
+    """Max Pain = strike where total option loss is minimum for option writers."""
+    if not rows:
+        return 0.0
+    strikes = sorted({float(r["strike"]) for r in rows})
+    min_pain, max_pain_strike = float("inf"), strikes[0]
+    for s in strikes:
+        loss = 0.0
+        for r in rows:
+            st = float(r["strike"])
+            ce_oi = float(r.get("call_oi", r.get("CE_openInterest", r.get("CE_OI", 0))))
+            pe_oi = float(r.get("put_oi",  r.get("PE_openInterest", r.get("PE_OI", 0))))
+            loss += max(0, st - s) * ce_oi + max(0, s - st) * pe_oi
+        if loss < min_pain:
+            min_pain = loss
+            max_pain_strike = s
+    return max_pain_strike
+
+
+@app.get("/api/oi-indicator/nifty")
+async def get_oi_indicator():
+    """OI Indicator for Nifty 50 — PCR, Max Pain, Call/Put walls, Price+OI signal."""
+    import asyncio as _asyncio
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _oi_indicator_cache.get("nifty")
+    if cached and (now_ts - cached.get("_ts", 0)) < _OI_IND_TTL:
+        return cached
+
+    # ── Spot price + change ───────────────────────────────────────────────────
+    spot_price   = 0.0
+    price_change = 0.0
+    price_pct    = 0.0
+    try:
+        import yfinance as _yf
+        _nifty_hist = _yf.Ticker("^NSEI").history(period="2d", interval="1d", progress=False)
+        if len(_nifty_hist) >= 2:
+            prev_close   = float(_nifty_hist["Close"].iloc[-2])
+            curr_close   = float(_nifty_hist["Close"].iloc[-1])
+            spot_price   = curr_close
+            price_change = round(curr_close - prev_close, 2)
+            price_pct    = round((curr_close - prev_close) / prev_close * 100, 2) if prev_close else 0.0
+        elif len(_nifty_hist) == 1:
+            spot_price = float(_nifty_hist["Close"].iloc[-1])
+    except Exception:
+        pass
+
+    # ── Option chain ──────────────────────────────────────────────────────────
+    oc_data: dict = {}
+    try:
+        oc_data = await _asyncio.to_thread(_fetch_nse_option_chain, "NIFTY")
+    except Exception:
+        pass
+
+    records  = oc_data.get("records",  {})
+    filtered = oc_data.get("filtered", {})
+
+    raw_rows  = records.get("data", []) or filtered.get("data", [])
+    spot_from_chain = float(records.get("underlyingValue", 0) or filtered.get("underlyingValue", 0) or spot_price)
+    if spot_from_chain > 0:
+        spot_price = spot_from_chain
+
+    # ── Parse rows ────────────────────────────────────────────────────────────
+    parsed: list = []
+    total_call_oi = 0.0
+    total_put_oi  = 0.0
+
+    for row in raw_rows:
+        strike = float(row.get("strikePrice", 0))
+        ce = row.get("CE", {}) or {}
+        pe = row.get("PE", {}) or {}
+        ce_oi  = float(ce.get("openInterest",       ce.get("OI", 0)) or 0)
+        pe_oi  = float(pe.get("openInterest",       pe.get("OI", 0)) or 0)
+        ce_chg = float(ce.get("changeinOpenInterest", 0) or 0)
+        pe_chg = float(pe.get("changeinOpenInterest", 0) or 0)
+        ce_vol = float(ce.get("totalTradedVolume",    0) or 0)
+        pe_vol = float(pe.get("totalTradedVolume",    0) or 0)
+
+        total_call_oi += ce_oi
+        total_put_oi  += pe_oi
+        parsed.append({
+            "strike":   strike,
+            "call_oi":  ce_oi, "put_oi": pe_oi,
+            "ce_chg":   ce_chg, "pe_chg": pe_chg,
+            "ce_vol":   ce_vol, "pe_vol": pe_vol,
+        })
+
+    # ── PCR ───────────────────────────────────────────────────────────────────
+    pcr = round(total_put_oi / total_call_oi, 3) if total_call_oi > 0 else 0.0
+
+    # ── Max Pain ──────────────────────────────────────────────────────────────
+    max_pain = _compute_max_pain(parsed) if parsed else 0.0
+
+    # ── Call Wall (highest Call OI strike near spot) = Resistance ────────────
+    near_parsed = [r for r in parsed if abs(r["strike"] - spot_price) <= 1500] if spot_price else parsed
+    call_wall_row = max(near_parsed, key=lambda r: r["call_oi"], default={})
+    call_wall = call_wall_row.get("strike", 0)
+
+    # ── Put Wall (highest Put OI strike near spot) = Support ─────────────────
+    put_wall_row = max(near_parsed, key=lambda r: r["put_oi"], default={})
+    put_wall = put_wall_row.get("strike", 0)
+
+    # ── Top 5 OI levels for bar chart ─────────────────────────────────────────
+    top_n = sorted(near_parsed, key=lambda r: r["call_oi"] + r["put_oi"], reverse=True)[:7]
+
+    # ── Price + OI Signal ─────────────────────────────────────────────────────
+    price_up = price_pct >= 0
+    oi_up    = (total_call_oi + total_put_oi) > 0   # simplification: PCR-based
+    pcr_rising = pcr > 1.0
+
+    if price_up and pcr_rising:
+        signal, signal_desc, signal_color = "STRONG BULLISH", "Fresh longs aa rahe hain — Call Buy bias strong", "#22c55e"
+    elif price_up and not pcr_rising:
+        signal, signal_desc, signal_color = "SHORT COVERING", "Shorts cover ho rahe hain — Less powerful", "#86efac"
+    elif not price_up and pcr_rising:
+        signal, signal_desc, signal_color = "LONG UNWINDING", "Longs nikal rahe hain — Cautious", "#f59e0b"
+    else:
+        signal, signal_desc, signal_color = "STRONG BEARISH", "Fresh shorts aa rahe hain — Put Buy bias strong", "#ef4444"
+
+    # PCR zone
+    if pcr < 0.7:
+        pcr_zone, pcr_zone_color = "OVERBOUGHT", "#ef4444"
+    elif pcr > 1.3:
+        pcr_zone, pcr_zone_color = "OVERSOLD", "#22c55e"
+    else:
+        pcr_zone, pcr_zone_color = "NEUTRAL", "#94a3b8"
+
+    result = {
+        "symbol":        "NIFTY",
+        "spot_price":    round(spot_price, 2),
+        "price_change":  round(price_change, 2),
+        "price_pct":     round(price_pct, 2),
+        "total_call_oi": round(total_call_oi),
+        "total_put_oi":  round(total_put_oi),
+        "pcr":           pcr,
+        "pcr_zone":      pcr_zone,
+        "pcr_zone_color":pcr_zone_color,
+        "max_pain":      max_pain,
+        "call_wall":     call_wall,
+        "put_wall":      put_wall,
+        "signal":        signal,
+        "signal_desc":   signal_desc,
+        "signal_color":  signal_color,
+        "top_strikes":   top_n,
+        "updated_at":    datetime.now(timezone.utc).isoformat(),
+        "_ts":           now_ts,
+    }
+    _oi_indicator_cache["nifty"] = result
+    return result
 # ═══════════════════════════════════════════════════════════════════
 @app.get("/api/gamma-blast/sensex-picks")
 async def gamma_blast_sensex_picks():
