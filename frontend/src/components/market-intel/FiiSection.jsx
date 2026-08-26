@@ -78,28 +78,28 @@ export function FiiSection({ C, isDark }) {
     <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
       {/* Header / Toggle */}
       <button
-        className="w-full flex items-center justify-between px-4 py-2.5 transition-all"
+        className="w-full flex items-center justify-between px-3 py-2 sm:px-4 sm:py-2.5 transition-all gap-2"
         style={{ background: C.cardBg }}
         onClick={handleToggle}
         data-testid="fii-section-toggle"
       >
-        <div className="flex items-center gap-2 flex-wrap">
-          <TrendUp size={13} className="text-emerald-500" />
-          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: C.textPrimary }}>
+        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+          <TrendUp size={12} className="text-emerald-500 shrink-0" />
+          <span className="text-[10px] font-bold uppercase tracking-widest whitespace-nowrap" style={{ color: C.textPrimary }}>
             FII / DII Activity
           </span>
-          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
+          <span className="text-[8px] px-1.5 py-0.5 rounded font-semibold whitespace-nowrap"
             style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}>
             NSE F&amp;O
           </span>
           {live && cls && (
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold"
+            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold whitespace-nowrap"
               style={{ background: `${cls.color}20`, color: cls.color }}>
               FII: {cls.action}
             </span>
           )}
           {fiiData?.data_for_date && (
-            <span className="text-[8px] px-1.5 py-0.5 rounded font-mono"
+            <span className="hidden sm:inline text-[8px] px-1.5 py-0.5 rounded font-mono"
               style={{ color: C.textMuted, background: 'rgba(100,116,139,0.15)' }}>
               {fiiData.data_for_date}
             </span>
@@ -113,7 +113,7 @@ export function FiiSection({ C, isDark }) {
       </button>
 
       {open && (
-        <div className="px-4 pb-4 pt-2 space-y-3" style={{ background: C.panelBg }}>
+        <div className="px-3 pb-3 pt-2 sm:px-4 sm:pb-4 space-y-3" style={{ background: C.panelBg }}>
 
           {loading && !fiiData && (
             <div className="text-[9px] py-3 text-center" style={{ color: C.textMuted }}>
@@ -153,75 +153,104 @@ export function FiiSection({ C, isDark }) {
             </div>
           )}
 
-          {/* ── Main Participant × Instrument Table (like image) ── */}
+          {/* ── Main Participant × Instrument Table ── */}
           {Object.keys(participants).length > 0 && (
             <div>
               <div className="text-[9px] uppercase tracking-widest mb-1.5 font-bold"
                 style={{ color: C.textMuted }}>
                 NSE F&amp;O Participant Activity — {fiiData?.data_for_date || 'Latest'}
               </div>
-              <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
-                <table className="w-full text-[10px]">
-                  <thead>
-                    <tr style={{ background: C.tableBg }}>
-                      <th className="px-3 py-2 text-left font-bold uppercase tracking-widest whitespace-nowrap"
-                        style={{ color: C.textMuted, width: '70px' }}>Participant</th>
-                      <th className="px-3 py-2 text-left font-bold uppercase tracking-widest whitespace-nowrap"
-                        style={{ color: C.textMuted }}>Instrument</th>
-                      <th className="px-3 py-2 text-right font-bold uppercase tracking-widest whitespace-nowrap"
-                        style={{ color: C.textMuted }}>Change</th>
-                      <th className="px-3 py-2 text-left font-bold uppercase tracking-widest whitespace-nowrap"
-                        style={{ color: C.textMuted }}>Activity</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {PARTICIPANT_ORDER.map((pKey) => {
-                      const pData = participants[pKey];
-                      if (!pData) return null;
-                      const instruments = pData.instruments || [];
-                      const pColor = PARTICIPANT_COLORS[pKey] || '#94a3b8';
-                      return instruments.map((row, idx) => (
-                        <tr key={`${pKey}-${row.instrument}`} style={{
-                          borderTop: `1px solid ${C.borderSubtle}`,
-                          background: idx === 0
-                            ? (isDark ? `${pColor}08` : `${pColor}06`)
-                            : 'transparent',
-                        }}>
-                          {/* Participant label — only on first row (Future) */}
-                          {idx === 0 ? (
-                            <td className="px-3 py-2 font-bold align-top" rowSpan={3}
-                              style={{
-                                color: pColor,
-                                borderRight: `2px solid ${pColor}30`,
-                                fontSize: '11px',
-                                verticalAlign: 'middle',
-                              }}>
-                              {pKey}
-                            </td>
-                          ) : null}
-                          <td className="px-3 py-2 font-mono whitespace-nowrap"
-                            style={{ color: C.textSecond }}>
-                            {row.instrument}
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono font-bold whitespace-nowrap"
-                            style={{ color: row.color }}>
-                            {fmtContracts(row.change)}
-                          </td>
-                          <td className="px-3 py-2 whitespace-nowrap">
-                            <span className="px-2 py-0.5 rounded text-[9px] font-semibold"
-                              style={{
-                                background: `${row.color}18`,
-                                color: row.color,
-                              }}>
+
+              {/* ── Mobile Card View ── */}
+              <div className="sm:hidden space-y-2">
+                {PARTICIPANT_ORDER.map((pKey) => {
+                  const pData = participants[pKey];
+                  if (!pData) return null;
+                  const instruments = pData.instruments || [];
+                  const pColor = PARTICIPANT_COLORS[pKey] || '#94a3b8';
+                  return (
+                    <div key={pKey} className="rounded-lg overflow-hidden"
+                      style={{ border: `1px solid ${pColor}30`, background: isDark ? `${pColor}08` : `${pColor}05` }}>
+                      <div className="px-3 py-1.5 font-bold text-[11px]"
+                        style={{ color: pColor, borderBottom: `1px solid ${pColor}25` }}>
+                        {pKey}
+                      </div>
+                      {instruments.map((row) => (
+                        <div key={row.instrument}
+                          className="flex items-center justify-between px-3 py-1.5"
+                          style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                          <span className="text-[9px] font-mono" style={{ color: C.textSecond }}>{row.instrument}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-mono font-bold" style={{ color: row.color }}>
+                              {fmtContracts(row.change)}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[8px] font-semibold"
+                              style={{ background: `${row.color}18`, color: row.color }}>
                               {row.activity}
                             </span>
-                          </td>
-                        </tr>
-                      ));
-                    })}
-                  </tbody>
-                </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
+
+              {/* ── Desktop Table View ── */}
+              <div className="hidden sm:block rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[10px]" style={{ minWidth: '420px' }}>
+                    <thead>
+                      <tr style={{ background: C.tableBg }}>
+                        <th className="px-3 py-2 text-left font-bold uppercase tracking-widest whitespace-nowrap"
+                          style={{ color: C.textMuted, width: '70px' }}>Participant</th>
+                        <th className="px-3 py-2 text-left font-bold uppercase tracking-widest whitespace-nowrap"
+                          style={{ color: C.textMuted }}>Instrument</th>
+                        <th className="px-3 py-2 text-right font-bold uppercase tracking-widest whitespace-nowrap"
+                          style={{ color: C.textMuted }}>Change</th>
+                        <th className="px-3 py-2 text-left font-bold uppercase tracking-widest whitespace-nowrap"
+                          style={{ color: C.textMuted }}>Activity</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {PARTICIPANT_ORDER.map((pKey) => {
+                        const pData = participants[pKey];
+                        if (!pData) return null;
+                        const instruments = pData.instruments || [];
+                        const pColor = PARTICIPANT_COLORS[pKey] || '#94a3b8';
+                        return instruments.map((row, idx) => (
+                          <tr key={`${pKey}-${row.instrument}`} style={{
+                            borderTop: `1px solid ${C.borderSubtle}`,
+                            background: idx === 0
+                              ? (isDark ? `${pColor}08` : `${pColor}06`)
+                              : 'transparent',
+                          }}>
+                            {idx === 0 ? (
+                              <td className="px-3 py-2 font-bold align-middle" rowSpan={3}
+                                style={{ color: pColor, borderRight: `2px solid ${pColor}30`, fontSize: '11px' }}>
+                                {pKey}
+                              </td>
+                            ) : null}
+                            <td className="px-3 py-2 font-mono whitespace-nowrap" style={{ color: C.textSecond }}>
+                              {row.instrument}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono font-bold whitespace-nowrap" style={{ color: row.color }}>
+                              {fmtContracts(row.change)}
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <span className="px-2 py-0.5 rounded text-[9px] font-semibold"
+                                style={{ background: `${row.color}18`, color: row.color }}>
+                                {row.activity}
+                              </span>
+                            </td>
+                          </tr>
+                        ));
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
               <div className="mt-1 text-[8px] px-1" style={{ color: C.textMuted }}>
                 * Contracts = Index F&amp;O positions. Change = Net (Long − Short). Source: NSE F&amp;O Archives
               </div>
@@ -297,8 +326,8 @@ export function FiiSection({ C, isDark }) {
                 Last 3 Days — FII / DII Index Futures (Contracts)
               </div>
               <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-[9px]">
+                <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
+                  <table className="w-full text-[9px]" style={{ minWidth: '580px' }}>
                     <thead>
                       <tr style={{ background: C.tableBg }}>
                         {['Date', 'FII Long', 'FII Short', 'FII Net', 'DII Long', 'DII Short', 'DII Net', 'Signal'].map(h => (
@@ -354,26 +383,45 @@ export function FiiSection({ C, isDark }) {
           <div>
             <div className="text-[9px] uppercase tracking-widest mb-1.5 font-semibold" style={{ color: C.textMuted }}>FII Buying ka Basic Logic</div>
             <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
-              <table className="w-full text-[9px]">
-                <thead>
-                  <tr style={{ background: C.tableBg }}>
-                    {['FII Action', 'Nifty pe Asar', 'Kitna Move', 'Kyun?'].map(h => (
-                      <th key={h} className="px-2 py-1.5 text-left font-semibold uppercase tracking-widest whitespace-nowrap"
-                        style={{ color: C.textMuted }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {FII_LOGIC_ROWS.map((row, i) => (
-                    <tr key={i} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
-                      <td className="px-2 py-1.5 font-semibold whitespace-nowrap" style={{ color: row.color }}>{row.action}</td>
-                      <td className="px-2 py-1.5" style={{ color: C.textPrimary }}>{row.nifty}</td>
-                      <td className="px-2 py-1.5 font-mono" style={{ color: C.textCell }}>{row.move}</td>
-                      <td className="px-2 py-1.5" style={{ color: C.textSecond }}>{row.reason}</td>
+
+              {/* Mobile: card layout */}
+              <div className="sm:hidden divide-y" style={{ borderColor: C.borderSubtle }}>
+                {FII_LOGIC_ROWS.map((row, i) => (
+                  <div key={i} className="px-3 py-2 space-y-1">
+                    <div className="text-[9px] font-semibold" style={{ color: row.color }}>{row.action}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[8px]" style={{ color: C.textSecond }}>{row.nifty}</span>
+                      <span className="text-[8px] font-mono" style={{ color: C.textCell }}>{row.move}</span>
+                    </div>
+                    <div className="text-[8px]" style={{ color: C.textMuted }}>{row.reason}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop: table layout */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-[9px]" style={{ minWidth: '420px' }}>
+                  <thead>
+                    <tr style={{ background: C.tableBg }}>
+                      {['FII Action', 'Nifty pe Asar', 'Kitna Move', 'Kyun?'].map(h => (
+                        <th key={h} className="px-2 py-1.5 text-left font-semibold uppercase tracking-widest whitespace-nowrap"
+                          style={{ color: C.textMuted }}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {FII_LOGIC_ROWS.map((row, i) => (
+                      <tr key={i} style={{ borderTop: `1px solid ${C.borderSubtle}` }}>
+                        <td className="px-2 py-1.5 font-semibold whitespace-nowrap" style={{ color: row.color }}>{row.action}</td>
+                        <td className="px-2 py-1.5" style={{ color: C.textPrimary }}>{row.nifty}</td>
+                        <td className="px-2 py-1.5 font-mono" style={{ color: C.textCell }}>{row.move}</td>
+                        <td className="px-2 py-1.5" style={{ color: C.textSecond }}>{row.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
             </div>
           </div>
 
