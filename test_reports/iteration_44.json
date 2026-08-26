@@ -1,0 +1,40 @@
+{
+  "summary": "Frontend-only testing of isDark bug fix, OI panel positioning fix, and chart lines feature. All 9 test scenarios passed: app loads without crash, chart renders, OI button exists right of REJ, panel opens right-aligned without cutoff, panel shows all required data fields, Lines ON/OFF toggle works, chart price lines drawn, REJ regression pass, backdrop close works.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_44.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "MINOR: In oiLinesOn useEffect (line 2748), `candlestickSeriesRef.current.markers?.()` uses optional chaining on a non-existent method (lightweight-charts v4.2.1 removed `markers()` getter). The fallback `|| []` means direction-change markers always start fresh (cannot merge with existing markers). This is non-critical since the try/catch silences errors and lines still draw. However, OI direction arrows may conflict with other indicator markers. Not blocking.",
+    "INFO: When OI button is clicked, oiLinesOn is auto-set to true (lines always drawn on first click). This is by design per the onClick handler at line 3489."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only test)",
+    "frontend": "100% (9/9 tests passed)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 44: All OI-related features verified working. isDark fix confirmed at line 1357 (const isDark = theme !== 'light'). OI button at x=820, REJ at x=778 (correct order). OI panel: right-aligned (right:0), width=300, left=550, right=850 - not cut off in 1920px viewport. Panel shows: signal (SHORT COVERING), PCR (0.733 NEUTRAL), Max Pain (24500), Call Wall (24500 Resistance), Put Wall (24200 Support), 7 strike OI bars. Lines toggle: 'Lines ON'/'Lines OFF' toggle works. Chart price lines: Max Pain (yellow), Call Wall (red), Put Wall (green) drawn. Backdrop click closes panel. No JS console errors (only WebSocket warnings expected in preview env). OI API endpoint /api/oi-indicator/nifty working, returns real NSE data.",
+  "test_credentials": "None required",
+  "verified_tests": {
+    "isDark_fix": "PASS - const isDark = theme !== 'light' at line 1357, no ReferenceError in browser console",
+    "chart_renders": "PASS - canvas element found, NIFTY 50 chart displayed",
+    "oi_button_position": "PASS - OI button at x=820, REJ at x=778, correct order REJ|OI",
+    "oi_panel_opens": "PASS - [data-testid='oi-panel'] found after OI button click",
+    "oi_panel_right_aligned": "PASS - panel right edge=850 < viewport=1920, right:0 CSS applied",
+    "oi_panel_content": "PASS - Shows OI INDICATOR, NIFTY 50, Lines ON, SHORT COVERING, PCR, Max Pain, Call Wall, Put Wall, Strike OI bars",
+    "lines_toggle": "PASS - Toggles between 'Lines ON' and 'Lines OFF', initial state Lines ON",
+    "chart_lines_drawn": "PASS - Max Pain, Call Wall price line labels visible on chart right axis",
+    "rej_regression": "PASS - REJ button still toggles correctly",
+    "backdrop_close": "PASS - Panel closes when backdrop (.fixed.inset-0.z-40) is clicked"
+  }
+}

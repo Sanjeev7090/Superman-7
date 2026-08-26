@@ -17,7 +17,7 @@ function fmtOI(n) {
   return n.toLocaleString('en-IN');
 }
 
-function OIPanel({ data, loading, isDark, onRefresh }) {
+function OIPanel({ data, loading, isDark, onRefresh, oiLinesOn, onToggleLines }) {
   const C = {
     bg:     isDark ? '#111117' : '#fff',
     card:   isDark ? '#18181e' : '#f8fafc',
@@ -48,9 +48,27 @@ function OIPanel({ data, loading, isDark, onRefresh }) {
             background: 'rgba(167,139,250,0.15)', color: '#a78bfa',
           }}>NIFTY 50</span>
         </div>
-        <button onClick={onRefresh} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: loading ? 0.4 : 0.7, padding: 2 }}>
-          <ArrowClockwise size={12} color={C.sub} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {onToggleLines && (
+            <button
+              onClick={onToggleLines}
+              title="Toggle chart lines"
+              style={{
+                fontSize: 8, fontWeight: 800, padding: '2px 7px', borderRadius: 4,
+                background: oiLinesOn ? 'rgba(167,139,250,0.2)' : 'transparent',
+                color:  oiLinesOn ? '#a78bfa' : C.muted,
+                border: `1px solid ${oiLinesOn ? '#a78bfa50' : C.border}`,
+                cursor: 'pointer',
+              }}
+              data-testid="oi-toggle-lines"
+            >
+              {oiLinesOn ? 'Lines ON' : 'Lines OFF'}
+            </button>
+          )}
+          <button onClick={onRefresh} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: loading ? 0.4 : 0.7, padding: 2 }}>
+            <ArrowClockwise size={12} color={C.sub} />
+          </button>
+        </div>
       </div>
 
       {loading && !data ? (
@@ -1320,7 +1338,9 @@ const ChartPanel = ({
   const [oiPanelOpen, setOiPanelOpen] = useState(false);
   const [oiData,      setOiData]      = useState(null);
   const [oiLoading,   setOiLoading]   = useState(false);
-  const oiBtnRef = useRef(null);
+  const [oiLinesOn,   setOiLinesOn]   = useState(false);   // chart lines toggle
+  const oiBtnRef      = useRef(null);
+  const oiPriceLinesRef = useRef([]);
   const rejCanvasRef = useRef(null);
   const rejAnimRef   = useRef(null);
   const rejDataRef   = useRef(null);
@@ -1334,6 +1354,7 @@ const ChartPanel = ({
   // MTF Market Direction — 1H / 45M / 15M
   const [mtfDirection, setMtfDirection] = useState({ '1H': null, '45M': null, '15M': null });
   const { theme } = useTheme();
+  const isDark = theme !== 'light';
 
   const TF_GROUPS = [
     { group: 'MINUTES', items: [
@@ -2644,6 +2665,93 @@ const ChartPanel = ({
     if (oiPanelOpen && !oiData) fetchOIData();
   }, [oiPanelOpen, oiData, fetchOIData]);
 
+  // ── OI: clear & draw price lines on chart ────────────────────────
+  const clearOILines = useCallback(() => {
+    oiPriceLinesRef.current.forEach(pl => {
+      try { candlestickSeriesRef.current?.removePriceLine(pl); } catch(e) {}
+    });
+    oiPriceLinesRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    clearOILines();
+    if (!oiLinesOn || !oiData || !candlestickSeriesRef.current) return;
+
+    // Draw Call Wall, Put Wall, Max Pain as price lines
+    const lineDefs = [
+      { price: oiData.call_wall, color: '#ef4444', title: 'Call Wall ▼', style: 2, width: 1 },
+      { price: oiData.put_wall,  color: '#22c55e', title: 'Put Wall  ▲', style: 2, width: 1 },
+      { price: oiData.max_pain,  color: '#f59e0b', title: 'Max Pain  ●', style: 3, width: 1 },
+    ];
+    lineDefs.forEach(({ price, color, title, style, width }) => {
+      if (!price) return;
+      try {
+        const pl = candlestickSeriesRef.current.createPriceLine({
+          price, color, lineWidth: width, lineStyle: style,
+          axisLabelVisible: true, title,
+        });
+        oiPriceLinesRef.current.push(pl);
+      } catch(e) {}
+    });
+
+    // Direction change markers based on proximity
+    if (!stockData?.bars?.length) return;
+    const bars = stockData.bars;
+    const spot = oiData.spot_price || oiData.call_wall;
+    if (!spot) return;
+
+    const newMarkers = [];
+    const lastBar = bars[bars.length - 1];
+    const lastTime = lastBar.time || lastBar.t;
+
+    const nearCallWall = oiData.call_wall && Math.abs(spot - oiData.call_wall) / oiData.call_wall < 0.008;
+    const nearPutWall  = oiData.put_wall  && Math.abs(spot - oiData.put_wall)  / oiData.put_wall  < 0.008;
+    const nearMaxPain  = oiData.max_pain  && Math.abs(spot - oiData.max_pain)  / oiData.max_pain  < 0.005;
+
+    if (nearCallWall) {
+      newMarkers.push({
+        time: lastTime, position: 'aboveBar',
+        color: '#ef4444', shape: 'arrowDown',
+        text: `Call Wall ${oiData.call_wall?.toLocaleString('en-IN')} — Reversal Alert`,
+      });
+    }
+    if (nearPutWall) {
+      newMarkers.push({
+        time: lastTime, position: 'belowBar',
+        color: '#22c55e', shape: 'arrowUp',
+        text: `Put Wall ${oiData.put_wall?.toLocaleString('en-IN')} — Bounce Alert`,
+      });
+    }
+    if (nearMaxPain) {
+      newMarkers.push({
+        time: lastTime, position: 'aboveBar',
+        color: '#f59e0b', shape: 'circle',
+        text: `Max Pain ${oiData.max_pain?.toLocaleString('en-IN')}`,
+      });
+    }
+
+    // PCR-based direction signal on most recent candle
+    if (oiData.pcr_zone === 'OVERBOUGHT') {
+      newMarkers.push({
+        time: lastTime, position: 'aboveBar',
+        color: '#ef4444', shape: 'arrowDown', text: 'OI: Overbought — Bear Alert',
+      });
+    } else if (oiData.pcr_zone === 'OVERSOLD') {
+      newMarkers.push({
+        time: lastTime, position: 'belowBar',
+        color: '#22c55e', shape: 'arrowUp', text: 'OI: Oversold — Bull Alert',
+      });
+    }
+
+    if (newMarkers.length > 0) {
+      try {
+        const existing = candlestickSeriesRef.current.markers?.() || [];
+        candlestickSeriesRef.current.setMarkers([...existing, ...newMarkers]);
+      } catch(e) {}
+    }
+
+  }, [oiLinesOn, oiData, stockData, clearOILines]);
+
   // ── Black Box: draw canvas ──────────────────────────────────────
   const drawBBCanvas = useCallback(() => {
     const canvas = bbCanvasRef.current;
@@ -3374,9 +3482,17 @@ const ChartPanel = ({
           {/* OI Indicator — Nifty Open Interest Dashboard */}
           <div className="relative shrink-0" ref={oiBtnRef}>
             <button
-              onClick={() => setOiPanelOpen(v => !v)}
+              onClick={() => {
+                const opening = !oiPanelOpen;
+                setOiPanelOpen(opening);
+                if (opening && !oiData) fetchOIData();
+                if (!oiLinesOn) {
+                  setOiLinesOn(true);
+                  if (!oiData) fetchOIData();
+                }
+              }}
               className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border ${
-                oiPanelOpen
+                oiPanelOpen || oiLinesOn
                   ? 'text-[#a78bfa] border-[#a78bfa]/40 bg-[#a78bfa]/10'
                   : 'text-zinc-500 border-transparent'
               }`}
@@ -3394,13 +3510,12 @@ const ChartPanel = ({
                   className="fixed inset-0 z-40"
                   onClick={() => setOiPanelOpen(false)}
                 />
-                {/* Panel */}
+                {/* Panel — right-aligned to prevent viewport overflow */}
                 <div
                   className="absolute z-50 mt-1 rounded-xl shadow-2xl overflow-hidden"
                   style={{
                     top: '100%',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
+                    right: 0,
                     width: 300,
                     background: isDark ? '#111117' : '#ffffff',
                     border: `1px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
@@ -3410,7 +3525,11 @@ const ChartPanel = ({
                   onClick={e => e.stopPropagation()}
                   data-testid="oi-panel"
                 >
-                  <OIPanel data={oiData} loading={oiLoading} isDark={isDark} onRefresh={fetchOIData} />
+                  <OIPanel data={oiData} loading={oiLoading} isDark={isDark}
+                    onRefresh={() => { fetchOIData(); }}
+                    oiLinesOn={oiLinesOn}
+                    onToggleLines={() => setOiLinesOn(v => !v)}
+                  />
                 </div>
               </>
             )}
