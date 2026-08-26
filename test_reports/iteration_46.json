@@ -1,0 +1,53 @@
+{
+  "summary": "Testing REJ Option Picks 12-factor checklist feature for both NIFTY 50 and SENSEX sections. Backend: 28/28 tests passed. Frontend: All 12-factor criteria rendering verified, scores show [X/12], weight badges (MUST/High/Medium) visible, ✓/✗ marks correct, recommended banner working, existing features preserved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_rej_12factor.py",
+    "/app/test_reports/pytest/test_rej_12factor.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PASS: All 12 criteria keys present in both endpoints (future_oi_vol, iv_ok, put_writing_call_unwind/call_writing_put_unwind, delta_range, vanna, net_gex, gap_fii_bias, pcr_level, oi_walls, chart_pa, sector_breadth, preopen_imbalance)",
+    "PASS: Score matches actual pass count (verified against raw criteria values)",
+    "PASS: Recommendation logic: CALL_BUY if call_score>put_score and call_score>=6, else PUT_BUY if put_score>=6, else NEUTRAL",
+    "PASS: STRONG threshold >=8/12, PARTIAL >=6/12, WEAK <6/12",
+    "INFO: SENSEX BSE real OI not available (is_real_oi=false), PCR criteria for SENSEX correctly shows 'N/A (BSE OI)' — expected behavior",
+    "INFO: No Recommended banner for SENSEX (call=4, put=5, both <6 = NEUTRAL) — correct behavior"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_rej_12factor.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (28/28 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  "seed_data_creation": "",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 46: 12-factor checklist for both NIFTY and SENSEX REJ Option Picks sections fully verified. Backend /api/rej/option-flow and /api/rej/sensex-option-flow both return exactly 12 criteria keys per side with correct structure (pass, label, detail, weight). Frontend FlowSidePanel correctly renders [score/12] format (dynamic total from Object.values(criteria).length). Weight badges: MUST=amber, High=purple, Medium=grey — all rendering. NIFTY live result: call=[6/12]PARTIAL, put=[5/12]WEAK, recommended=CALL_BUY. SENSEX live result: call=[4/12]WEAK, put=[5/12]WEAK, recommended=NEUTRAL. All existing features preserved (Manual Override, Refresh, Signal bar, option pick card with Delta/Gamma/Vega/Theta). No bugs found.",
+  "verified_tests": {
+    "nifty_call_12_criteria": "PASS — 12 criteria keys verified",
+    "nifty_put_12_criteria": "PASS — 12 criteria keys verified",
+    "nifty_score_matches_passes": "PASS — call=6, put=5 confirmed by counting ✓ marks",
+    "nifty_recommended_call_buy": "PASS — call_score(6)>put_score(5) and >=6",
+    "nifty_weight_badges": "PASS — MUST(4), High(10), Medium(10) per section",
+    "nifty_flow_strip": "PASS — ATM IV 9.55%, CE Vol 19604K, PE Vol 22781K",
+    "sensex_call_12_criteria": "PASS — 12 criteria keys verified",
+    "sensex_put_12_criteria": "PASS — 12 criteria keys verified",
+    "sensex_score_matches_passes": "PASS — call=4, put=5 confirmed",
+    "sensex_neutral_no_banner": "PASS — no recommended banner shown (both <6)",
+    "sensex_pcr_na_graceful": "PASS — PCR shows 'N/A (BSE OI)' when no real OI",
+    "existing_manual_override": "PASS — BUY/SELL/Refresh buttons present",
+    "existing_signal_bar": "PASS — SELL CONFIRMED, Entry/SL/TGT showing",
+    "existing_option_pick_card": "PASS — 24350 PUT with Delta/Gamma/Vega/Theta/OI/IV",
+    "score_format_x_of_12": "PASS — regex found [6/12],[5/12],[4/12],[5/12] across both sections"
+  }
+}

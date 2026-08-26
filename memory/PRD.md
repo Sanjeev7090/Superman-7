@@ -118,6 +118,14 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
   - Fixed z-index conflict: `relative z-50` on OI button (backdrop z-40 was intercepting second click)
   - Testing: iteration_45.json — 100% (9 backend + 6 frontend all pass)
 
+- **12-Factor Option Buying Checklist (Feb 2026):**
+  - Added 12-factor checklist to BOTH `/api/rej/option-flow` (NIFTY) and `/api/rej/sensex-option-flow` (SENSEX)
+  - Factors: Future+OI+Vol, IV, Writing/Unwind, Delta Range (0.35-0.60), Vanna, Net GEX, Gap+FII Bias, PCR, OI Walls, Chart PA, Sector Breadth, Pre-open Imbalance
+  - Score now [X/12], STRONG ≥8, PARTIAL ≥6, WEAK <6
+  - Weight badges per criterion: MUST (amber), High (purple), Medium (grey)
+  - Frontend: CriteriaRow updated with weight badge + smaller text (7.5px labels, 6.5px detail)
+  - Testing: iteration_46.json — 100% (28 backend + all frontend verified)
+
 
 
 ---

@@ -14628,69 +14628,210 @@ async def rej_option_flow():
     avg_vanna_ce = _avg_vanna(atm_ce, "CE")
     avg_vanna_pe = _avg_vanna(atm_pe, "PE")
 
-    # ── 8. Evaluate criteria ──────────────────────────────────────────
-    # -- CALL BUY --
-    # Criterion 1: Future ↑ + OI ↑ + Vol ↑
-    c1_future_up  = total_ce_vol >= total_pe_vol * 0.9   # CE vol comparable or higher
-    c1_oi_up      = atm_ce_oi_chg >= 0 and (total_pe_oi_chg > 0 or total_ce_oi_chg >= 0)
-    c1_vol_up     = total_ce_vol >= total_pe_vol * 0.85
-    call_c1       = c1_future_up and c1_vol_up
-    c1_detail     = (f"CE {int(total_ce_vol//1000)}K {'≥' if c1_future_up else '<'} PE {int(total_pe_vol//1000)}K vol | "
-                     f"OI Δ {'+' if atm_ce_oi_chg >= 0 else ''}{int(atm_ce_oi_chg)}")
+    # ── 8a. Absolute OI from rows (for PCR, OI Walls, GEX) ──────────────
+    total_ce_oi_abs = 0.0
+    total_pe_oi_abs = 0.0
+    near_ce_oi_abs  = 0.0
+    near_pe_oi_abs  = 0.0
+    oi_by_strike_ce: dict = {}
+    oi_by_strike_pe: dict = {}
+    for r in rows:
+        oi_val = r.get("oi", 0) or 0
+        s = r["strike"]
+        if r["type"] == "CE":
+            total_ce_oi_abs += oi_val
+            oi_by_strike_ce[s] = oi_by_strike_ce.get(s, 0) + oi_val
+            if abs(s - spot) <= ATM_BAND:
+                near_ce_oi_abs += oi_val
+        else:
+            total_pe_oi_abs += oi_val
+            oi_by_strike_pe[s] = oi_by_strike_pe.get(s, 0) + oi_val
+            if abs(s - spot) <= ATM_BAND:
+                near_pe_oi_abs += oi_val
 
-    # Criterion 2: IV Rising / Stable
+    # PCR from absolute OI
+    pcr_abs = round(total_pe_oi_abs / max(total_ce_oi_abs, 1), 3)
+
+    # ── 8b. Max Pain + OI Walls ──────────────────────────────────────────
+    all_strikes_set = set(list(oi_by_strike_ce.keys()) + list(oi_by_strike_pe.keys()))
+    parsed_mp = [{"strike": s, "call_oi": oi_by_strike_ce.get(s, 0), "put_oi": oi_by_strike_pe.get(s, 0)} for s in all_strikes_set]
+    max_pain_val = _compute_max_pain(parsed_mp) if parsed_mp else 0.0
+    near_mp = [p for p in parsed_mp if abs(p["strike"] - spot) <= 1500]
+    call_wall_val = (max(near_mp, key=lambda r: r["call_oi"], default={})).get("strike", 0)
+    put_wall_val  = (max(near_mp, key=lambda r: r["put_oi"],  default={})).get("strike", 0)
+
+    # ── 8c. Gap + FII Bias + Sector proxy (yfinance with timeout) ────────
+    gap_pct         = 0.0
+    spot_change_pct = 0.0
+    try:
+        def _nifty_spot_hist():
+            import yfinance as _yf2
+            return _yf2.Ticker("^NSEI").history(period="3d", interval="1d", progress=False)
+        _h = await asyncio.wait_for(asyncio.to_thread(_nifty_spot_hist), timeout=5.0)
+        if len(_h) >= 2:
+            _prev = float(_h["Close"].iloc[-2])
+            _open = float(_h["Open"].iloc[-1])
+            _cls  = float(_h["Close"].iloc[-1])
+            gap_pct         = round((_open - _prev) / _prev * 100, 2) if _prev else 0.0
+            spot_change_pct = round((_cls  - _prev) / _prev * 100, 2) if _prev else 0.0
+    except Exception:
+        pass
+
+    # ── 8d. ATM Delta (BS) ───────────────────────────────────────────────
+    def _bs_delta_c(S, K, T, r, sig):
+        if sig <= 0 or T <= 0 or S <= 0 or K <= 0:
+            return 0.5
+        try:
+            d1 = (_math.log(S/K) + (r + 0.5*sig**2)*T) / (sig * _math.sqrt(T))
+            return round(float(_rej_norm.cdf(d1)), 4)
+        except Exception:
+            return 0.5
+
+    atm_call_delta = _bs_delta_c(spot, spot, T_years, r_rate, avg_iv / 100.0) if avg_iv > 0 else 0.5
+    atm_put_delta  = round(atm_call_delta - 1.0, 4)
+
+    # ── 8. Evaluate ALL 12 criteria ──────────────────────────────────────
+    # -- CALL BUY --
+    # Factor 1 (Mandatory): Future ↑ + OI ↑ + Vol ↑
+    c1_future_up = total_ce_vol >= total_pe_vol * 0.9
+    c1_vol_up    = total_ce_vol >= total_pe_vol * 0.85
+    call_c1      = c1_future_up and c1_vol_up
+    c1_detail    = (f"CE {int(total_ce_vol//1000)}K {'≥' if c1_future_up else '<'} PE {int(total_pe_vol//1000)}K vol | "
+                    f"OI Δ {'+' if atm_ce_oi_chg >= 0 else ''}{int(atm_ce_oi_chg)}")
+
+    # Factor 2: IV Rising / Stable
     call_c2   = avg_iv >= 11
     c2_detail = f"ATM IV {avg_iv}% — {iv_status}"
 
-    # Criterion 3: Put Writing + Call Unwinding
-    put_writing    = total_pe_oi_chg > 0        # shorts adding to puts (bullish)
-    call_unwind    = total_ce_oi_chg < 0        # call writers covering (bullish)
+    # Factor 3: Put Writing + Call Unwinding
+    put_writing    = total_pe_oi_chg > 0
+    call_unwind    = total_ce_oi_chg < 0
     call_c3        = put_writing or call_unwind
     c3_detail_call = (f"PE OI {'+' if total_pe_oi_chg >= 0 else ''}{int(total_pe_oi_chg)} "
                       f"{'(Put Writing ✓)' if put_writing else '(No Writing)'} | "
                       f"CE OI {'+' if total_ce_oi_chg >= 0 else ''}{int(total_ce_oi_chg)} "
                       f"{'(Call Unwind ✓)' if call_unwind else '(Building)'}")
 
-    # Criterion 4: High Positive Vanna
-    call_c4   = avg_vanna_ce > 0
-    c4_detail_call = f"CE Vanna {'+' if avg_vanna_ce >= 0 else ''}{avg_vanna_ce:.4f}"
+    # Factor 4: Delta 0.35–0.60 (Call Buy)
+    call_c4_delta = 0.35 <= atm_call_delta <= 0.60
+    f4_detail_c   = f"ATM CE Δ {atm_call_delta:.4f} {'✓ 0.35-0.60' if call_c4_delta else '✗ out of range'}"
 
-    call_score  = sum([call_c1, call_c2, call_c3, call_c4])
-    call_signal = "STRONG" if call_score >= 3 else "PARTIAL" if call_score == 2 else "WEAK"
+    # Factor 5: Positive Vanna (Call Buy)
+    call_c5   = avg_vanna_ce > 0
+    c5_detail_call = f"CE Vanna {'+' if avg_vanna_ce >= 0 else ''}{avg_vanna_ce:.4f}"
+
+    # Factor 6: Net GEX Negative (near-ATM CE OI < PE OI = put-heavy = neg GEX)
+    net_gex_sign = near_ce_oi_abs - near_pe_oi_abs
+    call_c6 = net_gex_sign < 0
+    f6_detail_c = (f"ATM CE OI {int(near_ce_oi_abs//1000)}K vs PE OI {int(near_pe_oi_abs//1000)}K "
+                   f"({'Neg GEX ✓' if call_c6 else 'Pos GEX ✗'})")
+
+    # Factor 7: Gap + FII Bias Bullish
+    call_c7 = spot_change_pct > 0
+    f7_detail_c = (f"Spot {'+' if spot_change_pct >= 0 else ''}{spot_change_pct}% "
+                   f"Gap {'+' if gap_pct >= 0 else ''}{gap_pct}% "
+                   f"{'(Bullish ✓)' if call_c7 else '(Bearish ✗)'}")
+
+    # Factor 8: PCR < 0.9
+    call_c8 = 0 < pcr_abs < 0.9
+    f8_detail_c = f"PCR {pcr_abs} {'< 0.9 ✓' if call_c8 else '✗ not in range'}"
+
+    # Factor 9: OI Walls — Upside room (spot < call_wall)
+    call_c9 = call_wall_val > 0 and spot < call_wall_val
+    f9_detail_c = (f"Call Wall {call_wall_val:.0f} Max Pain {max_pain_val:.0f} "
+                   f"Spot {spot:.0f} {'< CW ✓' if call_c9 else '≥ CW ✗'}")
+
+    # Factor 10 (Mandatory): Chart / Price Action — CE buildup proxy
+    call_c10 = total_ce_oi_chg > 0 and total_ce_vol > total_pe_vol
+    f10_detail_c = (f"CE OI Δ{'+' if total_ce_oi_chg >= 0 else ''}{int(total_ce_oi_chg//1000)}K "
+                    f"Vol {int(total_ce_vol//1000)}K vs PE {int(total_pe_vol//1000)}K "
+                    f"{'(Breakout Bias ✓)' if call_c10 else '✗'}")
+
+    # Factor 11: Sector Breadth — Spot up + IV calm
+    call_c11 = spot_change_pct > 0 and avg_iv < 18
+    f11_detail_c = (f"Spot {'+' if spot_change_pct >= 0 else ''}{spot_change_pct}% "
+                    f"IV {avg_iv}% {'< 18 ✓' if avg_iv < 18 else '≥ 18 ✗'} "
+                    f"{'(Bullish Breadth ✓)' if call_c11 else '✗'}")
+
+    # Factor 12: Pre-open Imbalance — Gap Up
+    call_c12 = gap_pct >= 0
+    f12_detail_c = f"Gap {'+' if gap_pct >= 0 else ''}{gap_pct}% {'(Buy Side ✓)' if call_c12 else '(Sell Side ✗)'}"
+
+    call_score  = sum([call_c1, call_c2, call_c3, call_c4_delta, call_c5, call_c6, call_c7, call_c8, call_c9, call_c10, call_c11, call_c12])
+    call_signal = "STRONG" if call_score >= 8 else "PARTIAL" if call_score >= 6 else "WEAK"
 
     # -- PUT BUY --
-    # Criterion 1: Future ↓ + OI ↑ + Vol ↑
-    p1_future_dn  = total_pe_vol >= total_ce_vol * 0.9
-    p1_oi_up      = atm_pe_oi_chg >= 0
-    p1_vol_up     = total_pe_vol >= total_ce_vol * 0.85
-    put_c1        = p1_future_dn and p1_vol_up
-    p1_detail     = (f"PE {int(total_pe_vol//1000)}K {'≥' if p1_future_dn else '<'} CE {int(total_ce_vol//1000)}K vol | "
-                     f"OI Δ {'+' if atm_pe_oi_chg >= 0 else ''}{int(atm_pe_oi_chg)}")
+    # Factor 1 (Mandatory): Future ↓ + OI ↑ + Vol ↑
+    p1_future_dn = total_pe_vol >= total_ce_vol * 0.9
+    p1_vol_up    = total_pe_vol >= total_ce_vol * 0.85
+    put_c1       = p1_future_dn and p1_vol_up
+    p1_detail    = (f"PE {int(total_pe_vol//1000)}K {'≥' if p1_future_dn else '<'} CE {int(total_ce_vol//1000)}K vol | "
+                    f"OI Δ {'+' if atm_pe_oi_chg >= 0 else ''}{int(atm_pe_oi_chg)}")
 
-    # Criterion 2: IV Rising
+    # Factor 2: IV Rising
     put_c2    = avg_iv > 14
     p2_detail = f"ATM IV {avg_iv}% — {iv_status}"
 
-    # Criterion 3: Call Writing + Put Unwinding
-    call_writing  = total_ce_oi_chg > 0       # call writers adding (bearish)
-    put_unwind    = total_pe_oi_chg < 0        # put writers covering (bearish unwind)
+    # Factor 3: Call Writing + Put Unwinding
+    call_writing  = total_ce_oi_chg > 0
+    put_unwind    = total_pe_oi_chg < 0
     put_c3        = call_writing or put_unwind
     c3_detail_put = (f"CE OI {'+' if total_ce_oi_chg >= 0 else ''}{int(total_ce_oi_chg)} "
                      f"{'(Call Writing ✓)' if call_writing else '(No Writing)'} | "
                      f"PE OI {'+' if total_pe_oi_chg >= 0 else ''}{int(total_pe_oi_chg)} "
                      f"{'(Put Unwind ✓)' if put_unwind else '(Building)'}")
 
-    # Criterion 4: High Negative Vanna (abs value)
-    put_c4   = avg_vanna_pe < 0
-    c4_detail_put = f"PE Vanna {'+' if avg_vanna_pe >= 0 else ''}{avg_vanna_pe:.4f}"
+    # Factor 4: Delta -0.35 to -0.60 (Put Buy)
+    put_c4_delta = -0.60 <= atm_put_delta <= -0.35
+    f4_detail_p  = f"ATM PE Δ {atm_put_delta:.4f} {'✓ -0.60 to -0.35' if put_c4_delta else '✗ out of range'}"
 
-    put_score  = sum([put_c1, put_c2, put_c3, put_c4])
-    put_signal = "STRONG" if put_score >= 3 else "PARTIAL" if put_score == 2 else "WEAK"
+    # Factor 5: Negative Vanna (Put Buy)
+    put_c5   = avg_vanna_pe < 0
+    c5_detail_put = f"PE Vanna {'+' if avg_vanna_pe >= 0 else ''}{avg_vanna_pe:.4f}"
+
+    # Factor 6: Net GEX Negative
+    put_c6 = net_gex_sign < 0
+    f6_detail_p = (f"ATM CE OI {int(near_ce_oi_abs//1000)}K vs PE OI {int(near_pe_oi_abs//1000)}K "
+                   f"({'Neg GEX ✓' if put_c6 else 'Pos GEX ✗'})")
+
+    # Factor 7: Gap + FII Bias Bearish
+    put_c7 = spot_change_pct < 0
+    f7_detail_p = (f"Spot {'+' if spot_change_pct >= 0 else ''}{spot_change_pct}% "
+                   f"Gap {'+' if gap_pct >= 0 else ''}{gap_pct}% "
+                   f"{'(Bearish ✓)' if put_c7 else '(Bullish ✗)'}")
+
+    # Factor 8: PCR > 1.1
+    put_c8 = pcr_abs > 1.1
+    f8_detail_p = f"PCR {pcr_abs} {'> 1.1 ✓' if put_c8 else '✗ not in range'}"
+
+    # Factor 9: OI Walls — Downside room (spot > put_wall)
+    put_c9 = put_wall_val > 0 and spot > put_wall_val
+    f9_detail_p = (f"Put Wall {put_wall_val:.0f} Max Pain {max_pain_val:.0f} "
+                   f"Spot {spot:.0f} {'> PW ✓' if put_c9 else '≤ PW ✗'}")
+
+    # Factor 10 (Mandatory): Chart / Price Action — PE buildup proxy
+    put_c10 = total_pe_oi_chg > 0 and total_pe_vol > total_ce_vol
+    f10_detail_p = (f"PE OI Δ{'+' if total_pe_oi_chg >= 0 else ''}{int(total_pe_oi_chg//1000)}K "
+                    f"Vol {int(total_pe_vol//1000)}K vs CE {int(total_ce_vol//1000)}K "
+                    f"{'(Breakdown Bias ✓)' if put_c10 else '✗'}")
+
+    # Factor 11: Sector Breadth — Spot down or IV spiking
+    put_c11 = spot_change_pct < 0 or avg_iv >= 18
+    f11_detail_p = (f"Spot {'+' if spot_change_pct >= 0 else ''}{spot_change_pct}% "
+                    f"IV {avg_iv}% {'≥ 18 ✓' if avg_iv >= 18 else '< 18'} "
+                    f"{'(Bearish Breadth ✓)' if put_c11 else '✗'}")
+
+    # Factor 12: Pre-open Imbalance — Gap Down
+    put_c12 = gap_pct < 0
+    f12_detail_p = f"Gap {'+' if gap_pct >= 0 else ''}{gap_pct}% {'(Sell Side ✓)' if put_c12 else '(Buy Side ✗)'}"
+
+    put_score  = sum([put_c1, put_c2, put_c3, put_c4_delta, put_c5, put_c6, put_c7, put_c8, put_c9, put_c10, put_c11, put_c12])
+    put_signal = "STRONG" if put_score >= 8 else "PARTIAL" if put_score >= 6 else "WEAK"
 
     # ── 9. Overall recommendation ─────────────────────────────────────
-    if call_score > put_score and call_score >= 2:
+    if call_score > put_score and call_score >= 6:
         recommended = "CALL_BUY"
-    elif put_score > call_score and put_score >= 2:
+    elif put_score > call_score and put_score >= 6:
         recommended = "PUT_BUY"
     else:
         recommended = "NEUTRAL"
@@ -14705,25 +14846,45 @@ async def rej_option_flow():
         "total_pe_vol":     int(float(total_pe_vol)),
         "avg_vanna_ce":     float(avg_vanna_ce),
         "avg_vanna_pe":     float(avg_vanna_pe),
+        "pcr":              float(pcr_abs),
+        "max_pain":         float(max_pain_val),
+        "call_wall":        float(call_wall_val),
+        "put_wall":         float(put_wall_val),
         "recommended":      str(recommended),
         "call_buy": {
             "score":  int(call_score),
             "signal": str(call_signal),
             "criteria": {
-                "future_oi_vol":           {"pass": bool(call_c1), "label": "Future ↑ · OI ↑ · Vol ↑",       "detail": str(c1_detail)},
-                "iv_ok":                   {"pass": bool(call_c2), "label": "IV Rising / Stable",              "detail": str(c2_detail)},
-                "put_writing_call_unwind": {"pass": bool(call_c3), "label": "Put Writing + Call Unwind",       "detail": str(c3_detail_call)},
-                "vanna":                   {"pass": bool(call_c4), "label": "High Positive Vanna",             "detail": str(c4_detail_call), "value": float(avg_vanna_ce)},
+                "future_oi_vol":           {"pass": bool(call_c1),       "label": "Future ↑ · OI ↑ · Vol ↑",        "detail": str(c1_detail),      "weight": "Mandatory"},
+                "iv_ok":                   {"pass": bool(call_c2),       "label": "IV Rising / Stable",               "detail": str(c2_detail),      "weight": "High"},
+                "put_writing_call_unwind": {"pass": bool(call_c3),       "label": "Put Writing + Call Unwind",        "detail": str(c3_detail_call), "weight": "High"},
+                "delta_range":             {"pass": bool(call_c4_delta), "label": "Delta 0.35–0.60",                  "detail": str(f4_detail_c),    "weight": "High"},
+                "vanna":                   {"pass": bool(call_c5),       "label": "Positive Vanna",                   "detail": str(c5_detail_call), "weight": "Medium"},
+                "net_gex":                 {"pass": bool(call_c6),       "label": "Net GEX Negative",                 "detail": str(f6_detail_c),    "weight": "High"},
+                "gap_fii_bias":            {"pass": bool(call_c7),       "label": "Gap + FII Bias Bullish",           "detail": str(f7_detail_c),    "weight": "High"},
+                "pcr_level":               {"pass": bool(call_c8),       "label": "PCR < 0.9",                        "detail": str(f8_detail_c),    "weight": "Medium"},
+                "oi_walls":                {"pass": bool(call_c9),       "label": "OI Walls: Upside Room",            "detail": str(f9_detail_c),    "weight": "Medium"},
+                "chart_pa":                {"pass": bool(call_c10),      "label": "Chart / Price Action Breakout",    "detail": str(f10_detail_c),   "weight": "Mandatory"},
+                "sector_breadth":          {"pass": bool(call_c11),      "label": "Sector Breadth Bullish",           "detail": str(f11_detail_c),   "weight": "Medium"},
+                "preopen_imbalance":       {"pass": bool(call_c12),      "label": "Pre-open Imbalance Buy Side",      "detail": str(f12_detail_c),   "weight": "Medium"},
             },
         },
         "put_buy": {
             "score":  int(put_score),
             "signal": str(put_signal),
             "criteria": {
-                "future_oi_vol":            {"pass": bool(put_c1), "label": "Future ↓ · OI ↑ · Vol ↑",       "detail": str(p1_detail)},
-                "iv_ok":                    {"pass": bool(put_c2), "label": "IV Rising",                       "detail": str(p2_detail)},
-                "call_writing_put_unwind":  {"pass": bool(put_c3), "label": "Call Writing + Put Unwind",       "detail": str(c3_detail_put)},
-                "vanna":                    {"pass": bool(put_c4), "label": "High Negative Vanna",             "detail": str(c4_detail_put), "value": float(avg_vanna_pe)},
+                "future_oi_vol":           {"pass": bool(put_c1),       "label": "Future ↓ · OI ↑ · Vol ↑",        "detail": str(p1_detail),      "weight": "Mandatory"},
+                "iv_ok":                   {"pass": bool(put_c2),       "label": "IV Rising",                        "detail": str(p2_detail),      "weight": "High"},
+                "call_writing_put_unwind": {"pass": bool(put_c3),       "label": "Call Writing + Put Unwind",        "detail": str(c3_detail_put),  "weight": "High"},
+                "delta_range":             {"pass": bool(put_c4_delta), "label": "Delta -0.35 to -0.60",             "detail": str(f4_detail_p),    "weight": "High"},
+                "vanna":                   {"pass": bool(put_c5),       "label": "Negative Vanna",                   "detail": str(c5_detail_put),  "weight": "Medium"},
+                "net_gex":                 {"pass": bool(put_c6),       "label": "Net GEX Negative",                 "detail": str(f6_detail_p),    "weight": "High"},
+                "gap_fii_bias":            {"pass": bool(put_c7),       "label": "Gap + FII Bias Bearish",           "detail": str(f7_detail_p),    "weight": "High"},
+                "pcr_level":               {"pass": bool(put_c8),       "label": "PCR > 1.1",                        "detail": str(f8_detail_p),    "weight": "Medium"},
+                "oi_walls":                {"pass": bool(put_c9),       "label": "OI Walls: Downside Room",          "detail": str(f9_detail_p),    "weight": "Medium"},
+                "chart_pa":                {"pass": bool(put_c10),      "label": "Chart / Price Action Breakdown",   "detail": str(f10_detail_p),   "weight": "Mandatory"},
+                "sector_breadth":          {"pass": bool(put_c11),      "label": "Sector Breadth Bearish",           "detail": str(f11_detail_p),   "weight": "Medium"},
+                "preopen_imbalance":       {"pass": bool(put_c12),      "label": "Pre-open Imbalance Sell Side",     "detail": str(f12_detail_p),   "weight": "Medium"},
             },
         },
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -14840,12 +15001,62 @@ async def rej_sensex_option_flow():
     avg_vanna_pe = _avg_v(atm_pe)
 
     # ════════════════════════════════════════════════════════════════
-    # CALL BUY — STRICT criteria
+    # Extra data for 12-factor checklist
     # ════════════════════════════════════════════════════════════════
 
-    # C1: Future ↑ + OI proxy ≥ +1.5L + CE vol ≥ 1.3× PE vol
-    #     (OI +1.5L proxy = spot move ≥ 0.5% = high conviction move)
-    # C1: Real BSE OI (if available) OR spot proxy fallback
+    # Near-ATM absolute OI for GEX proxy
+    near_ce_oi_abs_s = sum(o.get("oi", 0) for o in atm_ce)
+    near_pe_oi_abs_s = sum(o.get("oi", 0) for o in atm_pe)
+
+    # Max Pain + OI Walls
+    s_oi_by_ce: dict = {}
+    s_oi_by_pe: dict = {}
+    for o in options:
+        ov = o.get("oi", 0) or 0
+        sk = o["strike"]
+        if o["type"] == "CE":
+            s_oi_by_ce[sk] = s_oi_by_ce.get(sk, 0) + ov
+        else:
+            s_oi_by_pe[sk] = s_oi_by_pe.get(sk, 0) + ov
+    all_sk_s = set(list(s_oi_by_ce.keys()) + list(s_oi_by_pe.keys()))
+    s_parsed_mp = [{"strike": sk, "call_oi": s_oi_by_ce.get(sk, 0), "put_oi": s_oi_by_pe.get(sk, 0)} for sk in all_sk_s]
+    s_max_pain = _compute_max_pain(s_parsed_mp) if s_parsed_mp else 0.0
+    s_near_mp = [p for p in s_parsed_mp if abs(p["strike"] - spot) <= 2000]
+    s_call_wall = (max(s_near_mp, key=lambda r: r["call_oi"], default={})).get("strike", 0)
+    s_put_wall  = (max(s_near_mp, key=lambda r: r["put_oi"],  default={})).get("strike", 0)
+
+    # ATM delta via BS
+    def _bs_delta_s(S, K, T, r, sig):
+        if sig <= 0 or T <= 0 or S <= 0 or K <= 0:
+            return 0.5
+        try:
+            d1 = (_math.log(S/K) + (r + 0.5*sig**2)*T) / (sig * _math.sqrt(T))
+            return round(float(_rej_norm.cdf(d1)), 4)
+        except Exception:
+            return 0.5
+
+    s_atm_call_delta = _bs_delta_s(spot, spot, T_years, r_rate, avg_iv / 100.0) if avg_iv > 0 else 0.5
+    s_atm_put_delta  = round(s_atm_call_delta - 1.0, 4)
+
+    # Gap data (spot_change already available as spot_data["change_pct"])
+    gap_pct_s = 0.0
+    try:
+        def _sensex_gap():
+            import yfinance as _yf2
+            return _yf2.Ticker("^BSESN").history(period="3d", interval="1d", progress=False)
+        _sh = await asyncio.wait_for(asyncio.to_thread(_sensex_gap), timeout=5.0)
+        if len(_sh) >= 2:
+            _sp = float(_sh["Close"].iloc[-2])
+            _op = float(_sh["Open"].iloc[-1])
+            gap_pct_s = round((_op - _sp) / _sp * 100, 2) if _sp else 0.0
+    except Exception:
+        pass
+
+    # ════════════════════════════════════════════════════════════════
+    # CALL BUY — 12-factor criteria
+    # ════════════════════════════════════════════════════════════════
+
+    # Factor 1 (Mandatory)
     c1_spot_up  = spot_change > 0
     if is_real_oi:
         c1_oi_proxy = pcr_oi < 1.0 and total_ce_oi > total_pe_oi * 0.7
@@ -14858,30 +15069,70 @@ async def rej_sensex_option_flow():
     c1d = (f"{oi_note_c} | "
            f"CE {int(total_ce_vol//1000)}K {'≥1.3x' if c1_vol_ok else '<1.3x'} PE {int(total_pe_vol//1000)}K")
 
-    # C2: IV Rising / Stable
+    # Factor 2: IV Rising / Stable
     call_c2 = avg_iv >= 11
     c2d     = f"VIX {avg_iv}% — {iv_status}"
 
-    # C3: BOTH Put Writing AND Call Unwind must pass (strict AND, not OR)
-    pw  = vix_change_pct <= -0.3        # VIX falling ≥ 0.3% = put writers active
-    cu  = spot_change >= 0.3            # Spot ↑ ≥ 0.3% = call writers covering
-    call_c3  = pw and cu               # BOTH required (strict)
+    # Factor 3: Put Writing AND Call Unwind (strict)
+    pw  = vix_change_pct <= -0.3
+    cu  = spot_change >= 0.3
+    call_c3 = pw and cu
     c3d_c = (f"VIX {'+' if vix_change_pct >= 0 else ''}{vix_change_pct}% "
-             f"{'(Put Writing ✓)' if pw else '(Put Writing ✗ — need ≤-0.3%)'} | "
-             f"Spot +{spot_change}% {'(Call Unwind ✓)' if cu else '(Call Unwind ✗ — need ≥+0.3%)'}")
+             f"{'(Put Writing ✓)' if pw else '(Put Writing ✗)'} | "
+             f"Spot +{spot_change}% {'(Call Unwind ✓)' if cu else '(Call Unwind ✗)'}")
 
-    # C4: High Positive Vanna
-    call_c4   = avg_vanna_ce > 0
-    c4d_c     = f"ATM CE Vanna {'+' if avg_vanna_ce >= 0 else ''}{avg_vanna_ce:.4f}"
+    # Factor 4: Delta 0.35–0.60
+    call_c4_d = 0.35 <= s_atm_call_delta <= 0.60
+    c4d_c_d   = f"ATM CE Δ {s_atm_call_delta:.4f} {'✓ 0.35-0.60' if call_c4_d else '✗ out of range'}"
 
-    call_score  = int(sum([call_c1, call_c2, call_c3, call_c4]))
-    call_signal = "STRONG" if call_score >= 3 else "PARTIAL" if call_score == 2 else "WEAK"
+    # Factor 5: Positive Vanna
+    call_c5 = avg_vanna_ce > 0
+    c5d_c   = f"ATM CE Vanna {'+' if avg_vanna_ce >= 0 else ''}{avg_vanna_ce:.4f}"
+
+    # Factor 6: Net GEX Negative
+    s_net_gex = near_ce_oi_abs_s - near_pe_oi_abs_s
+    call_c6 = s_net_gex < 0
+    c6d_c   = (f"ATM CE OI {int(near_ce_oi_abs_s//1000)}K vs PE OI {int(near_pe_oi_abs_s//1000)}K "
+               f"({'Neg GEX ✓' if call_c6 else 'Pos GEX ✗'})")
+
+    # Factor 7: Gap + FII Bias Bullish
+    call_c7 = spot_change > 0
+    c7d_c   = (f"Spot {'+' if spot_change >= 0 else ''}{spot_change}% "
+               f"Gap {'+' if gap_pct_s >= 0 else ''}{gap_pct_s}% "
+               f"{'(Bullish ✓)' if call_c7 else '(Bearish ✗)'}")
+
+    # Factor 8: PCR < 0.9 (using BSE OI if available)
+    s_pcr_check = pcr_oi if is_real_oi else 1.0  # if no real OI, assume neutral
+    call_c8 = is_real_oi and 0 < s_pcr_check < 0.9
+    c8d_c   = f"PCR {s_pcr_check if is_real_oi else 'N/A (BSE OI)'} {'< 0.9 ✓' if call_c8 else '✗'}"
+
+    # Factor 9: OI Walls Upside Room
+    call_c9 = s_call_wall > 0 and spot < s_call_wall
+    c9d_c   = (f"Call Wall {s_call_wall:.0f} Max Pain {s_max_pain:.0f} "
+               f"Spot {spot:.0f} {'< CW ✓' if call_c9 else '≥ CW ✗'}")
+
+    # Factor 10 (Mandatory): Chart / Price Action
+    call_c10 = c1_vol_ok and c1_spot_up
+    c10d_c   = (f"CE Vol {int(total_ce_vol//1000)}K Spot {'↑ ✓' if c1_spot_up else '↓ ✗'} "
+                f"{'(Breakout Bias ✓)' if call_c10 else '✗'}")
+
+    # Factor 11: Sector Breadth
+    call_c11 = spot_change > 0 and avg_iv < 18
+    c11d_c   = (f"Spot {'+' if spot_change >= 0 else ''}{spot_change}% IV {avg_iv}% "
+                f"{'(Bullish Breadth ✓)' if call_c11 else '✗'}")
+
+    # Factor 12: Pre-open Imbalance
+    call_c12 = gap_pct_s >= 0
+    c12d_c   = f"Gap {'+' if gap_pct_s >= 0 else ''}{gap_pct_s}% {'(Buy Side ✓)' if call_c12 else '(Sell Side ✗)'}"
+
+    call_score  = int(sum([call_c1, call_c2, call_c3, call_c4_d, call_c5, call_c6, call_c7, call_c8, call_c9, call_c10, call_c11, call_c12]))
+    call_signal = "STRONG" if call_score >= 8 else "PARTIAL" if call_score >= 6 else "WEAK"
 
     # ════════════════════════════════════════════════════════════════
-    # PUT BUY — STRICT criteria
+    # PUT BUY — 12-factor criteria
     # ════════════════════════════════════════════════════════════════
 
-    # C1 PUT: Real BSE OI (if available) OR spot proxy
+    # Factor 1 (Mandatory)
     p1_spot_dn  = spot_change < 0
     if is_real_oi:
         p1_oi_proxy = pcr_oi > 1.0 and total_pe_oi > total_ce_oi * 0.7
@@ -14894,29 +15145,67 @@ async def rej_sensex_option_flow():
     p1d = (f"{oi_note_p} | "
            f"PE {int(total_pe_vol//1000)}K {'≥1.3x' if p1_vol_ok else '<1.3x'} CE {int(total_ce_vol//1000)}K")
 
-    # C2: IV Rising (stricter for put buy)
+    # Factor 2: IV Rising
     put_c2 = avg_iv > 14
     p2d    = f"VIX {avg_iv}% — {iv_status}"
 
-    # C3: BOTH Call Writing AND Put Unwind must pass (strict AND)
-    cw  = vix_change_pct >= 0.3        # VIX rising ≥ 0.3% = call writers active
-    pu  = spot_change <= -0.3          # Spot ↓ ≥ 0.3% = put writers unwinding
-    put_c3  = cw and pu               # BOTH required (strict)
+    # Factor 3: Call Writing AND Put Unwind (strict)
+    cw  = vix_change_pct >= 0.3
+    pu  = spot_change <= -0.3
+    put_c3 = cw and pu
     c3d_p = (f"VIX {'+' if vix_change_pct >= 0 else ''}{vix_change_pct}% "
-             f"{'(Call Writing ✓)' if cw else '(Call Writing ✗ — need ≥+0.3%)'} | "
-             f"Spot {spot_change}% {'(Put Unwind ✓)' if pu else '(Put Unwind ✗ — need ≤-0.3%)'}")
+             f"{'(Call Writing ✓)' if cw else '(Call Writing ✗)'} | "
+             f"Spot {spot_change}% {'(Put Unwind ✓)' if pu else '(Put Unwind ✗)'}")
 
-    # C4: High Negative Vanna
-    put_c4 = avg_vanna_pe < 0
-    c4d_p  = f"ATM PE Vanna {'+' if avg_vanna_pe >= 0 else ''}{avg_vanna_pe:.4f}"
+    # Factor 4: Delta -0.35 to -0.60
+    put_c4_d = -0.60 <= s_atm_put_delta <= -0.35
+    c4d_p_d  = f"ATM PE Δ {s_atm_put_delta:.4f} {'✓ -0.60 to -0.35' if put_c4_d else '✗ out of range'}"
 
-    put_score  = int(sum([put_c1, put_c2, put_c3, put_c4]))
-    put_signal = "STRONG" if put_score >= 3 else "PARTIAL" if put_score == 2 else "WEAK"
+    # Factor 5: Negative Vanna
+    put_c5 = avg_vanna_pe < 0
+    c5d_p  = f"ATM PE Vanna {'+' if avg_vanna_pe >= 0 else ''}{avg_vanna_pe:.4f}"
 
-    # ── Strict recommendation: needs score ≥ 3 ──────────────────────
-    if call_score >= 3 and call_score > put_score:
+    # Factor 6: Net GEX Negative
+    put_c6 = s_net_gex < 0
+    c6d_p  = (f"ATM CE OI {int(near_ce_oi_abs_s//1000)}K vs PE OI {int(near_pe_oi_abs_s//1000)}K "
+              f"({'Neg GEX ✓' if put_c6 else 'Pos GEX ✗'})")
+
+    # Factor 7: Gap + FII Bias Bearish
+    put_c7 = spot_change < 0
+    c7d_p  = (f"Spot {'+' if spot_change >= 0 else ''}{spot_change}% "
+              f"Gap {'+' if gap_pct_s >= 0 else ''}{gap_pct_s}% "
+              f"{'(Bearish ✓)' if put_c7 else '(Bullish ✗)'}")
+
+    # Factor 8: PCR > 1.1
+    put_c8 = is_real_oi and s_pcr_check > 1.1
+    c8d_p  = f"PCR {s_pcr_check if is_real_oi else 'N/A (BSE OI)'} {'> 1.1 ✓' if put_c8 else '✗'}"
+
+    # Factor 9: OI Walls Downside Room
+    put_c9 = s_put_wall > 0 and spot > s_put_wall
+    c9d_p  = (f"Put Wall {s_put_wall:.0f} Max Pain {s_max_pain:.0f} "
+              f"Spot {spot:.0f} {'> PW ✓' if put_c9 else '≤ PW ✗'}")
+
+    # Factor 10 (Mandatory): Chart / Price Action
+    put_c10 = p1_vol_ok and p1_spot_dn
+    c10d_p  = (f"PE Vol {int(total_pe_vol//1000)}K Spot {'↓ ✓' if p1_spot_dn else '↑ ✗'} "
+               f"{'(Breakdown Bias ✓)' if put_c10 else '✗'}")
+
+    # Factor 11: Sector Breadth
+    put_c11 = spot_change < 0 or avg_iv >= 18
+    c11d_p  = (f"Spot {'+' if spot_change >= 0 else ''}{spot_change}% IV {avg_iv}% "
+               f"{'(Bearish Breadth ✓)' if put_c11 else '✗'}")
+
+    # Factor 12: Pre-open Imbalance
+    put_c12 = gap_pct_s < 0
+    c12d_p  = f"Gap {'+' if gap_pct_s >= 0 else ''}{gap_pct_s}% {'(Sell Side ✓)' if put_c12 else '(Buy Side ✗)'}"
+
+    put_score  = int(sum([put_c1, put_c2, put_c3, put_c4_d, put_c5, put_c6, put_c7, put_c8, put_c9, put_c10, put_c11, put_c12]))
+    put_signal = "STRONG" if put_score >= 8 else "PARTIAL" if put_score >= 6 else "WEAK"
+
+    # ── Recommendation: needs score ≥ 6 ──────────────────────────────
+    if call_score >= 6 and call_score > put_score:
         recommended = "CALL_BUY"
-    elif put_score >= 3 and put_score > call_score:
+    elif put_score >= 6 and put_score > call_score:
         recommended = "PUT_BUY"
     else:
         recommended = "NEUTRAL"
@@ -14929,23 +15218,42 @@ async def rej_sensex_option_flow():
         "total_ce_vol": int(float(total_ce_vol)), "total_pe_vol": int(float(total_pe_vol)),
         "avg_vanna_ce": float(avg_vanna_ce), "avg_vanna_pe": float(avg_vanna_pe),
         "recommended": str(recommended),
-        "strict_mode": True,          # flag for frontend badge
+        "strict_mode": True,
         "is_derived":  True,
         "is_real_oi":    bool(is_real_oi),
         "total_ce_oi":   int(total_ce_oi),
         "total_pe_oi":   int(total_pe_oi),
         "pcr_oi":        float(pcr_oi),
+        "max_pain":      float(s_max_pain),
+        "call_wall":     float(s_call_wall),
+        "put_wall":      float(s_put_wall),
         "call_buy": {"score": call_score, "signal": call_signal, "criteria": {
-            "future_oi_vol":           {"pass": bool(call_c1), "label": "Future ↑ · OI+1.5L · CE≥1.3×PE", "detail": str(c1d)},
-            "iv_ok":                   {"pass": bool(call_c2), "label": "IV Rising / Stable",               "detail": str(c2d)},
-            "put_writing_call_unwind": {"pass": bool(call_c3), "label": "Put Writing AND Call Unwind",       "detail": str(c3d_c)},
-            "vanna":                   {"pass": bool(call_c4), "label": "High Positive Vanna",               "detail": str(c4d_c), "value": float(avg_vanna_ce)},
+            "future_oi_vol":           {"pass": bool(call_c1),   "label": "Future ↑ · OI+1.5L · CE≥1.3×PE",  "detail": str(c1d),    "weight": "Mandatory"},
+            "iv_ok":                   {"pass": bool(call_c2),   "label": "IV Rising / Stable",                "detail": str(c2d),    "weight": "High"},
+            "put_writing_call_unwind": {"pass": bool(call_c3),   "label": "Put Writing + Call Unwind",         "detail": str(c3d_c),  "weight": "High"},
+            "delta_range":             {"pass": bool(call_c4_d), "label": "Delta 0.35–0.60",                   "detail": str(c4d_c_d),"weight": "High"},
+            "vanna":                   {"pass": bool(call_c5),   "label": "Positive Vanna",                    "detail": str(c5d_c),  "weight": "Medium"},
+            "net_gex":                 {"pass": bool(call_c6),   "label": "Net GEX Negative",                  "detail": str(c6d_c),  "weight": "High"},
+            "gap_fii_bias":            {"pass": bool(call_c7),   "label": "Gap + FII Bias Bullish",            "detail": str(c7d_c),  "weight": "High"},
+            "pcr_level":               {"pass": bool(call_c8),   "label": "PCR < 0.9",                         "detail": str(c8d_c),  "weight": "Medium"},
+            "oi_walls":                {"pass": bool(call_c9),   "label": "OI Walls: Upside Room",             "detail": str(c9d_c),  "weight": "Medium"},
+            "chart_pa":                {"pass": bool(call_c10),  "label": "Chart / Price Action Breakout",     "detail": str(c10d_c), "weight": "Mandatory"},
+            "sector_breadth":          {"pass": bool(call_c11),  "label": "Sector Breadth Bullish",            "detail": str(c11d_c), "weight": "Medium"},
+            "preopen_imbalance":       {"pass": bool(call_c12),  "label": "Pre-open Imbalance Buy Side",       "detail": str(c12d_c), "weight": "Medium"},
         }},
         "put_buy": {"score": put_score, "signal": put_signal, "criteria": {
-            "future_oi_vol":           {"pass": bool(put_c1), "label": "Future ↓ · OI+1.5L · PE≥1.3×CE",  "detail": str(p1d)},
-            "iv_ok":                   {"pass": bool(put_c2), "label": "IV Rising",                          "detail": str(p2d)},
-            "call_writing_put_unwind": {"pass": bool(put_c3), "label": "Call Writing AND Put Unwind",        "detail": str(c3d_p)},
-            "vanna":                   {"pass": bool(put_c4), "label": "High Negative Vanna",                "detail": str(c4d_p), "value": float(avg_vanna_pe)},
+            "future_oi_vol":           {"pass": bool(put_c1),   "label": "Future ↓ · OI+1.5L · PE≥1.3×CE",  "detail": str(p1d),    "weight": "Mandatory"},
+            "iv_ok":                   {"pass": bool(put_c2),   "label": "IV Rising",                         "detail": str(p2d),    "weight": "High"},
+            "call_writing_put_unwind": {"pass": bool(put_c3),   "label": "Call Writing + Put Unwind",         "detail": str(c3d_p),  "weight": "High"},
+            "delta_range":             {"pass": bool(put_c4_d), "label": "Delta -0.35 to -0.60",              "detail": str(c4d_p_d),"weight": "High"},
+            "vanna":                   {"pass": bool(put_c5),   "label": "Negative Vanna",                    "detail": str(c5d_p),  "weight": "Medium"},
+            "net_gex":                 {"pass": bool(put_c6),   "label": "Net GEX Negative",                  "detail": str(c6d_p),  "weight": "High"},
+            "gap_fii_bias":            {"pass": bool(put_c7),   "label": "Gap + FII Bias Bearish",            "detail": str(c7d_p),  "weight": "High"},
+            "pcr_level":               {"pass": bool(put_c8),   "label": "PCR > 1.1",                         "detail": str(c8d_p),  "weight": "Medium"},
+            "oi_walls":                {"pass": bool(put_c9),   "label": "OI Walls: Downside Room",           "detail": str(c9d_p),  "weight": "Medium"},
+            "chart_pa":                {"pass": bool(put_c10),  "label": "Chart / Price Action Breakdown",    "detail": str(c10d_p), "weight": "Mandatory"},
+            "sector_breadth":          {"pass": bool(put_c11),  "label": "Sector Breadth Bearish",            "detail": str(c11d_p), "weight": "Medium"},
+            "preopen_imbalance":       {"pass": bool(put_c12),  "label": "Pre-open Imbalance Sell Side",      "detail": str(c12d_p), "weight": "Medium"},
         }},
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

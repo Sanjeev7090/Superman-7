@@ -80,18 +80,28 @@ function detectREJSignal(bars) {
 // ── Flow Criteria checklist component ────────────────────────────────────────
 const SIG_COL = s => s === 'STRONG' ? '#22c55e' : s === 'PARTIAL' ? '#fbbf24' : '#94a3b8';
 
+const WEIGHT_COLOR = w => w === 'Mandatory' ? '#f59e0b' : w === 'High' ? '#a78bfa' : '#64748b';
+
 function CriteriaRow({ item }) {
-  const { pass, label, detail } = item;
+  const { pass, label, detail, weight } = item;
   return (
-    <div className="flex items-start gap-1 py-0.5">
-      <span className="text-[9px] font-bold shrink-0 mt-px" style={{ color: pass ? '#22c55e' : '#ef4444' }}>
+    <div className="flex items-start gap-1 py-[2px]">
+      <span className="text-[8px] font-bold shrink-0 mt-px w-2.5 text-center" style={{ color: pass ? '#22c55e' : '#ef4444' }}>
         {pass ? '✓' : '✗'}
       </span>
-      <div className="min-w-0">
-        <div className="text-[8px] font-semibold leading-tight" style={{ color: pass ? '#d1fae5' : '#fca5a5' }}>
-          {label}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1">
+          <div className="text-[7.5px] font-semibold leading-tight truncate" style={{ color: pass ? '#d1fae5' : '#fca5a5' }}>
+            {label}
+          </div>
+          {weight && (
+            <span className="text-[5.5px] font-bold uppercase shrink-0 px-[3px] py-px rounded"
+              style={{ background: `${WEIGHT_COLOR(weight)}18`, color: WEIGHT_COLOR(weight), letterSpacing: '0.04em' }}>
+              {weight === 'Mandatory' ? 'MUST' : weight}
+            </span>
+          )}
         </div>
-        <div className="text-[7px] leading-tight text-zinc-500 truncate" title={detail}>
+        <div className="text-[6.5px] leading-tight text-zinc-600 truncate" title={detail}>
           {detail}
         </div>
       </div>
@@ -100,8 +110,9 @@ function CriteriaRow({ item }) {
 }
 
 function FlowSidePanel({ data, side, isRec }) {
-  const col  = side === 'CALL' ? '#22c55e' : '#ef4444';
-  const crit = Object.values(data.criteria);
+  const col   = side === 'CALL' ? '#22c55e' : '#ef4444';
+  const crit  = Object.values(data.criteria);
+  const total = crit.length;
   return (
     <div className="flex-1 rounded border px-2 py-1.5 min-w-0"
       style={{
@@ -114,15 +125,15 @@ function FlowSidePanel({ data, side, isRec }) {
         </span>
         <div className="flex items-center gap-1">
           <span className="text-[8px] font-bold" style={{ color: SIG_COL(data.signal) }}>
-            [{data.score}/4]
+            [{data.score}/{total}]
           </span>
-          <span className="text-[7px] font-bold px-1 rounded"
+          <span className="text-[6.5px] font-bold px-1 rounded"
             style={{ background: `${SIG_COL(data.signal)}20`, color: SIG_COL(data.signal) }}>
             {data.signal}
           </span>
         </div>
       </div>
-      <div className="divide-y divide-zinc-800/40">
+      <div className="divide-y divide-zinc-800/30">
         {crit.map((item, i) => <CriteriaRow key={i} item={item} />)}
       </div>
     </div>
