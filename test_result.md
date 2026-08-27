@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "ECO Calendar section mein 'Overall Best & Worst Months (Nifty 50)' section add karo - collapsible table with Month / Generally / Average Behaviour columns"
+user_problem_statement: "ECO Calendar section mein 'Overall Best & Worst Months (Nifty 50)' section add karo - collapsible table with Month / Generally / Average Behaviour columns. Then add 'Sector-wise Best / Worst Month' table below it with 10 sectors."
 
 frontend:
   - task: "Overall Best & Worst Months (Nifty 50) section in Eco Calendar"
@@ -120,10 +120,25 @@ frontend:
         agent: "testing"
         comment: "VERIFIED: All requirements met. (1) Section header displays 'OVERALL BEST & WORST MONTHS' with 'NIFTY 50' badge ✓ (2) Section is visible and expanded by default (showSeasonal=true, ▲ arrow visible) ✓ (3) Column headers present: 'Month', 'Generally', 'Average Behaviour' ✓ (4) All 7 months verified with correct data: April→Strongest→New FY fund deployment, November→Very Strong→Festival + year-end positioning, December→Strong→Year-end rally, July→Mildly Strong→Earnings + rural demand, February→Weakest→Budget uncertainty, August→Weak→Monsoon + global weakness, March→Weak→FY-end selling ✓ (5) Color-coded left borders working: Strongest=#22c55e (green), Very Strong=#4ade80 (light green), Strong=#06b6d4 (cyan), Mildly Strong=#facc15 (yellow), Weakest=#ef4444 (red), Weak=#f97316 (orange) ✓ (6) Toggle functionality working perfectly: clicking header collapses section (▼ arrow, content hidden), clicking again expands (▲ arrow, content visible) ✓ (7) Section correctly placed at bottom of Eco Calendar tab above footer ✓ Screenshots captured showing expanded and collapsed states. Feature is production-ready."
 
+  - task: "Sector-wise Best / Worst Month table in Eco Calendar"
+    implemented: true
+    working: true
+    file: "frontend/src/components/InsiderTracker.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added 'Sector-wise Best / Worst Month' collapsible section below 'Overall Best & Worst Months' in EconomicCalendar component. Added SECTOR_SEASONAL constant with 10 sectors (Auto, Metal, Pharma, IT, Bank/PSU Bank, Realty, Oil & Gas, FMCG, Energy/Power, Infra/Cap Goods). Each sector has icon emoji, best month(s), and worst month(s). Added showSector state (default true = expanded). Grid layout: Sector (100px) | Best Month | Worst Month. Green styling for Best Month cells (rgba(34,197,94,0.12) bg, #4ade80 text). Red styling for Worst Month cells (rgba(239,68,68,0.10) bg, #f87171 text). Plain styling for '—' (no worst month). Toggle arrow (▲/▼) collapses/expands section. Section header has ◈ icon. Positioned below Overall Best & Worst Months section."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: All requirements met. (1) Section header displays 'SECTOR-WISE BEST / WORST MONTH' with ◈ icon ✓ (2) Section is visible and expanded by default (showSector=true) ✓ (3) Column headers present: 'Sector', 'Best Month', 'Worst Month' ✓ (4) All 10 sectors verified with correct data: Auto (🚗 April, Oct–Nov → January), Metal (⚙️ April, Dec → January), Pharma (💊 April, Jul–Sep → January), IT (💻 July–Sep → Feb/April), Bank/PSU Bank (🏦 Oct–Nov → February), Realty (🏗️ Dec, Oct–Nov → February), Oil & Gas (⛽ April → February), FMCG (🛒 Oct–Dec → Monsoon variable), Energy/Power (⚡ May–Jun → —), Infra/Cap Goods (🏛️ Feb (Budget), Aug–Sep → —) ✓ (5) Styling verified: Best Month cells have green color rgb(74,222,128)=#4ade80 ✓ Worst Month cells have red color rgb(248,113,113)=#f87171 ✓ (6) Toggle functionality working: section collapses/expands on header click ✓ (7) Section correctly positioned below 'Overall Best & Worst Months' section ✓ (8) Both sections visible together in Eco Calendar tab ✓ Screenshots captured showing both sections. Feature is production-ready."
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
@@ -137,6 +152,8 @@ agent_communication:
     message: "Added 'Overall Best & Worst Months (Nifty 50)' collapsible section in EconomicCalendar component (InsiderTracker.jsx). Added SEASONAL_MONTHS constant with 7 months data. Added showSeasonal state (default open). Section renders between events list and footer. Grid layout: Month (72px) | Generally badge (88px) | Average Behaviour text. Color-coded left border: Strongest=green, Very Strong=light-green, Strong=cyan, Mildly Strong=yellow, Weakest=red, Weak=orange. Toggle arrow collapses/expands. Frontend compiled successfully."
   - agent: "testing"
     message: "Testing complete for 'Overall Best & Worst Months (Nifty 50)' section. Comprehensive UI testing performed via Playwright. All 7 requirements verified: (1) Section header with NIFTY 50 badge ✓ (2) Expanded by default ✓ (3) Column headers ✓ (4) All 7 months with correct data ✓ (5) Color-coded borders ✓ (6) Toggle collapse/expand ✓ (7) Correct placement ✓ Feature is fully functional and ready for production use."
+  - agent: "testing"
+    message: "Testing complete for 'Sector-wise Best / Worst Month' table. Comprehensive UI testing performed via Playwright on https://1e9c4385-cd97-444e-92a5-55146f6143da.preview.emergentagent.com. All 10 requirements verified: (1) Section header with ◈ icon ✓ (2) Section expanded by default ✓ (3) All 3 column headers present ✓ (4) All 10 sectors present with correct data ✓ (5) Green styling for Best Month cells confirmed ✓ (6) Red styling for Worst Month cells confirmed ✓ (7) Toggle functionality working ✓ (8) Both sections (Overall + Sector-wise) visible together ✓ (9) Correct positioning below Overall section ✓ (10) All sector icons (emojis) present ✓ Feature is fully functional and production-ready. No issues found."
 
 user_problem_statement: "Clone https://github.com/Sanjeev7090/superman-4 - everything same"
 

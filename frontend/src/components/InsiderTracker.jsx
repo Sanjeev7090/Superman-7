@@ -593,6 +593,19 @@ const SEASONAL_MONTHS = [
   { month: 'March',    rating: 'Weak',         color: '#f97316', behavior: 'FY-end selling'                  },
 ];
 
+const SECTOR_SEASONAL = [
+  { sector: 'Auto',           icon: '🚗', best: 'April, Oct–Nov',        worst: 'January'           },
+  { sector: 'Metal',          icon: '⚙️', best: 'April, Dec',            worst: 'January'           },
+  { sector: 'Pharma',         icon: '💊', best: 'April, Jul–Sep',        worst: 'January'           },
+  { sector: 'IT',             icon: '💻', best: 'July–Sep',              worst: 'Feb / April'       },
+  { sector: 'Bank / PSU Bank',icon: '🏦', best: 'Oct–Nov',               worst: 'February'          },
+  { sector: 'Realty',         icon: '🏗️', best: 'Dec, Oct–Nov',          worst: 'February'          },
+  { sector: 'Oil & Gas',      icon: '⛽', best: 'April',                 worst: 'February'          },
+  { sector: 'FMCG',           icon: '🛒', best: 'Oct–Dec',               worst: 'Monsoon variable'  },
+  { sector: 'Energy / Power', icon: '⚡', best: 'May–Jun',               worst: '—'                 },
+  { sector: 'Infra / Cap Goods',icon:'🏛️',best: 'Feb (Budget), Aug–Sep', worst: '—'                 },
+];
+
 function EconomicCalendar({ C }) {
   const now = new Date();
   const [viewMonth,    setViewMonth]    = useState(now.getMonth() + 1);
@@ -600,6 +613,7 @@ function EconomicCalendar({ C }) {
   const [ecoData,      setEcoData]      = useState(null);
   const [loading,      setLoading]      = useState(false);
   const [showSeasonal, setShowSeasonal] = useState(true);
+  const [showSector,   setShowSector]   = useState(true);
 
   const load = useCallback(async (m, y) => {
     setLoading(true);
@@ -888,6 +902,86 @@ function EconomicCalendar({ C }) {
                   textAlign: 'center', whiteSpace: 'nowrap',
                 }}>{item.rating}</span>
                 <span style={{ fontSize: 9, color: C.textSecond, lineHeight: 1.35 }}>{item.behavior}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Sector-wise Seasonal Table ── */}
+      <div style={{
+        borderTop: `1px solid ${C.border}`,
+        background: C.headerBg,
+        flexShrink: 0,
+      }}>
+        {/* Header toggle */}
+        <div
+          onClick={() => setShowSector(s => !s)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '7px 14px', cursor: 'pointer',
+            borderBottom: showSector ? `1px solid ${C.border}` : 'none',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 8, color: '#a78bfa', fontWeight: 800 }}>◈</span>
+            <span style={{ fontSize: 9, fontWeight: 800, color: C.textPrimary, letterSpacing: '0.05em' }}>
+              SECTOR-WISE BEST / WORST MONTH
+            </span>
+          </div>
+          <span style={{ fontSize: 9, color: C.textSecond, lineHeight: 1 }}>
+            {showSector ? '▲' : '▼'}
+          </span>
+        </div>
+
+        {showSector && (
+          <div style={{ padding: '8px 10px 10px' }}>
+            {/* Column headers */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '100px 1fr 1fr',
+              gap: 4, padding: '3px 8px 5px',
+              borderBottom: `1px solid ${C.border}`,
+              marginBottom: 4,
+            }}>
+              {['Sector', 'Best Month', 'Worst Month'].map(h => (
+                <span key={h} style={{ fontSize: 7, fontWeight: 800, color: C.textSecond, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+                  {h}
+                </span>
+              ))}
+            </div>
+            {/* Rows */}
+            {SECTOR_SEASONAL.map(item => (
+              <div
+                key={item.sector}
+                style={{
+                  display: 'grid', gridTemplateColumns: '100px 1fr 1fr',
+                  alignItems: 'center', gap: 4,
+                  padding: '5px 8px', borderRadius: 6,
+                  marginBottom: 3,
+                  background: C.cardBg,
+                  border: `1px solid ${C.border}`,
+                }}
+              >
+                {/* Sector */}
+                <span style={{ fontSize: 9, fontWeight: 700, color: C.textPrimary, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 10 }}>{item.icon}</span>
+                  {item.sector}
+                </span>
+                {/* Best */}
+                <span style={{
+                  fontSize: 8, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                  background: 'rgba(34,197,94,0.12)', color: '#4ade80',
+                  border: '1px solid rgba(34,197,94,0.25)',
+                  textAlign: 'center',
+                }}>{item.best}</span>
+                {/* Worst */}
+                <span style={{
+                  fontSize: 8, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                  background: item.worst === '—' ? 'transparent' : 'rgba(239,68,68,0.10)',
+                  color: item.worst === '—' ? C.textSecond : '#f87171',
+                  border: item.worst === '—' ? 'none' : '1px solid rgba(239,68,68,0.25)',
+                  textAlign: 'center',
+                }}>{item.worst}</span>
               </div>
             ))}
           </div>
