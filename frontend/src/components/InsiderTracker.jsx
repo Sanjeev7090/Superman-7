@@ -583,12 +583,23 @@ const CAT_META = {
   FNO:   { color: '#06b6d4', label: 'F&O'  },
 };
 
+const SEASONAL_MONTHS = [
+  { month: 'April',    rating: 'Strongest',    color: '#22c55e', behavior: 'New FY fund deployment'         },
+  { month: 'November', rating: 'Very Strong',  color: '#4ade80', behavior: 'Festival + year-end positioning' },
+  { month: 'December', rating: 'Strong',       color: '#06b6d4', behavior: 'Year-end rally'                  },
+  { month: 'July',     rating: 'Mildly Strong',color: '#facc15', behavior: 'Earnings + rural demand'         },
+  { month: 'February', rating: 'Weakest',      color: '#ef4444', behavior: 'Budget uncertainty'              },
+  { month: 'August',   rating: 'Weak',         color: '#f97316', behavior: 'Monsoon + global weakness'       },
+  { month: 'March',    rating: 'Weak',         color: '#f97316', behavior: 'FY-end selling'                  },
+];
+
 function EconomicCalendar({ C }) {
   const now = new Date();
-  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
-  const [viewYear,  setViewYear]  = useState(now.getFullYear());
-  const [ecoData,   setEcoData]   = useState(null);
-  const [loading,   setLoading]   = useState(false);
+  const [viewMonth,    setViewMonth]    = useState(now.getMonth() + 1);
+  const [viewYear,     setViewYear]     = useState(now.getFullYear());
+  const [ecoData,      setEcoData]      = useState(null);
+  const [loading,      setLoading]      = useState(false);
+  const [showSeasonal, setShowSeasonal] = useState(true);
 
   const load = useCallback(async (m, y) => {
     setLoading(true);
@@ -806,6 +817,80 @@ function EconomicCalendar({ C }) {
                 </div>
               );
             })
+        )}
+      </div>
+
+      {/* ── Seasonal Monthly Behaviour ── */}
+      <div style={{
+        borderTop: `1px solid ${C.border}`,
+        background: C.headerBg,
+        flexShrink: 0,
+      }}>
+        {/* Header toggle */}
+        <div
+          onClick={() => setShowSeasonal(s => !s)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '7px 14px', cursor: 'pointer',
+            borderBottom: showSeasonal ? `1px solid ${C.border}` : 'none',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 8, letterSpacing: '0.05em', color: '#06b6d4', fontWeight: 800 }}>
+              ★
+            </span>
+            <span style={{ fontSize: 9, fontWeight: 800, color: C.textPrimary, letterSpacing: '0.05em' }}>
+              OVERALL BEST &amp; WORST MONTHS
+            </span>
+            <span style={{
+              fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 3,
+              background: 'rgba(6,182,212,0.12)', color: '#06b6d4',
+              border: '1px solid rgba(6,182,212,0.30)',
+            }}>NIFTY 50</span>
+          </div>
+          <span style={{ fontSize: 9, color: C.textSecond, lineHeight: 1 }}>
+            {showSeasonal ? '▲' : '▼'}
+          </span>
+        </div>
+
+        {showSeasonal && (
+          <div style={{ padding: '8px 10px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {/* Column headers */}
+            <div style={{
+              display: 'grid', gridTemplateColumns: '72px 88px 1fr',
+              gap: 6, padding: '3px 10px 5px',
+              borderBottom: `1px solid ${C.border}`,
+            }}>
+              {['Month', 'Generally', 'Average Behaviour'].map(h => (
+                <span key={h} style={{ fontSize: 7, fontWeight: 800, color: C.textSecond, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+                  {h}
+                </span>
+              ))}
+            </div>
+            {/* Rows */}
+            {SEASONAL_MONTHS.map(item => (
+              <div
+                key={item.month}
+                style={{
+                  display: 'grid', gridTemplateColumns: '72px 88px 1fr',
+                  alignItems: 'center', gap: 6,
+                  padding: '5px 8px', borderRadius: 6,
+                  background: C.cardBg,
+                  border: `1px solid ${C.border}`,
+                  borderLeft: `3px solid ${item.color}`,
+                }}
+              >
+                <span style={{ fontSize: 10, fontWeight: 800, color: C.textPrimary }}>{item.month}</span>
+                <span style={{
+                  fontSize: 8, fontWeight: 700, padding: '2px 6px', borderRadius: 10,
+                  background: `${item.color}20`, color: item.color,
+                  border: `1px solid ${item.color}40`,
+                  textAlign: 'center', whiteSpace: 'nowrap',
+                }}>{item.rating}</span>
+                <span style={{ fontSize: 9, color: C.textSecond, lineHeight: 1.35 }}>{item.behavior}</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
