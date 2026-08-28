@@ -107,6 +107,7 @@ const TradingDashboard = () => {
   const [strategyMarkers, setStrategyMarkers] = useState([]); // Strategy overlay markers from Vibe Research
   const [showInsider, setShowInsider] = useState(false); // Insider Tracker
   const [showTradeSetup, setShowTradeSetup] = useState(false);
+  const [tradeAlert, setTradeAlert] = useState(null); // { score, direction, active }
   const [patternCount, setPatternCount] = useState(0);  // Pattern alert badge
   const { theme, toggleTheme } = useTheme();
 
@@ -122,6 +123,22 @@ const TradingDashboard = () => {
     };
     const t = setTimeout(fetchCount, 6000);   // delayed so it doesn't slow initial load
     return () => clearTimeout(t);
+  }, []);
+
+  // Background Trade Setup score poll — every 3 min, alert when |score| >= 3
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/trade-setup/suggest`);
+        if (!r.ok) return;
+        const d = await r.json();
+        const score = d.score ?? 0;
+        setTradeAlert({ score, direction: d.direction, active: Math.abs(score) >= 3 });
+      } catch (_) {}
+    };
+    const t = setTimeout(poll, 8000); // delay initial so page loads first
+    const iv = setInterval(poll, 3 * 60 * 1000); // then every 3 min
+    return () => { clearTimeout(t); clearInterval(iv); };
   }, []);
   const wsRef = useRef(null);
   const rlPollRef = useRef(null);
@@ -709,12 +726,46 @@ const TradingDashboard = () => {
           {/* Trade Setup Suggester button */}
           <button
             onClick={() => setShowTradeSetup(true)}
-            className="p-1.5 rounded-md border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10 transition-all"
-            title="Trade Setup — Entry / SL / Target / Best Strike"
+            className={`p-1.5 rounded-md border transition-all ${
+              tradeAlert?.active
+                ? tradeAlert.direction === 'BUY CE'
+                  ? 'border-green-500/50 text-green-400 bg-green-500/10 shadow-[0_0_12px_rgba(34,197,94,0.3)]'
+                  : 'border-red-500/50 text-red-400 bg-red-500/10 shadow-[0_0_12px_rgba(239,68,68,0.3)]'
+                : 'border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10'
+            }`}
+            title={tradeAlert?.active
+              ? `SIGNAL: ${tradeAlert.direction} (Score ${tradeAlert.score >= 0 ? '+' : ''}${tradeAlert.score}) — Click to view`
+              : 'Trade Setup — Entry / SL / Target / Best Strike'}
             data-testid="trade-setup-btn"
             style={{ position: 'relative' }}
           >
             <Lightning size={15} weight="fill" />
+
+            {/* Flashing badge when strong signal */}
+            {tradeAlert?.active && (
+              <>
+                {/* ping ring */}
+                <span className="absolute inset-0 rounded-md animate-ping"
+                  style={{
+                    background: tradeAlert.direction === 'BUY CE'
+                      ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)',
+                    animationDuration: '1.4s',
+                  }}
+                />
+                {/* badge */}
+                <span style={{
+                  position: 'absolute', top: -6, right: -7,
+                  fontSize: 6, fontWeight: 900, letterSpacing: '0.03em',
+                  padding: '1px 3px', borderRadius: 3, lineHeight: 1.4,
+                  background: tradeAlert.direction === 'BUY CE' ? '#22c55e' : '#ef4444',
+                  color: '#000',
+                  boxShadow: '0 0 0 1.5px #0d0f17',
+                  pointerEvents: 'none',
+                }}>
+                  {tradeAlert.direction === 'BUY CE' ? 'CE' : 'PE'}
+                </span>
+              </>
+            )}
           </button>
 
           {/* RL AGENT BACKGROUND TRAINING INDICATOR — jumps into Settings drawer */}
