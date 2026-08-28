@@ -8643,18 +8643,26 @@ async def get_top_movers(cap: str = "large", filter: str = "gainers", limit: int
 # ======================= SECTOR TRENDING =======================
 
 _SECTOR_MAP = [
-    {"name": "NIFTY BANK",    "ticker": "^NSEBANK",    "icon": "bank"},
-    {"name": "NIFTY IT",      "ticker": "^CNXIT",      "icon": "it"},
-    {"name": "NIFTY AUTO",    "ticker": "^CNXAUTO",    "icon": "auto"},
-    {"name": "NIFTY PHARMA",  "ticker": "^CNXPHARMA",  "icon": "pharma"},
-    {"name": "NIFTY FMCG",   "ticker": "^CNXFMCG",    "icon": "fmcg"},
-    {"name": "NIFTY METAL",   "ticker": "^CNXMETAL",   "icon": "metal"},
-    {"name": "NIFTY REALTY",  "ticker": "^CNXREALTY",  "icon": "realty"},
-    {"name": "NIFTY ENERGY",  "ticker": "^CNXENERGY",  "icon": "energy"},
-    {"name": "NIFTY INFRA",   "ticker": "^CNXINFRA",   "icon": "infra"},
-    {"name": "NIFTY MEDIA",   "ticker": "^CNXMEDIA",   "icon": "media"},
-    {"name": "NIFTY PSU BANK","ticker": "^CNXPSUBANK", "icon": "psubank"},
-    {"name": "NIFTY MIDCAP",  "ticker": "^NSEMDCP50",  "icon": "midcap"},
+    # ── High weight (biggest impact on Nifty 50) ──
+    {"name": "NIFTY BANK",      "ticker": "^NSEBANK",    "icon": "bank",    "weight": "HIGH", "nifty_wt": "~36%"},
+    {"name": "NIFTY FIN SVC",   "ticker": "^CNXFIN",     "icon": "finserv", "weight": "HIGH", "nifty_wt": "~8%"},
+    {"name": "NIFTY IT",        "ticker": "^CNXIT",      "icon": "it",      "weight": "HIGH", "nifty_wt": "~13%"},
+    {"name": "NIFTY ENERGY",    "ticker": "^CNXENERGY",  "icon": "energy",  "weight": "HIGH", "nifty_wt": "~12%"},
+    {"name": "NIFTY FMCG",      "ticker": "^CNXFMCG",    "icon": "fmcg",    "weight": "HIGH", "nifty_wt": "~9%"},
+    {"name": "NIFTY AUTO",      "ticker": "^CNXAUTO",    "icon": "auto",    "weight": "HIGH", "nifty_wt": "~7%"},
+    # ── Mid weight ──
+    {"name": "NIFTY PHARMA",    "ticker": "^CNXPHARMA",  "icon": "pharma",  "weight": "MID",  "nifty_wt": "~4%"},
+    {"name": "NIFTY METAL",     "ticker": "^CNXMETAL",   "icon": "metal",   "weight": "MID",  "nifty_wt": "~4%"},
+    {"name": "NIFTY INFRA",     "ticker": "^CNXINFRA",   "icon": "infra",   "weight": "MID",  "nifty_wt": "~3%"},
+    {"name": "NIFTY PSU BANK",  "ticker": "^CNXPSUBANK", "icon": "psubank", "weight": "MID",  "nifty_wt": "~3%"},
+    {"name": "NIFTY PSE",       "ticker": "^CNXPSE",     "icon": "pse",     "weight": "MID",  "nifty_wt": "~4%"},
+    {"name": "NIFTY CONSUM",    "ticker": "^CNXCONSUM",  "icon": "consump", "weight": "MID",  "nifty_wt": "~3%"},
+    # ── Lower weight (watch sectors) ──
+    {"name": "NIFTY SERVICE",   "ticker": "^CNXSERVICE", "icon": "service", "weight": "LOW",  "nifty_wt": "~3%"},
+    {"name": "NIFTY MNC",       "ticker": "^CNXMNC",     "icon": "mnc",     "weight": "LOW",  "nifty_wt": "~2%"},
+    {"name": "NIFTY REALTY",    "ticker": "^CNXREALTY",  "icon": "realty",  "weight": "LOW",  "nifty_wt": "~1%"},
+    {"name": "NIFTY MEDIA",     "ticker": "^CNXMEDIA",   "icon": "media",   "weight": "LOW",  "nifty_wt": "~1%"},
+    {"name": "NIFTY MIDCAP",    "ticker": "^NSEMDCP50",  "icon": "midcap",  "weight": "LOW",  "nifty_wt": "broad"},
 ]
 
 # ---- NSE Sector Constituents ----
@@ -8933,30 +8941,39 @@ async def get_sectors_trending():
     if _sector_cache.get("ts", 0) + _SECTOR_CACHE_TTL > now and _sector_cache.get("data"):
         return {"sectors": _sector_cache["data"], "cached": True}
 
-    results = []
-    for sector in _SECTOR_MAP:
+    def _fetch_one_sector(sector):
         try:
-            obj = yf.Ticker(sector["ticker"])
-            hist = obj.history(period="2d")
-            if hist.empty or len(hist) < 2:
-                hist = obj.history(period="5d")
-            if hist.empty or len(hist) < 2:
-                continue
-            prev_close = float(hist["Close"].iloc[-2])
-            curr_close = float(hist["Close"].iloc[-1])
-            if prev_close <= 0:
-                continue
-            change_pct = round((curr_close - prev_close) / prev_close * 100, 2)
-            results.append({
-                "name": sector["name"],
-                "ticker": sector["ticker"],
-                "icon": sector["icon"],
+            fast = yf.Ticker(sector["ticker"]).fast_info
+            curr = fast.get("last_price") or fast.get("lastPrice")
+            prev = fast.get("previous_close") or fast.get("previousClose")
+            if not curr or not prev or prev <= 0:
+                # Fallback to history if fast_info missing
+                hist = yf.Ticker(sector["ticker"]).history(period="5d")
+                if hist.empty or len(hist) < 2:
+                    return None
+                prev = float(hist["Close"].iloc[-2])
+                curr = float(hist["Close"].iloc[-1])
+                if prev <= 0:
+                    return None
+            change_pct = round((curr - prev) / prev * 100, 2)
+            return {
+                "name":       sector["name"],
+                "ticker":     sector["ticker"],
+                "icon":       sector["icon"],
+                "weight":     sector.get("weight", "MID"),
+                "nifty_wt":  sector.get("nifty_wt", ""),
                 "change_pct": change_pct,
-                "current": round(curr_close, 2),
-            })
+                "current":    round(curr, 2),
+            }
         except Exception:
-            continue
+            return None
 
+    loop = asyncio.get_event_loop()
+    with _TPE(max_workers=18) as exe:
+        tasks = [loop.run_in_executor(exe, _fetch_one_sector, s) for s in _SECTOR_MAP]
+        raw = await asyncio.gather(*tasks)
+
+    results = [r for r in raw if r is not None]
     # Sort by absolute change descending (top movers first)
     results.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
     _sector_cache = {"ts": now, "data": results}
@@ -8973,32 +8990,9 @@ async def get_sector_breadth():
     global _sector_cache
     now = datetime.now(timezone.utc).timestamp()
 
-    # Reuse cache or fetch fresh
+    # Reuse cache or fetch fresh via get_sectors_trending (parallel fast_info)
     if not (_sector_cache.get("ts", 0) + _SECTOR_CACHE_TTL > now and _sector_cache.get("data")):
-        results = []
-        for sector in _SECTOR_MAP:
-            try:
-                obj = yf.Ticker(sector["ticker"])
-                hist = obj.history(period="2d")
-                if hist.empty or len(hist) < 2:
-                    hist = obj.history(period="5d")
-                if hist.empty or len(hist) < 2:
-                    continue
-                prev_close = float(hist["Close"].iloc[-2])
-                curr_close = float(hist["Close"].iloc[-1])
-                if prev_close <= 0:
-                    continue
-                change_pct = round((curr_close - prev_close) / prev_close * 100, 2)
-                results.append({
-                    "name": sector["name"],
-                    "ticker": sector["ticker"],
-                    "icon": sector["icon"],
-                    "change_pct": change_pct,
-                    "current": round(curr_close, 2),
-                })
-            except Exception:
-                continue
-        _sector_cache = {"ts": now, "data": results}
+        await get_sectors_trending()
 
     sectors = _sector_cache.get("data", [])
     up_sectors   = [s for s in sectors if s["change_pct"] > 0]
@@ -9007,45 +9001,55 @@ async def get_sector_breadth():
     up_count = len(up_sectors)
     down_count = len(down_sectors)
 
-    # ── Determine bias using user-specified rules ──────────────────────
+    # ── Determine bias — percentage-based so it scales with sector count ──
+    # High-weight sectors (bank, finserv, it, energy, fmcg, auto) get tracked separately
+    HIGH_WEIGHT_ICONS = {"bank", "finserv", "it", "energy", "fmcg", "auto"}
+    hw_sectors   = [s for s in sectors if s.get("icon") in HIGH_WEIGHT_ICONS]
+    hw_up        = sum(1 for s in hw_sectors if s["change_pct"] > 0)
+    hw_down      = sum(1 for s in hw_sectors if s["change_pct"] < 0)
+    hw_total     = len(hw_sectors)
+
+    # Thresholds: proportional to total (67% / 50% / 33%)
+    strong_thr  = max(4, int(total * 0.67))
+    mild_thr    = max(3, int(total * 0.50))
+    neutral_thr = max(2, int(total * 0.33))
+
     if up_count >= down_count:
-        # Bullish side
-        if up_count >= 8:
+        if up_count >= strong_thr:
             bias = "Strong Bullish"; move = "+170 to +260 pts"
             action = "Aggressive Long / Call Buy"; color = "#22c55e"
-        elif up_count >= 6:
+        elif up_count >= mild_thr:
             bias = "Mild Bullish"; move = "+80 to +150 pts"
             action = "Selective Long"; color = "#86efac"
-        elif up_count >= 4:
+        elif up_count >= neutral_thr:
             bias = "Neutral-Mild"; move = "+30 to +80 pts"
             action = "Range / Selective"; color = "#fbbf24"
         else:
             bias = "Weak Bullish"; move = "+10 to +40 pts"
             action = "Normal Trading"; color = "#94a3b8"
     else:
-        # Bearish side
-        if down_count >= 8:
+        if down_count >= strong_thr:
             bias = "Strong Bearish"; move = "-180 to -280 pts"
             action = "Avoid Long / Consider Short"; color = "#ef4444"
-        elif down_count >= 6:
+        elif down_count >= mild_thr:
             bias = "Mild Bearish"; move = "-90 to -160 pts"
             action = "Cautious / Reduce Longs"; color = "#fca5a5"
-        elif down_count >= 4:
+        elif down_count >= neutral_thr:
             bias = "Neutral-Mild"; move = "-40 to -90 pts"
             action = "Range / Selective"; color = "#fbbf24"
         else:
             bias = "Weak Bearish"; move = "-10 to -40 pts"
             action = "Normal Trading"; color = "#94a3b8"
 
-    # ── Power sectors (Bank + IT + Auto carry highest weight) ─────────
-    POWER_ICONS = {"bank", "it", "auto"}
-    power_sectors = [s for s in sectors if s["icon"] in POWER_ICONS]
-    power_green = sum(1 for s in power_sectors if s["change_pct"] > 0)
-    power_red   = sum(1 for s in power_sectors if s["change_pct"] < 0)
-    power_aligned = power_green == 3 or power_red == 3  # all 3 same side
+    # ── Power sectors (Bank + IT + Auto + FinServ + Energy carry highest weight) ──
+    POWER_ICONS = {"bank", "it", "auto", "finserv", "energy"}
+    power_sectors = [s for s in sectors if s.get("icon") in POWER_ICONS]
+    power_green   = sum(1 for s in power_sectors if s["change_pct"] > 0)
+    power_red     = sum(1 for s in power_sectors if s["change_pct"] < 0)
+    power_aligned = power_green >= 4 or power_red >= 4
 
-    # ── High-probability big-move flag (8+ sectors same direction) ────
-    high_prob = up_count >= 8 or down_count >= 8
+    # ── High-probability big-move flag (67%+ sectors same direction) ────
+    high_prob = up_count >= strong_thr or down_count >= strong_thr
 
     return {
         "up_count": up_count,
@@ -9060,6 +9064,9 @@ async def get_sector_breadth():
         "power_green": power_green,
         "power_red": power_red,
         "power_aligned": power_aligned,
+        "hw_up": hw_up,
+        "hw_down": hw_down,
+        "hw_total": hw_total,
         "sectors": sectors,
         "cached": _sector_cache.get("ts", 0) + _SECTOR_CACHE_TTL > now,
     }

@@ -2,9 +2,23 @@ import React, { useState } from 'react';
 import { ChartBar } from '@phosphor-icons/react';
 
 const SECTOR_ICONS_LABEL = {
-  bank: 'BANK', it: 'IT', auto: 'AUTO', pharma: 'PHARMA', fmcg: 'FMCG',
-  metal: 'METAL', realty: 'REALTY', energy: 'ENERGY', infra: 'INFRA',
-  media: 'MEDIA', psubank: 'PSU BK', midcap: 'MIDCAP',
+  bank:    'BANK',
+  finserv: 'FIN SVC',
+  it:      'IT',
+  energy:  'ENERGY',
+  fmcg:    'FMCG',
+  auto:    'AUTO',
+  pharma:  'PHARMA',
+  metal:   'METAL',
+  infra:   'INFRA',
+  psubank: 'PSU BK',
+  pse:     'PSE',
+  consump: 'CONSUM',
+  service: 'SERVICE',
+  mnc:     'MNC',
+  realty:  'REALTY',
+  media:   'MEDIA',
+  midcap:  'MIDCAP',
 };
 
 export function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
@@ -12,13 +26,18 @@ export function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
   if (!sb || sb.total === 0) return null;
 
   const { up_count, down_count, total, bias, move, action, color,
-          high_prob, power_sectors, power_green, power_red, power_aligned, sectors } = sb;
+          high_prob, power_sectors, power_green, power_red, power_aligned,
+          hw_up, hw_down, hw_total = 6, sectors } = sb;
 
   const giftBull = giftPremium > 0;
   const giftBear = giftPremium < 0;
-  const combinedBull = up_count >= 8 && giftBull;
-  const combinedBear = down_count >= 8 && giftBear;
+  const strongThr  = Math.max(4, Math.floor(total * 0.67));
+  const combinedBull = up_count >= strongThr && giftBull;
+  const combinedBear = down_count >= strongThr && giftBear;
   const showSetup    = combinedBull || combinedBear;
+  const mixedLow     = Math.floor(total * 0.33);
+  const mixedHigh    = Math.ceil(total * 0.60);
+  const isMixed      = !showSetup && up_count >= mixedLow && up_count <= mixedHigh && down_count >= mixedLow;
 
   const CHECK_TIMES = '9:30 · 11:00 · 2:00 PM';
 
@@ -105,46 +124,160 @@ export function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
               {combinedBull ? '★ STRONG BULLISH SETUP' : '★ STRONG BEARISH SETUP'}
             </div>
             <div className="text-[7.5px] space-y-0.5" style={{ color: C.textSecond }}>
-              <div>✓ {up_count >= 8 ? `${up_count}` : `${down_count}`}/12 sectors aligned</div>
+              <div>✓ {up_count >= strongThr ? `${up_count}` : `${down_count}`}/{total} sectors aligned</div>
               <div>✓ GIFT Nifty {combinedBull ? 'positive' : 'negative'} ({giftPremium > 0 ? '+' : ''}{giftPremium} pts)</div>
               <div>→ {combinedBull ? 'Long / Call Buy after 15m Rejection + 1m Green confirm' : 'Short / Put Buy after 15m Rejection + 1m Red confirm'}</div>
             </div>
           </div>
         )}
 
-        {!showSetup && (up_count >= 5 && up_count <= 7 && down_count >= 5 && down_count <= 7) && (
+        {isMixed && (
           <div className="mt-2 rounded-lg px-3 py-1.5"
             style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)' }}>
             <div className="text-[8px] font-bold" style={{ color: '#fbbf24' }}>
               Mixed — Wait for clarity
             </div>
             <div className="text-[7.5px]" style={{ color: C.textMuted }}>
-              5–7 sectors mixed → small range trades only
+              Sectors split evenly → small range trades only
             </div>
           </div>
         )}
+
+        {/* ── Sector Breadth Decision Matrix ─────────────────── */}
+        <div className="mt-3">
+          <div className="text-[8px] font-black uppercase tracking-widest mb-1.5" style={{ color: C.textMuted }}>
+            Sector Breadth Decision Matrix
+          </div>
+          <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+            {/* Header row */}
+            <div className="grid text-[6.5px] font-black uppercase tracking-widest px-2 py-1.5"
+              style={{
+                gridTemplateColumns: '2.2rem 2.2rem 1fr 2.4rem 1.8rem 2.8rem',
+                gap: '4px',
+                background: C.cardBg,
+                color: C.textMuted,
+                borderBottom: `1px solid ${C.border}`,
+              }}>
+              <span>UP</span>
+              <span>DOWN</span>
+              <span>BIAS</span>
+              <span>EXP PTS</span>
+              <span>PROB</span>
+              <span>ACTION</span>
+            </div>
+
+            {[
+              {
+                upR: '10–12', dnR: '0–2',   bias: 'Strong Bullish', pts: '+400 to +650',
+                prob: 'High', action: 'Aggressive Long / Call',
+                color: '#22c55e', matchBias: ['Strong Bullish'],
+              },
+              {
+                upR: '8–9',  dnR: '3–4',   bias: 'Bullish',         pts: '+250 to +400',
+                prob: 'High', action: 'Selective Long',
+                color: '#86efac', matchBias: ['Mild Bullish'],
+              },
+              {
+                upR: '6–7',  dnR: '5–6',   bias: 'Mild Bullish',    pts: '+150 to +250',
+                prob: 'Med',  action: 'Small Long / wait 9:50',
+                color: '#bef264', matchBias: ['Weak Bullish','Neutral-Mild'],
+              },
+              {
+                upR: '5–7',  dnR: '5–7',   bias: 'Neutral',         pts: '−120 to +120',
+                prob: 'High', action: 'Range / pin / no chase',
+                color: '#fbbf24', matchBias: ['Neutral-Mild','Weak Bullish','Weak Bearish'],
+              },
+              {
+                upR: '3–4',  dnR: '8–9',   bias: 'Bearish',         pts: '−250 to −400',
+                prob: 'High', action: 'Selective Short / Put',
+                color: '#fca5a5', matchBias: ['Mild Bearish'],
+              },
+              {
+                upR: '0–2',  dnR: '10–12', bias: 'Strong Bearish',  pts: '−400 to −700',
+                prob: 'High', action: 'Hedge / Put / cash',
+                color: '#ef4444', matchBias: ['Strong Bearish'],
+              },
+            ].map((row, i, arr) => {
+              const isActive = row.matchBias.includes(bias);
+              return (
+                <div key={i}
+                  className="grid items-center px-2 py-1.5"
+                  style={{
+                    gridTemplateColumns: '2.2rem 2.2rem 1fr 2.4rem 1.8rem 2.8rem',
+                    gap: '4px',
+                    background: isActive ? `${row.color}14` : 'transparent',
+                    borderLeft: isActive ? `3px solid ${row.color}` : '3px solid transparent',
+                    borderBottom: i < arr.length - 1 ? `1px solid ${C.borderSubtle}` : 'none',
+                  }}>
+                  <span className="text-[7.5px] font-bold font-mono" style={{ color: isActive ? '#22c55e' : C.textMuted }}>
+                    {row.upR}
+                  </span>
+                  <span className="text-[7.5px] font-bold font-mono" style={{ color: isActive ? '#ef4444' : C.textMuted }}>
+                    {row.dnR}
+                  </span>
+                  <span className="text-[7.5px] font-bold" style={{ color: isActive ? row.color : C.textSecond }}>
+                    {row.bias}
+                  </span>
+                  <span className="text-[7px] font-mono" style={{ color: isActive ? C.textPrimary : C.textMuted }}>
+                    {row.pts}
+                  </span>
+                  <span className="text-[7px]" style={{ color: row.prob === 'High' ? (isActive ? '#22c55e' : C.textMuted) : '#fbbf24' }}>
+                    {row.prob}
+                  </span>
+                  <span className="text-[7px]" style={{ color: isActive ? C.textPrimary : C.textMuted }}>
+                    {row.action}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-1.5 mt-1">
+            <div className="w-2 h-2 rounded-sm" style={{ background: color, opacity: 0.7 }} />
+            <span className="text-[7.5px]" style={{ color: C.textMuted }}>
+              Current: <span style={{ color }}>{up_count}↑ {down_count}↓</span> of {total} → <span style={{ color }}>{bias}</span>
+            </span>
+          </div>
+        </div>
       </div>
 
       {expanded && (
         <div className="px-4 pb-4" style={{ borderTop: `1px solid ${C.border}` }}>
-          <div className="pt-3 mb-2">
-            <div className="text-[8px] uppercase tracking-wider mb-1.5 flex items-center justify-between"
+          {/* High-weight sectors summary */}
+          {hw_total > 0 && (
+            <div className="pt-2 pb-2 mb-1" style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+              <div className="text-[7.5px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>
+                High-Weight Sectors (Bank·FinSvc·IT·Oil&Gas·FMCG·Auto)
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] font-bold font-mono" style={{ color: '#22c55e' }}>▲{hw_up ?? '—'}</span>
+                <span className="text-[9px] font-bold font-mono" style={{ color: '#ef4444' }}>▼{hw_down ?? '—'}</span>
+                <span className="text-[7.5px]" style={{ color: C.textMuted }}>of {hw_total}</span>
+                <span className="text-[7.5px] ml-auto" style={{ color: C.textMuted }}>
+                  {(hw_up ?? 0) > (hw_down ?? 0) ? '→ Bullish bias amplified' : (hw_down ?? 0) > (hw_up ?? 0) ? '→ Bearish bias amplified' : '→ Mixed'}
+                </span>
+              </div>
+            </div>
+          )}
+          <div className="pt-2 mb-2">
+            <div className="text-[8px] uppercase tracking-wider mb-2 flex items-center justify-between"
               style={{ color: C.textMuted }}>
-              <span>All 12 Sectors</span>
+              <span>All {total} Sectors</span>
               <span>Check: {CHECK_TIMES}</span>
             </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="grid grid-cols-3 gap-x-3 gap-y-1">
               {(sectors || []).map(s => {
                 const up = s.change_pct > 0;
                 const pc = s.change_pct >= 0 ? `+${s.change_pct}%` : `${s.change_pct}%`;
+                const isHW = ['bank','finserv','it','oilgas','fmcg','auto'].includes(s.icon);
                 return (
                   <div key={s.icon} className="flex items-center justify-between">
-                    <span className="text-[8px] font-mono" style={{ color: C.textSecond }}>
+                    <span className="text-[7.5px] font-mono truncate"
+                      style={{ color: isHW ? C.textPrimary : C.textSecond }}>
                       {SECTOR_ICONS_LABEL[s.icon] || s.name.replace('NIFTY ', '')}
                     </span>
-                    <span className="text-[8px] font-bold font-mono"
+                    <span className="text-[7.5px] font-bold font-mono ml-1 shrink-0"
                       style={{ color: up ? '#22c55e' : s.change_pct < 0 ? '#ef4444' : C.textMuted }}>
-                      {up ? '▲' : s.change_pct < 0 ? '▼' : '→'} {pc}
+                      {up ? '▲' : s.change_pct < 0 ? '▼' : '→'}{pc}
                     </span>
                   </div>
                 );
@@ -155,9 +288,9 @@ export function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
             style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${C.border}` }}>
             <div className="text-[7.5px] space-y-0.5" style={{ color: C.textMuted }}>
               <div className="font-bold text-[8px]" style={{ color: C.textSecond }}>Short Rule</div>
-              <div>8+ sectors same direction → High probability big move</div>
+              <div>{strongThr}+ sectors same direction → High probability big move</div>
               <div>Add Price Action confirmation for best results</div>
-              <div className="font-bold" style={{ color: '#06b6d4' }}>Banking + IT + Auto strong → bias amplified</div>
+              <div className="font-bold" style={{ color: '#06b6d4' }}>Bank + IT + FinSvc + Oil&Gas strong → bias amplified</div>
             </div>
           </div>
         </div>
