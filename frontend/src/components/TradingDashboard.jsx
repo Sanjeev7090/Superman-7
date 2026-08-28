@@ -43,6 +43,7 @@ import PutCallParityScanner from './PutCallParityScanner';
 import DeltaDashScoreboard from './DeltaDashScoreboard';
 import HybridBrainPanel from './HybridBrainPanel';
 import PaperTradingPanel from './PaperTradingPanel';
+import MiniVWAPOIChart from './MiniVWAPOIChart';
 import SectorStocksSheet from './SectorStocksSheet';
 import TopTraderUniverseScan from './TopTraderUniverseScan';
 import SettingsDrawer from './SettingsDrawer';
@@ -936,6 +937,9 @@ const TradingDashboard = () => {
               externalMarkers={strategyMarkers}
             />
           </div>
+          {/* Mini VWAP + OI Chart — just above Key Indicators */}
+          <MiniVWAPOIChart stockData={stockData} isDark={theme === 'dark'} />
+
           {/* Key Indicators — Order Flow, Kronos Forecast, GannQSC, Square of 9 */}
           <div className="shrink-0 border-t border-slate-200 dark:border-white/10 px-2 py-2 space-y-2" data-testid="key-indicators-strip">
             <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400 dark:text-zinc-500 px-1">Key Indicators</p>
