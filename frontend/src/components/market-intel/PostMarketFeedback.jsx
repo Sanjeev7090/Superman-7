@@ -6,7 +6,8 @@ const API = process.env.REACT_APP_BACKEND_URL + '/api';
 export function PostMarketFeedback({ C, isDark }) {
   const [fb,      setFb]      = useState(null);
   const [loading, setLoading] = useState(false);
-  const [showWhy, setShowWhy] = useState(true);
+  const [showWhy, setShowWhy] = useState(false);
+  const [open,    setOpen]    = useState(false);   // collapsed by default
 
   useEffect(() => {
     load();
@@ -41,9 +42,10 @@ export function PostMarketFeedback({ C, isDark }) {
       style={{ border: `2px solid ${vc}40` }}
       data-testid="post-market-feedback"
     >
-      {/* ── Header ── */}
-      <div
-        className="px-3 py-2 flex items-center justify-between"
+      {/* ── Header (clickable — toggle entire section) ── */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full px-3 py-2 flex items-center justify-between"
         style={{ background: `${vc}12` }}
       >
         <div className="flex items-center gap-2 flex-wrap">
@@ -57,11 +59,16 @@ export function PostMarketFeedback({ C, isDark }) {
             {fb.verdict_icon} {fb.accuracy}
           </span>
         </div>
-        <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>
-          Score: {fb.score_at_close > 0 ? '+' : ''}{fb.score_at_close}
-        </span>
-      </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[8px] font-mono" style={{ color: C.textMuted }}>
+            Score: {fb.score_at_close > 0 ? '+' : ''}{fb.score_at_close}
+          </span>
+          <span className="text-[9px]" style={{ color: C.textMuted }}>{open ? '▲' : '▼'}</span>
+        </div>
+      </button>
 
+      {/* ── Expandable body ── */}
+      {open && (
       <div className="px-3 pb-3 pt-2 space-y-2.5" style={{ background: C.panelBg }}>
 
         {/* ── Verdict text ── */}
@@ -196,6 +203,7 @@ export function PostMarketFeedback({ C, isDark }) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
