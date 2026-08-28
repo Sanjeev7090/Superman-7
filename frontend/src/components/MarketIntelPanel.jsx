@@ -1143,8 +1143,8 @@ const MarketIntelPanel = ({ onClose }) => {
               <MarketNewsCard news={data.market_news} C={C} onRefresh={refreshNews} />
             )}
 
-            {/* ── Geopolitical Risk + DOOM — side by side ─────────────── */}
-            <div ref={doomRef} className="grid grid-cols-2 gap-2">
+            {/* ── Geopolitical Risk + DOOM — stacked mobile, side-by-side desktop ── */}
+            <div ref={doomRef} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <GeoRiskCard geoRisk={data.geo_risk} C={C} isDark={isDark} />
               <DoomCard C={C} isDark={isDark} />
             </div>
