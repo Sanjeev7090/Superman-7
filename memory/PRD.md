@@ -137,6 +137,24 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
 
 ---
 
+### Session (Feb 2026 — Part 7 — DOOM Card + VWAP + Sector Breadth)
+- **DOOM Card** (COMPLETED)
+  - Backend: `GET /api/doom/score` — 6-factor scoring (Brent, VIX, GIFT%, Breadth, FII, GEX). Score -12 to +12. Expiry/Clash overrides. 9:50 gate. MongoDB `doom_scores` storage.
+  - Frontend: `DoomCard.jsx` — expandable card at bottom of Market Intel panel (full details)
+  - Frontend: Mini DOOM card added inside Live Data Strip (top grid), right next to Geo Risk card (row 4: GEO RISK | DOOM). Shows: score, bias color, progress bar, action pill.
+  - Mini card fetched via MarketIntelPanel's main load (doom data state added).
+- **VWAP Flip Mini chart** (COMPLETED)
+  - Frontend: `VWAPFlipMini.jsx` — mini strip below main chart in ChartPanel.jsx. Above/below VWAP state, SVG plot, VWAP flip diagram.
+- **MiniVWAPOIChart** (COMPLETED)
+  - Frontend: `MiniVWAPOIChart.jsx` — above Key Indicators in TradingDashboard. VWAP graph + OI strike bars. 5s refresh.
+- **Sector Breadth Expansion** (COMPLETED)
+  - Backend: 17 sector indices for Nifty impact. `GET /api/sectors/breadth` returns up/down counts + bias.
+  - Frontend: `SectorBreadthCard.jsx` — Decision Matrix, expandable 17-sector list, current row auto-highlight.
+- **GEX Workflow Expandability** (COMPLETED)
+  - Frontend: `GexWorkflowSection.jsx` — default collapsed, clickable header, regime badge on header.
+- **Post-Market Feedback** (COMPLETED)
+  - Frontend: `PostMarketFeedback.jsx` — separated from ClosingPredictionSection, default collapsed.
+
 ### Session (Feb 2026 — Part 6 — Expiry Workflow)
 - **Expiry Day Workflow Section** (COMPLETED)
   - Frontend: `ExpiryWorkflowSection.jsx` — Market Intel panel mein Decision Matrix ke upar embedded

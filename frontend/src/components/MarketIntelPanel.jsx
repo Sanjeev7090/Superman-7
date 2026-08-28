@@ -61,6 +61,7 @@ const MarketIntelPanel = ({ onClose }) => {
   const [giftTf,     setGiftTf]     = useState('D');
   const [nowIST,     setNowIST]     = useState(() => new Date());
   const [sectorBreadth, setSectorBreadth] = useState(null);
+  const [doomData,      setDoomData]      = useState(null);
 
   // Update clock every minute
   useEffect(() => {
@@ -116,9 +117,10 @@ const MarketIntelPanel = ({ onClose }) => {
     setLoading(true);
     setError(null);
     try {
-      const [marketRes, sbRes] = await Promise.allSettled([
+      const [marketRes, sbRes, doomRes] = await Promise.allSettled([
         axios.get(`${API}/market-intel`),
         axios.get(`${API}/sectors/breadth`),
+        axios.get(`${API}/doom/score`),
       ]);
       if (marketRes.status === 'fulfilled') {
         setData(marketRes.value.data);
@@ -126,7 +128,8 @@ const MarketIntelPanel = ({ onClose }) => {
       } else {
         setError('Failed to load market intelligence data');
       }
-      if (sbRes.status === 'fulfilled') setSectorBreadth(sbRes.value.data);
+      if (sbRes.status   === 'fulfilled') setSectorBreadth(sbRes.value.data);
+      if (doomRes.status === 'fulfilled') setDoomData(doomRes.value.data);
     } catch (e) {
       setError('Failed to load market intelligence data');
     } finally {
@@ -500,9 +503,51 @@ const MarketIntelPanel = ({ onClose }) => {
                   </div>
                 </div>
               )}
+
+              {/* ── DOOM mini card in data strip — right next to Geo Risk ── */}
+              {doomData && (
+                <div
+                  className="rounded-xl p-3"
+                  style={{ background: C.cardBg, border: `1px solid ${doomData.color || '#fbbf24'}40` }}
+                  data-testid="card-doom-mini"
+                >
+                  <div className="flex items-center gap-1.5 text-[9px] mb-1.5" style={{ color: C.textMuted }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={doomData.color || '#fbbf24'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <span className="uppercase tracking-widest">DOOM</span>
+                  </div>
+                  <div className="text-sm font-bold font-mono" style={{ color: doomData.color || '#fbbf24' }}>
+                    {doomData.score >= 0 ? `+${doomData.score}` : `${doomData.score}`}
+                  </div>
+                  <div className="flex h-1.5 rounded-full overflow-hidden my-1" style={{ background: C.panelBg }}>
+                    <div style={{
+                      width: `${Math.min(100, ((doomData.score + 12) / 24) * 100)}%`,
+                      background: doomData.color || '#fbbf24',
+                      transition: 'width 0.4s',
+                    }} />
+                  </div>
+                  <div className="text-[10px] font-mono" style={{ color: doomData.color || '#fbbf24' }}>
+                    {doomData.bias}
+                  </div>
+                  <div
+                    className="mt-1 text-[8px] font-bold px-1 py-0.5 rounded text-center"
+                    style={{
+                      color: doomData.action === 'LONG' ? '#22c55e'
+                           : doomData.action === 'SHORT' ? '#ef4444'
+                           : '#fbbf24',
+                      background: doomData.action === 'LONG' ? 'rgba(34,197,94,0.12)'
+                                : doomData.action === 'SHORT' ? 'rgba(239,68,68,0.12)'
+                                : 'rgba(251,191,36,0.12)',
+                    }}
+                  >
+                    {(doomData.action || 'WAIT').split('/')[0].trim()}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Current Bias Card */}
             {(() => {
               // IST date helpers — computed once for the whole bias card
               const nowIST  = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
@@ -1091,11 +1136,11 @@ const MarketIntelPanel = ({ onClose }) => {
               <MarketNewsCard news={data.market_news} C={C} onRefresh={refreshNews} />
             )}
 
-            {/* ── Geopolitical Risk Card ───────────────────────────────── */}
-            <GeoRiskCard geoRisk={data.geo_risk} C={C} isDark={isDark} />
-
-            {/* ── DOOM Card ────────────────────────────────────────────── */}
-            <DoomCard C={C} isDark={isDark} />
+            {/* ── Geopolitical Risk + DOOM — side by side ─────────────── */}
+            <div className="grid grid-cols-2 gap-2">
+              <GeoRiskCard geoRisk={data.geo_risk} C={C} isDark={isDark} />
+              <DoomCard C={C} isDark={isDark} />
+            </div>
 
             {/* ── Crude Oil Supply ─────────────────────────────────────── */}
             <CrudeSupplyCard
