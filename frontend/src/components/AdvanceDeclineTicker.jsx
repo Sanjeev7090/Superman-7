@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import axios from 'axios';
 import Nifty50LiveModal from './Nifty50LiveModal';
+import InstitutionalFlowPanel from './InstitutionalFlowPanel';
 import { BullIcon, BearIcon } from './BullBearIcons';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -15,6 +16,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function AdvanceDeclineTicker() {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
+  const [showFlow, setShowFlow] = useState(false);
   const [loading, setLoading] = useState(true);
   // Full-screen run state
   const [run, setRun] = useState(null);
@@ -208,8 +210,8 @@ export default function AdvanceDeclineTicker() {
           <span
             className={`ad-3d-emoji inline-flex items-center justify-center ${bullish ? 'ad-run-right' : bearish ? 'ad-run-left' : ''}`}
             aria-label={dominant}
-            onClick={(e) => { e.stopPropagation(); triggerRun(); }}
-            title="Click to launch full-screen run"
+            onClick={(e) => { e.stopPropagation(); setShowFlow(true); }}
+            title="Click → Institutional Flow Intelligence"
             style={{ width: 32, height: 26 }}
           >
             {bullish
@@ -404,6 +406,10 @@ export default function AdvanceDeclineTicker() {
           onClose={() => setOpen(false)}
           onRefresh={fetchAD}
         />
+      )}
+
+      {showFlow && (
+        <InstitutionalFlowPanel onClose={() => setShowFlow(false)} />
       )}
     </>
   );

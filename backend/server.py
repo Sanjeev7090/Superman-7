@@ -16778,3 +16778,6 @@ app.include_router(metals_router)
 app.include_router(market_intel_router)
 app.include_router(doom_router)
 app.include_router(insider_router)
+
+from routes.institutional import router as institutional_router
+app.include_router(institutional_router)
