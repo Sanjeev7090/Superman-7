@@ -15562,7 +15562,140 @@ async def get_nifty_gex():
             }
 
     _GEX_CACHE[cache_key] = (result, now)
+
+    # ── Auto-save daily snapshot to MongoDB ──────────────────────────
+    try:
+        from database import db as _gex_db
+        from zoneinfo import ZoneInfo as _ZI
+        _ist = datetime.now(_ZI("Asia/Kolkata"))
+        _today_str = _ist.strftime("%Y-%m-%d")
+        _snap_coll = _gex_db["gex_daily_snapshots"]
+        await _snap_coll.update_one(
+            {"date": _today_str},
+            {"$set": {
+                "date":      _today_str,
+                "snapshot":  {k: v for k, v in result.items() if k != "_ts"},
+                "saved_at":  _ist.isoformat(),
+            }},
+            upsert=True,
+        )
+    except Exception as _se:
+        logging.debug(f"GEX snapshot save: {_se}")
+
     return result
+
+
+@_gex_router.get("/history")
+async def get_gex_history(date: str = ""):
+    """Return saved GEX snapshot for a specific date (YYYY-MM-DD)."""
+    try:
+        from database import db as _gdb
+        from zoneinfo import ZoneInfo as _ZI
+        if not date:
+            from datetime import date as _dt2
+            date = _dt2.today().isoformat()
+        rec = await _gdb["gex_daily_snapshots"].find_one({"date": date}, {"_id": 0})
+        if rec:
+            return {"found": True, "date": date, **rec.get("snapshot", {})}
+        return {"found": False, "date": date, "msg": f"No snapshot for {date}"}
+    except Exception as e:
+        return {"found": False, "error": str(e)}
+
+
+@_gex_router.get("/prev-day-summary")
+async def get_gex_prev_day_summary():
+    """
+    Returns yesterday's GEX snapshot + actual Nifty intraday move for comparison.
+    Verdict: how accurate was the regime prediction.
+    """
+    from datetime import date as _dt2, timedelta as _td2
+    from zoneinfo import ZoneInfo as _ZI2
+
+    ist_now   = datetime.now(_ZI2("Asia/Kolkata"))
+    yesterday = (ist_now.date() - _td2(days=1)).isoformat()
+
+    # Fetch yesterday's snapshot
+    snap = None
+    try:
+        from database import db as _gdb2
+        rec = await _gdb2["gex_daily_snapshots"].find_one({"date": yesterday}, {"_id": 0})
+        if rec:
+            snap = rec.get("snapshot", {})
+    except Exception:
+        pass
+
+    if not snap:
+        return {"found": False, "date": yesterday, "msg": "Yesterday ka snapshot nahi mila. Kal se auto-save shuru hoga."}
+
+    # Fetch actual NIFTY move from yfinance
+    actual_move = None
+    actual_open = None
+    actual_close = None
+    verdict     = "UNKNOWN"
+    verdict_color = "#64748b"
+    verdict_note  = ""
+
+    try:
+        import yfinance as _yf2
+        loop = asyncio.get_event_loop()
+        def _get_nifty_yesterday():
+            tk = _yf2.Ticker("^NSEI")
+            h  = tk.history(period="5d", interval="1d")
+            if h is not None and len(h) >= 2:
+                row = h.iloc[-2]  # yesterday
+                return float(row["Open"]), float(row["Close"]), float(row["High"]), float(row["Low"])
+            return None
+        data = await loop.run_in_executor(None, _get_nifty_yesterday)
+        if data:
+            actual_open, actual_close, actual_high, actual_low = data
+            actual_move = round(abs(actual_close - actual_open), 1)
+            intraday_range = round(actual_high - actual_low, 1)
+
+            # Parse predicted range (e.g. "±50 – 120 pts")
+            exp_move = snap.get("expected_move", "")
+            try:
+                import re
+                nums = [int(x) for x in re.findall(r'\d+', exp_move)]
+                if len(nums) >= 2:
+                    lo, hi = nums[0], nums[1]
+                    if lo <= actual_move <= hi:
+                        verdict       = "ACCURATE"
+                        verdict_color = "#22c55e"
+                        verdict_note  = f"Move {actual_move:.0f} pts within predicted {lo}–{hi} pts range"
+                    elif actual_move < lo:
+                        verdict       = "BELOW RANGE"
+                        verdict_color = "#fbbf24"
+                        verdict_note  = f"Move {actual_move:.0f} pts — below predicted {lo} pts min (low-volatility day)"
+                    else:
+                        verdict       = "EXCEEDED"
+                        verdict_color = "#f97316"
+                        verdict_note  = f"Move {actual_move:.0f} pts — exceeded predicted {hi} pts max"
+                else:
+                    verdict_note = f"Actual move: {actual_move:.0f} pts"
+            except Exception:
+                verdict_note = f"Actual move: {actual_move:.0f} pts"
+    except Exception:
+        pass
+
+    return {
+        "found":         True,
+        "date":          yesterday,
+        "regime":        snap.get("regime", "—"),
+        "regime_label":  snap.get("regime_label", "—"),
+        "regime_color":  snap.get("regime_color", "#64748b"),
+        "expected_move": snap.get("expected_move", "—"),
+        "is_positive":   snap.get("is_positive"),
+        "call_wall":     snap.get("call_wall"),
+        "put_wall":      snap.get("put_wall"),
+        "gamma_flip":    snap.get("gamma_flip"),
+        "spot":          snap.get("spot"),
+        "actual_move":   actual_move,
+        "actual_open":   actual_open,
+        "actual_close":  actual_close,
+        "verdict":       verdict,
+        "verdict_color": verdict_color,
+        "verdict_note":  verdict_note,
+    }
 
 
 app.include_router(_gex_router)
