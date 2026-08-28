@@ -137,7 +137,12 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
 
 ---
 
-### Session (Feb 2026 — Part 9 — Insider Module v3 Full System)
+### Session (Feb 2026 — Part 10 — Insider Module Stats + Toggle)
+- **Module Stats Tab** — new 5th tab in InsiderTracker with winrate gauge, WIN/LOSS/FLAT bars, threshold display, last 30 alerts table with PENDING/WIN/LOSS/FLAT labels
+- **Module Toggle** — manual ON/OFF override button with "MANUAL" badge + "Reset to Auto" option
+- New endpoints: `POST /api/insider/module_toggle` (override: true/false/null), `GET /api/insider/outcomes`
+- `_get_module_state()` updated to include `manual_override` field; module_status endpoint respects manual override
+
 - **Module Switch** — `module_on` flag: OFF if DOOM ≤-4 / expiry / promoter sell tape > 3× buys
 - **Beneficial-Owner Entity Graph** — name-based merge (HUF/pvt/trust/holdings stripped), merged_buyer display
 - **Pledge + SAST** — stub (NSE SAST data not freely accessible, shows N/A with note)

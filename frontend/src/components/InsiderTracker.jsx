@@ -4,6 +4,7 @@ import {
   Minus, ChartBar, Users, CaretDown, CaretRight,
   MagnifyingGlass, Funnel, CalendarBlank, CaretLeft,
   CaretRight as CaretRightIcon, Newspaper, ArrowUp, ArrowDown,
+  ChartPieSlice, ToggleLeft, ToggleRight,
 } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -1220,6 +1221,258 @@ function EconomicCalendar({ C }) {
 }
 
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE STATS TAB
+// ═══════════════════════════════════════════════════════════════════════════
+
+const LABEL_META = {
+  WIN:  { color: '#22c55e', bg: 'rgba(34,197,94,0.15)',   border: 'rgba(34,197,94,0.35)'  },
+  LOSS: { color: '#ef4444', bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.35)'  },
+  FLAT: { color: '#94a3b8', bg: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.25)'},
+};
+
+function WinrateGauge({ winrate = 0, sample = 0 }) {
+  const r    = 38;
+  const circ = 2 * Math.PI * r;
+  const pct  = Math.min(winrate / 100, 1);
+  const color = winrate >= 55 ? '#22c55e' : winrate >= 45 ? '#fbbf24' : '#ef4444';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      <svg width="100" height="100" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="7" />
+        <circle cx="50" cy="50" r={r} fill="none" stroke={color} strokeWidth="7"
+          strokeDasharray={`${pct * circ} ${circ}`}
+          strokeLinecap="round" transform="rotate(-90 50 50)"
+          style={{ transition: 'stroke-dasharray 0.6s ease' }}
+        />
+        <text x="50" y="46" textAnchor="middle" fill={color} fontSize="18" fontWeight="900" fontFamily="monospace">
+          {winrate.toFixed(0)}%
+        </text>
+        <text x="50" y="60" textAnchor="middle" fill="#64748b" fontSize="9" fontFamily="monospace">
+          WINRATE
+        </text>
+      </svg>
+      <span style={{ fontSize: 9, color: '#64748b' }}>{sample} alert{sample !== 1 ? 's' : ''} labeled</span>
+    </div>
+  );
+}
+
+function ModuleToggle({ moduleOn, manualOverride, onToggle, toggling }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8,
+      padding: '12px 14px', borderRadius: 10,
+      background: moduleOn ? 'rgba(34,197,94,0.07)' : 'rgba(239,68,68,0.07)',
+      border: `1px solid ${moduleOn ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{
+            width: 8, height: 8, borderRadius: '50%',
+            background: moduleOn ? '#22c55e' : '#ef4444',
+            boxShadow: moduleOn ? '0 0 0 3px rgba(34,197,94,0.3)' : '0 0 0 3px rgba(239,68,68,0.3)',
+          }} />
+          <span style={{ fontSize: 13, fontWeight: 900, letterSpacing: '0.05em',
+            color: moduleOn ? '#4ade80' : '#f87171' }}>
+            MODULE {moduleOn ? 'ON' : 'OFF'}
+          </span>
+          {manualOverride !== null && manualOverride !== undefined && (
+            <span style={{
+              fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+              background: 'rgba(167,139,250,0.15)', color: '#a78bfa',
+              border: '1px solid rgba(167,139,250,0.3)',
+            }}>MANUAL</span>
+          )}
+        </div>
+        <button
+          onClick={() => onToggle(moduleOn ? false : true)}
+          disabled={toggling}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5,
+            padding: '5px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
+            background: moduleOn ? 'rgba(239,68,68,0.20)' : 'rgba(34,197,94,0.20)',
+            color: moduleOn ? '#f87171' : '#4ade80',
+            fontWeight: 800, fontSize: 10, opacity: toggling ? 0.5 : 1,
+            transition: 'all 0.2s',
+          }}
+          data-testid="module-toggle-btn"
+        >
+          {moduleOn
+            ? <><ToggleRight size={14} weight="fill" />&nbsp;Turn OFF</>
+            : <><ToggleLeft  size={14} weight="fill" />&nbsp;Turn ON</>
+          }
+        </button>
+      </div>
+      {manualOverride !== null && manualOverride !== undefined && (
+        <button
+          onClick={() => onToggle(null)}
+          disabled={toggling}
+          style={{
+            alignSelf: 'flex-start', padding: '3px 10px', borderRadius: 12, border: 'none',
+            cursor: 'pointer', background: 'rgba(148,163,184,0.12)',
+            color: '#94a3b8', fontSize: 8, fontWeight: 700,
+          }}
+          data-testid="module-reset-auto-btn"
+        >
+          Reset to Auto (DOOM + Expiry logic)
+        </button>
+      )}
+    </div>
+  );
+}
+
+function StatsTab({ C, moduleStatus, outcomesData, onToggle, toggling }) {
+  if (!moduleStatus) return (
+    <div style={{ padding: 24, textAlign: 'center', color: C.textSecond, fontSize: 12 }}>
+      Loading stats…
+    </div>
+  );
+
+  const s       = moduleStatus.alert_stats || {};
+  const labeled = s.labeled || 0;
+  const wins    = s.wins    || 0;
+  const losses  = s.losses  || 0;
+  const flats   = s.flats   || 0;
+  const winrate = labeled > 0 ? (wins / labeled) * 100 : 0;
+  const threshold = moduleStatus.threshold || 15;
+  const alerts    = outcomesData?.alerts   || [];
+
+  const bar = (label, count, color) => {
+    const pct = labeled > 0 ? (count / labeled) * 100 : 0;
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+          <span style={{ fontSize: 9, fontWeight: 800, color }}>{label}</span>
+          <span style={{ fontSize: 9, fontWeight: 700, color }}>{count} ({pct.toFixed(0)}%)</span>
+        </div>
+        <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3,
+            transition: 'width 0.5s ease' }} />
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12,
+      overflowY: 'auto', flex: 1 }} data-testid="stats-tab-content">
+
+      <ModuleToggle
+        moduleOn={moduleStatus.module_on}
+        manualOverride={moduleStatus.manual_override}
+        onToggle={onToggle}
+        toggling={toggling}
+      />
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div style={{
+          padding: '12px 10px', borderRadius: 10, textAlign: 'center',
+          background: C.cardBg, border: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <WinrateGauge winrate={winrate} sample={labeled} />
+        </div>
+        <div style={{ padding: '12px 12px', borderRadius: 10, background: C.cardBg, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 9, fontWeight: 800, color: C.textSecond,
+            letterSpacing: '0.07em', marginBottom: 8 }}>BREAKDOWN</div>
+          {bar('WIN',  wins,   '#22c55e')}
+          {bar('LOSS', losses, '#ef4444')}
+          {bar('FLAT', flats,  '#94a3b8')}
+          <div style={{ marginTop: 8, paddingTop: 7, borderTop: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 8, color: C.textSecond }}>
+              Threshold: <span style={{ color: '#fbbf24', fontWeight: 800 }}>{threshold}</span>
+              {labeled < 30 && <span style={{ color: '#94a3b8' }}> (default)</span>}
+            </div>
+            <div style={{ fontSize: 8, color: C.textSecond, marginTop: 2 }}>
+              DOOM: <span style={{
+                color: moduleStatus.index_score >= 4 ? '#22c55e' : moduleStatus.index_score <= -4 ? '#ef4444' : '#fbbf24',
+                fontWeight: 700,
+              }}>{moduleStatus.index_score >= 0 ? '+' : ''}{moduleStatus.index_score}</span>
+              &nbsp;· Size: <span style={{ color: '#a78bfa', fontWeight: 700 }}>{moduleStatus.size_cap}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Alert table */}
+      <div style={{ borderRadius: 10, overflow: 'hidden', border: `1px solid ${C.border}` }}>
+        <div style={{
+          padding: '8px 12px', background: C.headerBg,
+          borderBottom: `1px solid ${C.border}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 10, fontWeight: 800, color: C.textSecond, letterSpacing: '0.07em' }}>
+            LAST {alerts.length} ALERTS
+          </span>
+          <span style={{ fontSize: 8, color: C.textSecond }}>{s.total || 0} total · labels after 20 sessions</span>
+        </div>
+        {alerts.length === 0 ? (
+          <div style={{ padding: 16, textAlign: 'center', fontSize: 10, color: C.textSecond }}>
+            No alerts yet — WATCH/SETUP alerts auto-saved here.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '75px 38px 68px 58px 62px',
+              padding: '5px 12px', borderBottom: `1px solid ${C.border}` }}>
+              {['STOCK', 'SCR', 'STATUS', 'DATE', 'OUTCOME'].map(h => (
+                <span key={h} style={{ fontSize: 7, fontWeight: 800, color: C.textSecond,
+                  letterSpacing: '0.07em' }}>{h}</span>
+              ))}
+            </div>
+            {alerts.map((a, i) => {
+              const lm = a.label ? (LABEL_META[a.label] || LABEL_META.FLAT) : null;
+              const dt = a.entry_date
+                ? new Date(a.entry_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+                : '—';
+              return (
+                <div key={i} style={{
+                  display: 'grid', gridTemplateColumns: '75px 38px 68px 58px 62px',
+                  padding: '7px 12px', alignItems: 'center',
+                  background: i % 2 === 0 ? C.cardBg : 'transparent',
+                  borderBottom: i < alerts.length - 1 ? `1px solid ${C.border}` : 'none',
+                }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: C.textPrimary }}>{a.symbol}</span>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: '#fbbf24', fontFamily: 'monospace' }}>
+                    {a.adj_score ?? a.score}/{a.score_max ?? 20}
+                  </span>
+                  <span style={{ fontSize: 8, fontWeight: 700, color: C.textSecond }}>{a.status || '—'}</span>
+                  <span style={{ fontSize: 8, color: C.textSecond }}>{dt}</span>
+                  {lm ? (
+                    <span style={{
+                      fontSize: 8, fontWeight: 800, padding: '2px 5px', borderRadius: 4,
+                      background: lm.bg, color: lm.color, border: `1px solid ${lm.border}`,
+                      textAlign: 'center',
+                    }}>
+                      {a.label}{a.close_pct != null ? ` ${a.close_pct > 0 ? '+' : ''}${a.close_pct}%` : ''}
+                    </span>
+                  ) : (
+                    <span style={{
+                      fontSize: 8, padding: '2px 5px', borderRadius: 4, textAlign: 'center',
+                      background: 'rgba(148,163,184,0.08)', color: '#64748b',
+                      border: '1px solid rgba(148,163,184,0.2)',
+                    }}>PENDING</span>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+
+      <div style={{
+        padding: '8px 10px', borderRadius: 8,
+        background: 'rgba(148,163,184,0.05)', border: `1px solid ${C.border}`,
+        fontSize: 8, color: C.textSecond, lineHeight: 1.6,
+      }}>
+        <strong style={{ color: C.textPrimary }}>Size vs DOOM:</strong>&nbsp;
+        +8→+12: 2% · +4→+7: 1% · Neutral/Expiry/OFF: 0 new.&nbsp;
+        Threshold adapts: &lt;45% win → 17 · &gt;55% bull → 15 · else 16.
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1239,11 +1492,14 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
     tabActive:   '#06b6d4',
   };
 
-  const [tab, setTab]               = useState('insider');     // 'insider' | 'patterns'
+  const [tab, setTab]               = useState('insider');     // 'insider' | 'patterns' | 'eco' | 'news' | 'stats'
   const [insiderData, setInsiderData] = useState(null);
   const [patternData, setPatternData] = useState(null);
   const [loading, setLoading]       = useState(false);
   const [updatedAt, setUpdatedAt]   = useState(null);
+  const [moduleStatus, setModuleStatus] = useState(null);
+  const [outcomesData, setOutcomesData] = useState(null);
+  const [togglingModule, setTogglingModule] = useState(false);
 
   // Pattern filters
   const [tfFilter,    setTfFilter]    = useState('');
@@ -1255,8 +1511,7 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
   const [fMomentum,   setFMomentum]   = useState(false);
   const [fVolume,     setFVolume]     = useState(false);
 
-  const fetchInsider = useCallback(async (forceRefresh = false) => {
-    setLoading(true);
+  const fetchInsider = useCallback(async (forceRefresh = false) => {    setLoading(true);
     try {
       const res  = await fetch(`${API}/insider/detections${forceRefresh ? '?refresh=true' : ''}`);
       const json = await res.json();
@@ -1301,12 +1556,51 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
 
   // Fetch on tab switch
   useEffect(() => {
-    if (tab === 'insider' && !insiderData) fetchInsider();
-    if (tab === 'patterns' && !patternData) fetchPatterns();
+    if (tab === 'insider'  && !insiderData)   fetchInsider();
+    if (tab === 'patterns' && !patternData)   fetchPatterns();
+    if (tab === 'stats'    && !moduleStatus)  fetchStats();
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchStats = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [modRes, outRes] = await Promise.all([
+        fetch(`${API}/insider/module_status`),
+        fetch(`${API}/insider/outcomes`),
+      ]);
+      if (modRes.ok)  setModuleStatus(await modRes.json());
+      if (outRes.ok)  setOutcomesData(await outRes.json());
+    } catch (e) {
+      console.error('Stats fetch:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const toggleModule = useCallback(async (value) => {
+    // value: true = force ON, false = force OFF, null = reset to auto
+    setTogglingModule(true);
+    try {
+      const res = await fetch(`${API}/insider/module_toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ override: value }),
+      });
+      if (res.ok) {
+        // Re-fetch module status
+        const modRes = await fetch(`${API}/insider/module_status`);
+        if (modRes.ok) setModuleStatus(await modRes.json());
+      }
+    } catch (e) {
+      console.error('Toggle error:', e);
+    } finally {
+      setTogglingModule(false);
+    }
+  }, []);
+
   const handleRefresh = () => {
-    if (tab === 'insider') fetchInsider(true);
+    if (tab === 'insider')  fetchInsider(true);
+    else if (tab === 'stats') fetchStats();
     else fetchPatterns(true);
   };
 
@@ -1387,6 +1681,7 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
             { id: 'patterns', label: 'Pattern Scanner', icon: ChartBar      },
             { id: 'eco',      label: 'Eco Calendar',    icon: CalendarBlank },
             { id: 'news',     label: 'Stock News',      icon: Newspaper     },
+            { id: 'stats',    label: 'Module Stats',    icon: ChartPieSlice },
           ].map(t => {
             const Ico = t.icon;
             return (
@@ -1759,6 +2054,17 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
 
           {/* ── STOCK NEWS TAB ── */}
           {tab === 'news' && <StockNewsFeed C={C} isDark={isDark} />}
+
+          {/* ── MODULE STATS TAB ── */}
+          {!loading && tab === 'stats' && (
+            <StatsTab
+              C={C}
+              moduleStatus={moduleStatus}
+              outcomesData={outcomesData}
+              onToggle={toggleModule}
+              toggling={togglingModule}
+            />
+          )}
 
         </div>
 

@@ -990,16 +990,17 @@ async def _label_outcomes_job() -> dict:
 
 
 async def _get_module_state() -> dict:
-    """Fetch current module state from DB (threshold, winrate)."""
+    """Fetch current module state from DB (threshold, winrate, manual_override)."""
     try:
         doc = await db[MODULE_COLL].find_one({"type": "module_state"}, {"_id": 0})
         if doc:
-            return {"threshold": doc.get("threshold", 15),
-                    "winrate":   doc.get("winrate", 0),
-                    "sample":    doc.get("labeled_total", 0)}
+            return {"threshold":       doc.get("threshold", 15),
+                    "winrate":         doc.get("winrate", 0),
+                    "sample":          doc.get("labeled_total", 0),
+                    "manual_override": doc.get("manual_override")}   # True/False/None
     except Exception:
         pass
-    return {"threshold": 15, "winrate": 0.0, "sample": 0}
+    return {"threshold": 15, "winrate": 0.0, "sample": 0, "manual_override": None}
 
 
 
@@ -1768,7 +1769,6 @@ async def get_insider_detections(refresh: bool = False):
 async def get_module_status():
     """Current Insider Module state: ON/OFF, threshold, winrate, recent alert stats."""
     mod_state = await _get_module_state()
-    # Get latest doom for current module_on
     doom_score = 0
     is_expiry  = False
     try:
@@ -1779,27 +1779,78 @@ async def get_module_status():
             is_expiry  = bool(doc.get("expiry", False))
     except Exception:
         pass
-    mod = _module_switch(doom_score, is_expiry)
-    # Recent alert counts
+
+    # Check manual override
+    override = mod_state.get("manual_override")   # True/False/None
+    if override is not None:
+        mod = {"on": override, "reason": "Manual override", "size_cap": "2%" if override else "0%"}
+    else:
+        mod = _module_switch(doom_score, is_expiry)
+
     try:
         total   = await db[ALERTS_COLL].count_documents({})
         labeled = await db[ALERTS_COLL].count_documents({"label": {"$ne": None}})
         wins    = await db[ALERTS_COLL].count_documents({"label": "WIN"})
         losses  = await db[ALERTS_COLL].count_documents({"label": "LOSS"})
+        flats   = await db[ALERTS_COLL].count_documents({"label": "FLAT"})
     except Exception:
-        total = labeled = wins = losses = 0
+        total = labeled = wins = losses = flats = 0
 
     return {
         "module_on":        mod["on"],
         "module_reason":    mod["reason"],
+        "manual_override":  override,
         "threshold":        mod_state["threshold"],
         "winrate":          mod_state["winrate"],
         "sample_size":      mod_state["sample"],
         "index_score":      doom_score,
         "is_expiry":        is_expiry,
-        "alert_stats":      {"total": total, "labeled": labeled, "wins": wins, "losses": losses},
+        "alert_stats":      {"total": total, "labeled": labeled,
+                             "wins": wins, "losses": losses, "flats": flats},
         "size_cap":         mod["size_cap"],
     }
+
+
+@router.post("/module_toggle")
+async def toggle_module(payload: dict):
+    """
+    Manually override module ON/OFF.
+    Body: {"override": true | false | null}
+      null  = reset to auto (doom/expiry logic)
+      true  = force ON
+      false = force OFF
+    """
+    override = payload.get("override")  # True / False / None
+    try:
+        await db[MODULE_COLL].update_one(
+            {"type": "module_state"},
+            {"$set": {"manual_override": override,
+                      "override_set_at": datetime.now(timezone.utc)}},
+            upsert=True,
+        )
+        return {"status": "ok", "manual_override": override}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/outcomes")
+async def get_outcomes():
+    """Last 30 alerts with WIN/LOSS/FLAT labels + pending unlabeled."""
+    try:
+        docs = await db[ALERTS_COLL].find(
+            {}, {"_id": 0, "symbol": 1, "score": 1, "adj_score": 1,
+                 "status": 1, "filing_date": 1, "entry_date": 1,
+                 "entry_price": 1, "label": 1, "close_pct": 1, "z": 1, "cluster": 1}
+        ).sort("entry_date", -1).limit(30).to_list(30)
+        # Convert datetime to ISO string
+        for d in docs:
+            if "entry_date" in d and hasattr(d["entry_date"], "isoformat"):
+                d["entry_date"] = d["entry_date"].isoformat()
+            if "labeled_at" in d and hasattr(d.get("labeled_at"), "isoformat"):
+                d["labeled_at"] = d["labeled_at"].isoformat()
+        return {"alerts": docs, "count": len(docs)}
+    except Exception as e:
+        return {"alerts": [], "count": 0, "error": str(e)}
 
 
 @router.get("/label_outcomes")
