@@ -6,6 +6,7 @@ import { PcrSparkline } from './market-intel/PcrSparkline';
 import { MarketNewsCard } from './market-intel/MarketNewsCard';
 import { GeoRiskCard } from './market-intel/GeoRiskCard';
 import { CrudeSupplyCard } from './market-intel/CrudeSupplyCard';
+import { DoomCard } from './market-intel/DoomCard';
 import { SectorBreadthCard } from './market-intel/SectorBreadthCard';
 import { BreadthCard } from './market-intel/BreadthCard';
 import { FiiSection } from './market-intel/FiiSection';
@@ -1092,6 +1093,9 @@ const MarketIntelPanel = ({ onClose }) => {
 
             {/* ── Geopolitical Risk Card ───────────────────────────────── */}
             <GeoRiskCard geoRisk={data.geo_risk} C={C} isDark={isDark} />
+
+            {/* ── DOOM Card ────────────────────────────────────────────── */}
+            <DoomCard C={C} isDark={isDark} />
 
             {/* ── Crude Oil Supply ─────────────────────────────────────── */}
             <CrudeSupplyCard

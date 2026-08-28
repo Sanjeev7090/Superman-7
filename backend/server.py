@@ -16770,9 +16770,11 @@ app.include_router(_vibe_router)
 from routes.crude import router as crude_router
 from routes.metals import router as metals_router
 from routes.market_intel import router as market_intel_router
+from routes.doom import router as doom_router
 from routes.insider_trading import router as insider_router
 
 app.include_router(crude_router)
 app.include_router(metals_router)
 app.include_router(market_intel_router)
+app.include_router(doom_router)
 app.include_router(insider_router)
