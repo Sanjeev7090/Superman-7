@@ -2574,14 +2574,24 @@ async def fetch_gap_prediction() -> Dict:
     _mc      = _now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
     _is_open = _is_wd and _mo <= _now_ist <= _mc
 
-    # Prediction label: "Today" if pre-market / live; "Tomorrow/Next Session" if post-close
+    # Prediction label: "Today" if pre-market / live; actual next trading date if post-close / weekend
     _after_close   = _is_wd and _now_ist > _mc
-    _prediction_for = (
-        "Next Trading Day" if (_after_close or not _is_wd)
-        else "Today"
-    )
     _today_display = _now_ist.strftime("%d %b %Y")          # e.g. "26 Feb 2026"
     _day_abbr      = _now_ist.strftime("%a")                # e.g. "Wed"
+
+    def _next_trading_day(dt):
+        """Next Mon-Fri trading day (skips Sat/Sun). Does not account for NSE holidays."""
+        from datetime import timedelta as _td
+        nxt = dt.date() + _td(days=1)
+        while nxt.weekday() >= 5:   # 5=Sat, 6=Sun
+            nxt += _td(days=1)
+        return nxt
+
+    if _after_close or not _is_wd:
+        _ntd      = _next_trading_day(_now_ist)
+        _prediction_for = _ntd.strftime("%d %b %Y (%a)")   # e.g. "29 Aug 2026 (Mon)"
+    else:
+        _prediction_for = "Today"
 
     data = {
         # Live input values

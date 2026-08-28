@@ -60,9 +60,11 @@ function MarketStatusPill({ isOpen, date, day, predFor }) {
         }>
         {isOpen ? 'OPEN' : 'CLOSED'}
       </span>
-      <span className="text-[8px]" style={{ color: '#64748b' }}>
-        → {predFor}
-      </span>
+      {predFor !== 'Today' && (
+        <span className="text-[8px]" style={{ color: '#fbbf24', fontWeight: 700 }}>
+          → Next: {predFor}
+        </span>
+      )}
     </div>
   );
 }
@@ -169,7 +171,9 @@ export function GapPredictionSection({ C, isDark }) {
                     </div>
                     <div className="text-[9px]" style={{ color: '#94a3b8' }}>
                       {todayDay} {todayDate} · Prediction for{' '}
-                      <span style={{ color: '#fbbf24', fontWeight: 700 }}>{predFor}</span>{' '}
+                      <span style={{ color: '#fbbf24', fontWeight: 700 }}>
+                        {predFor === 'Today' ? 'Today' : `Next Trading Day: ${predFor}`}
+                      </span>{' '}
                       based on last session's data
                     </div>
                   </div>
@@ -286,7 +290,7 @@ export function GapPredictionSection({ C, isDark }) {
                     </span>
                     <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
                       style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}>
-                      {predFor} · {todayDate}
+                      Next Trading Day · {predFor === 'Today' ? todayDate : predFor}
                     </span>
                   </div>
                   <span className="text-[8px] font-mono px-1.5 py-0.5 rounded"
