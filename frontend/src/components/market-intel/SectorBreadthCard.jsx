@@ -23,6 +23,7 @@ const SECTOR_ICONS_LABEL = {
 
 export function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
   const [expanded, setExpanded] = useState(false);
+  const [showAll,  setShowAll]  = useState(false);
   if (!sb || sb.total === 0) return null;
 
   const { up_count, down_count, total, bias, move, action, color,
@@ -69,6 +70,7 @@ export function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
         </div>
       </div>
 
+      {expanded && (
       <div className="px-4 pb-3 pt-1.5">
         <div className="flex h-2 rounded-full overflow-hidden mb-2">
           <div style={{ width: `${(up_count / total) * 100}%`, background: '#22c55e', transition: 'width 0.4s' }} />
@@ -238,37 +240,47 @@ export function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
             </span>
           </div>
         </div>
-      </div>
+        </div>
+      )}
 
+      {/* All sectors & rules — toggled by showAll */}
       {expanded && (
         <div className="px-4 pb-4" style={{ borderTop: `1px solid ${C.border}` }}>
+          {/* Show All toggle */}
+          <button onClick={() => setShowAll(v => !v)}
+            className="w-full text-left text-[8px] pt-2 pb-1 flex items-center gap-1.5"
+            style={{ color: C.textMuted }}>
+            <span>{showAll ? '▲' : '▶'}</span>
+            <span className="uppercase tracking-widest">{showAll ? 'Hide Sectors' : `All ${total} Sectors`}</span>
+          </button>
+
+          {showAll && (<>
           {/* High-weight sectors summary */}
           {hw_total > 0 && (
-            <div className="pt-2 pb-2 mb-1" style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+            <div className="pt-1 pb-2 mb-1" style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
               <div className="text-[7.5px] uppercase tracking-wider mb-1" style={{ color: C.textMuted }}>
-                High-Weight Sectors (Bank·FinSvc·IT·Oil&Gas·FMCG·Auto)
+                High-Weight (Bank·FinSvc·IT·Energy·FMCG·Auto)
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[9px] font-bold font-mono" style={{ color: '#22c55e' }}>▲{hw_up ?? '—'}</span>
                 <span className="text-[9px] font-bold font-mono" style={{ color: '#ef4444' }}>▼{hw_down ?? '—'}</span>
                 <span className="text-[7.5px]" style={{ color: C.textMuted }}>of {hw_total}</span>
                 <span className="text-[7.5px] ml-auto" style={{ color: C.textMuted }}>
-                  {(hw_up ?? 0) > (hw_down ?? 0) ? '→ Bullish bias amplified' : (hw_down ?? 0) > (hw_up ?? 0) ? '→ Bearish bias amplified' : '→ Mixed'}
+                  {(hw_up ?? 0) > (hw_down ?? 0) ? '→ Bullish amplified' : (hw_down ?? 0) > (hw_up ?? 0) ? '→ Bearish amplified' : '→ Mixed'}
                 </span>
               </div>
             </div>
           )}
-          <div className="pt-2 mb-2">
+          <div className="mb-2">
             <div className="text-[8px] uppercase tracking-wider mb-2 flex items-center justify-between"
               style={{ color: C.textMuted }}>
-              <span>All {total} Sectors</span>
               <span>Check: {CHECK_TIMES}</span>
             </div>
             <div className="grid grid-cols-3 gap-x-3 gap-y-1">
               {(sectors || []).map(s => {
                 const up = s.change_pct > 0;
                 const pc = s.change_pct >= 0 ? `+${s.change_pct}%` : `${s.change_pct}%`;
-                const isHW = ['bank','finserv','it','oilgas','fmcg','auto'].includes(s.icon);
+                const isHW = ['bank','finserv','it','energy','fmcg','auto'].includes(s.icon);
                 return (
                   <div key={s.icon} className="flex items-center justify-between">
                     <span className="text-[7.5px] font-mono truncate"
@@ -284,15 +296,15 @@ export function SectorBreadthCard({ sb, C, isDark, giftPremium }) {
               })}
             </div>
           </div>
-          <div className="rounded-lg px-3 py-2 mt-1"
+          <div className="rounded-lg px-3 py-2"
             style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${C.border}` }}>
             <div className="text-[7.5px] space-y-0.5" style={{ color: C.textMuted }}>
-              <div className="font-bold text-[8px]" style={{ color: C.textSecond }}>Short Rule</div>
+              <div className="font-bold text-[8px]" style={{ color: C.textSecond }}>Rule</div>
               <div>{strongThr}+ sectors same direction → High probability big move</div>
-              <div>Add Price Action confirmation for best results</div>
-              <div className="font-bold" style={{ color: '#06b6d4' }}>Bank + IT + FinSvc + Oil&Gas strong → bias amplified</div>
+              <div className="font-bold" style={{ color: '#06b6d4' }}>Bank + IT + FinSvc + Energy strong → bias amplified</div>
             </div>
           </div>
+          </>)}
         </div>
       )}
     </div>
