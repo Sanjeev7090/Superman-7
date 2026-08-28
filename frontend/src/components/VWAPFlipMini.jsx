@@ -16,9 +16,11 @@ export default function VWAPFlipMini({ bars, isDark }) {
   // ── VWAP Calculation ──────────────────────────────────────────
   const { vwap, recentBars, currentPrice, aboveVwap, distancePct } = useMemo(() => {
     if (!bars || bars.length < 5) return {};
-    // Use all bars for VWAP (session cumulative)
+    // For VWAP: use last 390 bars max (intraday-like session window)
+    // On daily charts this keeps it ~1.5 years max; on 5m it's ~1 day
+    const sessionBars = bars.slice(-390);
     let cumTV = 0, cumV = 0;
-    for (const b of bars) {
+    for (const b of sessionBars) {
       const tp = (b.high + b.low + b.close) / 3;
       const v  = b.volume || 1;
       cumTV += tp * v;
@@ -27,7 +29,6 @@ export default function VWAPFlipMini({ bars, isDark }) {
     const vwap = cumV > 0 ? cumTV / cumV : bars[bars.length - 1].close;
     const last  = bars[bars.length - 1].close;
     const pct   = ((last - vwap) / vwap) * 100;
-    // Last 60 bars for the mini price chart
     const slice = bars.slice(-60);
     return {
       vwap,
