@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { Globe, ChartLine, ChartBar, Gauge, ArrowClockwise, X, Warning, Timer } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
@@ -62,6 +62,7 @@ const MarketIntelPanel = ({ onClose }) => {
   const [nowIST,     setNowIST]     = useState(() => new Date());
   const [sectorBreadth, setSectorBreadth] = useState(null);
   const [doomData,      setDoomData]      = useState(null);
+  const doomRef = useRef(null);
 
   // Update clock every minute
   useEffect(() => {
@@ -506,10 +507,11 @@ const MarketIntelPanel = ({ onClose }) => {
 
               {/* ── DOOM mini card in data strip — right next to Geo Risk ── */}
               {doomData && (
-                <div
-                  className="rounded-xl p-3"
-                  style={{ background: C.cardBg, border: `1px solid ${doomData.color || '#fbbf24'}40` }}
+                <button
+                  className="rounded-xl p-3 text-left transition-all hover:opacity-90 active:scale-95"
+                  style={{ background: C.cardBg, border: `1px solid ${doomData.color || '#fbbf24'}40`, cursor: 'pointer' }}
                   data-testid="card-doom-mini"
+                  onClick={() => doomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
                 >
                   <div className="flex items-center gap-1.5 text-[9px] mb-1.5" style={{ color: C.textMuted }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={doomData.color || '#fbbf24'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -517,9 +519,16 @@ const MarketIntelPanel = ({ onClose }) => {
                       <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
                     </svg>
                     <span className="uppercase tracking-widest">DOOM</span>
+                    <span className="ml-auto text-[7px]" style={{ color: C.textMuted }}>↓ detail</span>
                   </div>
-                  <div className="text-sm font-bold font-mono" style={{ color: doomData.color || '#fbbf24' }}>
-                    {doomData.score >= 0 ? `+${doomData.score}` : `${doomData.score}`}
+                  {/* Score + Bias combined band */}
+                  <div className="flex items-baseline gap-1 mb-0.5">
+                    <div className="text-sm font-bold font-mono" style={{ color: doomData.color || '#fbbf24' }}>
+                      {doomData.score >= 0 ? `+${doomData.score}` : `${doomData.score}`}
+                    </div>
+                    <div className="text-[9px] font-semibold" style={{ color: doomData.color || '#fbbf24' }}>
+                      {doomData.bias}
+                    </div>
                   </div>
                   <div className="flex h-1.5 rounded-full overflow-hidden my-1" style={{ background: C.panelBg }}>
                     <div style={{
@@ -528,9 +537,7 @@ const MarketIntelPanel = ({ onClose }) => {
                       transition: 'width 0.4s',
                     }} />
                   </div>
-                  <div className="text-[10px] font-mono" style={{ color: doomData.color || '#fbbf24' }}>
-                    {doomData.bias}
-                  </div>
+                  {/* Action pill */}
                   <div
                     className="mt-1 text-[8px] font-bold px-1 py-0.5 rounded text-center"
                     style={{
@@ -544,7 +551,7 @@ const MarketIntelPanel = ({ onClose }) => {
                   >
                     {(doomData.action || 'WAIT').split('/')[0].trim()}
                   </div>
-                </div>
+                </button>
               )}
             </div>
 
@@ -1137,7 +1144,7 @@ const MarketIntelPanel = ({ onClose }) => {
             )}
 
             {/* ── Geopolitical Risk + DOOM — side by side ─────────────── */}
-            <div className="grid grid-cols-2 gap-2">
+            <div ref={doomRef} className="grid grid-cols-2 gap-2">
               <GeoRiskCard geoRisk={data.geo_risk} C={C} isDark={isDark} />
               <DoomCard C={C} isDark={isDark} />
             </div>
