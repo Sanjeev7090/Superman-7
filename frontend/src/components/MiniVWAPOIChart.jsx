@@ -41,7 +41,7 @@ export default function MiniVWAPOIChart({ stockData, isDark }) {
 
   useEffect(() => {
     fetchOI();
-    const t = setInterval(fetchOI, 90_000);
+    const t = setInterval(fetchOI, 5_000);
     return () => clearInterval(t);
   }, [fetchOI]);
 
