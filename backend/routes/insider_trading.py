@@ -18,6 +18,7 @@ import asyncio
 import concurrent.futures
 import io
 import csv
+import re
 import httpx
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
@@ -35,7 +36,10 @@ _pattern_cache: dict = {"data": None, "ts": None}
 
 INSIDER_TTL = 900      # 15 min
 PATTERN_TTL = 900      # 15 min
-MONGO_COLL  = "insider_detections_history"
+MONGO_COLL      = "insider_detections_history"
+ALERTS_COLL     = "insider_alerts_v3"        # outcome model
+HISTORY_COLL    = "insider_buy_history"      # z-score 12m history
+MODULE_COLL     = "insider_module_state"     # threshold, winrate
 
 FII_KEYWORDS = [
     "goldman", "morgan", "jpmorgan", "citibank", "ubs", "credit suisse",
@@ -225,21 +229,44 @@ def _fetch_nse_bulk_live_sync() -> list:
 
 
 def _fetch_nse_pit_sync(days_back: int = 30) -> list:
+    """Fetch promoter/insider PIT filings from NSE live API.
+
+    Uses plain httpx with session-cookie flow (proven working from cloud).
+    Falls back to curl_cffi only if httpx fails.
+    """
+    today    = datetime.now(timezone.utc)
+    from_str = (today - timedelta(days=days_back)).strftime("%d-%m-%Y")
+    to_str   = today.strftime("%d-%m-%Y")
+    pit_url  = (f"https://www.nseindia.com/api/corporates-pit"
+                f"?index=equities&from_date={from_str}&to_date={to_str}")
+    hdrs     = {
+        **_NSE_HDRS,
+        "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading",
+    }
+
+    # ── Strategy 1: plain httpx (works reliably from cloud) ──────────────
     try:
-        today    = datetime.now(timezone.utc)
-        from_str = (today - timedelta(days=days_back)).strftime("%d-%m-%Y")
-        to_str   = today.strftime("%d-%m-%Y")
-        s        = _cffi_session()
-        hdrs     = {**_NSE_HDRS, "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-insider-trading"}
-        r = s.get(
-            f"https://www.nseindia.com/api/corporates-pit?index=equities&from_date={from_str}&to_date={to_str}",
-            timeout=12, headers=hdrs,
-        )
+        s0 = httpx.get("https://www.nseindia.com/", headers={**_NSE_HDRS, "Referer": "https://www.google.com/"},
+                        timeout=8, follow_redirects=True)
+        cookies = dict(s0.cookies)
+        r = httpx.get(pit_url, headers=hdrs, cookies=cookies, timeout=15, follow_redirects=True)
+        if r.status_code == 200:
+            rows = r.json().get("data", [])
+            logger.info(f"NSE PIT (httpx): {len(rows)} rows")
+            return rows
+        logger.debug(f"NSE PIT httpx status {r.status_code}")
+    except Exception as e:
+        logger.debug(f"NSE PIT httpx: {e}")
+
+    # ── Strategy 2: curl_cffi ─────────────────────────────────────────────
+    try:
+        s = _cffi_session()
+        r = s.get(pit_url, timeout=12, headers=hdrs)
         rows = r.json().get("data", [])
-        logger.info(f"NSE PIT: {len(rows)} rows")
+        logger.info(f"NSE PIT (cffi): {len(rows)} rows")
         return rows
     except Exception as e:
-        logger.debug(f"NSE PIT: {e}")
+        logger.debug(f"NSE PIT cffi: {e}")
         return []
 
 
@@ -400,29 +427,58 @@ def _normalise_live_bulk(rows: list) -> list:
 def _normalise_pit(rows: list) -> list:
     out = []
     for r in rows:
-        mode_raw = (r.get("acqMode") or r.get("reg7A1acqMode") or r.get("transType") or "").lower()
-        if any(k in mode_raw for k in ("sale", "sell", "disposal")):
+        mode_raw = (r.get("acqMode") or r.get("tdpTransactionType") or r.get("transType") or "").strip()
+        # Skip sales / disposals
+        if any(k in mode_raw.lower() for k in ("sale", "sell", "disposal", "transfer")):
             continue
+        # Skip fake modes upfront
+        if any(k in mode_raw.lower() for k in ("inter-se", "inter se", "gift", "esop", "allotment", "pledge")):
+            continue
+
         sym = (r.get("symbol") or "").strip().upper()
         if not sym:
             continue
-        try:   qty = int(str(r.get("secAcq") or r.get("sharesAcquired") or 0).replace(",", ""))
-        except Exception: qty = 0
-        cat_raw = (r.get("pid") or r.get("personCategory") or "").lower()
+
+        # Shares acquired
+        try:
+            qty = int(str(r.get("secAcq") or r.get("buyQuantity") or r.get("sharesAcquired") or 0).replace(",", ""))
+        except Exception:
+            qty = 0
+        if qty <= 0:
+            continue
+
+        # Value (NSE PIT gives secVal in rupees)
+        try:
+            val_rs    = float(str(r.get("secVal") or 0).replace(",", ""))
+            val_lakh  = round(val_rs / 1e5, 2)
+        except Exception:
+            val_lakh = 0.0
+
+        # Date — NSE PIT returns "25-Feb-2026" (acqtoDt) or "25-02-2026"
+        raw_date = (r.get("acqtoDt") or r.get("acqToDate") or r.get("date") or "").strip()
+        filing_date = raw_date  # _days_since handles both formats now
+
+        cat_raw = (r.get("personCategory") or r.get("pid") or "").lower()
         cat = ("PROMOTER" if "promoter" in cat_raw else
                "DIRECTOR" if "director" in cat_raw else
-               "KMP"      if any(k in cat_raw for k in ("key", "kmp")) else "INSIDER")
+               "KMP"      if any(k in cat_raw for k in ("key", "kmp", "management")) else "INSIDER")
+
         out.append({
-            "symbol": sym,
-            "company": r.get("company") or r.get("companyName") or sym,
-            "name": r.get("acqName") or r.get("acquirerName") or "Unknown",
-            "category": cat,
-            "mode": r.get("acqMode") or r.get("reg7A1acqMode") or "Market Purchase",
-            "shares": qty, "price": 0, "value_lakh": 0,
-            "date": r.get("acqToDate") or r.get("date") or "",
-            "source": "NSE_PIT",
+            "symbol":     sym,
+            "company":    r.get("company") or r.get("companyName") or sym,
+            "name":       (r.get("acqName") or r.get("acquirerName") or "Unknown").strip(),
+            "category":   cat,
+            "mode":       mode_raw or "Market Purchase",
+            "shares":     qty,
+            "price":      0,
+            "value_lakh": val_lakh,
+            "date":       filing_date,
+            "source":     "NSE_PIT",
         })
-    return out
+
+    # Sort by most recent first; keep top 100 rows (≈ top 30 symbols for yfinance batch)
+    out.sort(key=lambda x: _days_since(x["date"]))
+    return out[:100]
 
 
 def _normalise_yf_activity(rows: list) -> list:
@@ -442,12 +498,14 @@ _FAKE_MODES = frozenset([
 
 
 def _days_since(date_str: str) -> int:
-    """Parse DD-MM-YYYY → days since filing (int). Returns 999 on failure."""
-    try:
-        d = datetime.strptime(date_str.strip(), "%d-%m-%Y")
-        return max(0, (datetime.now() - d).days)
-    except Exception:
-        return 999
+    """Parse DD-MM-YYYY or DD-Mon-YYYY → days since filing. Returns 999 on failure."""
+    for fmt in ("%d-%m-%Y", "%d-%b-%Y", "%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            d = datetime.strptime(date_str.strip(), fmt)
+            return max(0, (datetime.now() - d).days)
+        except ValueError:
+            continue
+    return 999
 
 
 def _is_market_mode(mode: str) -> bool:
@@ -623,6 +681,327 @@ def _assign_status(score: int, window: dict, cluster: dict, rejected: bool) -> d
     return {"status": "MONITOR",       "color": "#64748b", "priority": "MONITOR"}
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  v3 UPGRADES — Module switch · Entity graph · Block/lit · Z-score · Outcomes
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── 0. Module Switch ──────────────────────────────────────────────────────────
+def _module_switch(doom_score: int = 0, is_expiry: bool = False,
+                   promo_buy_cr: float = 0, promo_sell_cr: float = 0) -> dict:
+    """
+    module_on = False if:
+      - doom_score ≤ -4 (index too bearish for new insider entries)
+      - expiry day (no new entries)
+      - promoter_sell_7d > 3× promoter_buy_7d (August-type sell tape)
+    """
+    if doom_score <= -4:
+        return {"on": False, "reason": f"Index bearish (DOOM {doom_score})", "size_cap": "0%"}
+    if is_expiry:
+        return {"on": False, "reason": "Expiry day — no new entries", "size_cap": "0%"}
+    if promo_sell_cr > 3 * promo_buy_cr and promo_buy_cr > 0:
+        return {"on": False, "reason": f"Sell tape: sells ₹{promo_sell_cr:.1f}Cr vs buys ₹{promo_buy_cr:.1f}Cr", "size_cap": "0%"}
+    # Size cap by doom score
+    if doom_score >= 8:
+        size_cap = "2%"
+    elif doom_score >= 4:
+        size_cap = "1%"
+    else:
+        size_cap = "0% — neutral index"
+    return {"on": True, "reason": "Active", "size_cap": size_cap}
+
+
+def _position_size(adj_score: int, doom_score: int, module_on: bool) -> str:
+    if not module_on:       return "0%"
+    if doom_score <= -4:    return "0%"
+    base = 2.0 if doom_score >= 8 else 1.0 if doom_score >= 4 else 0.0
+    if base == 0.0:         return "0 — neutral"
+    if adj_score >= 18:     return f"{base}% (rare — size small)"
+    if adj_score >= 15:     return f"{base}%"
+    if adj_score >= 12:     return f"{min(base, 1.5):.1f}%"
+    if adj_score >= 8:      return "1%"
+    return "0%"
+
+
+# ── 1. Beneficial-Owner Entity Graph (name-based merge) ───────────────────────
+_ENTITY_STRIP = re.compile(
+    r"\b(pvt|private|limited|ltd|huf|trust|family|holdings?|"
+    r"investment|capital|enterprises?|ventures?)\b",
+    re.I,
+)
+
+
+def _entity_id(name: str) -> str:
+    """Normalize a buyer name to an entity ID for grouping."""
+    n = _ENTITY_STRIP.sub("", name.lower())
+    n = re.sub(r"[^a-z0-9\s]", "", n).strip()
+    parts = n.split()
+    # Use first 2-3 meaningful words as entity key
+    key_parts = [w for w in parts if len(w) >= 3][:3]
+    return " ".join(key_parts) if key_parts else name.lower()[:20]
+
+
+def _merge_entities(rows: list) -> dict:
+    """
+    Merge rows by entity_id (same promoter group appearing as multiple entities).
+    Returns {entity_id: {merged_name, total_value_cr, count, rows, market_pct}}.
+    """
+    entities: dict = defaultdict(lambda: {
+        "names": set(), "value_cr": 0.0, "count": 0, "rows": [],
+        "market_buys": 0,
+    })
+    for r in rows:
+        eid = _entity_id(r.get("name", ""))
+        e   = entities[eid]
+        e["names"].add(r.get("name", ""))
+        e["value_cr"]   += r.get("value_lakh", 0) / 100.0
+        e["count"]      += 1
+        e["rows"].append(r)
+        if _is_market_mode(r.get("mode", "")):
+            e["market_buys"] += 1
+
+    result = {}
+    for eid, e in entities.items():
+        # Pick shortest name as display (usually the canonical individual/company)
+        display = min(e["names"], key=len)
+        names   = list(e["names"])
+        mkt_pct = round(e["market_buys"] / e["count"] * 100) if e["count"] else 0
+        result[eid] = {
+            "merged_name":     display,
+            "all_names":       names,
+            "entity_count":    len(e["names"]),
+            "value_cr":        round(e["value_cr"], 2),
+            "count":           e["count"],
+            "market_pct":      mkt_pct,
+            "rows":            e["rows"],
+        }
+    return result
+
+
+# ── 2. Pledge + SAST (stub — data not freely available) ───────────────────────
+def _pledge_check() -> dict:
+    """
+    Pledge data requires CDSL/NSDL or NSE SAST filings (not freely accessible).
+    Returns a neutral stub. Future: integrate NSE SAST API.
+    """
+    return {
+        "pledge_status":   "N/A",
+        "pledge_score_adj": 0,
+        "pledge_note":     "Pledge data unavailable — check NSE filings manually",
+    }
+
+
+# ── 3. Dark vs Lit: Block/Bulk tape vs PIT buy ────────────────────────────────
+def _block_tape_check(sym: str, pit_buy_cr: float,
+                      bulk_rows: list, block_rows: list) -> dict:
+    """
+    Compare PIT buy vs block/bulk sell for same stock in last 7 days.
+    block_sell > 3× pit_buy → REJECT (smart money selling into promoter buy).
+    block_buy > 0 + pit_buy > 0 → lit/dark confirm +2.
+    """
+    def _val(r):
+        return _safe_float(r.get("value_lakh", 0)) / 100.0
+
+    # Separate buys vs sells in archive bulk
+    bulk_buy_cr  = sum(_val(r) for r in bulk_rows  if r.get("symbol") == sym
+                        and (r.get("BUY/SELL") or r.get("BUY_SELL") or "B").upper().startswith("B"))
+    bulk_sell_cr = sum(_val(r) for r in bulk_rows  if r.get("symbol") == sym
+                        and (r.get("BUY/SELL") or r.get("BUY_SELL") or "B").upper().startswith("S"))
+    block_buy_cr = sum(_val(r) for r in block_rows if r.get("symbol") == sym
+                        and (r.get("BUY/SELL") or r.get("BUY_SELL") or "B").upper().startswith("B"))
+    block_sell_cr= sum(_val(r) for r in block_rows if r.get("symbol") == sym
+                        and (r.get("BUY/SELL") or r.get("BUY_SELL") or "B").upper().startswith("S"))
+
+    total_sell = bulk_sell_cr + block_sell_cr
+    total_buy  = bulk_buy_cr  + block_buy_cr
+
+    if total_sell > 3 * pit_buy_cr and pit_buy_cr > 0:
+        tape = "SELL"
+        score_adj = 0  # REJECT flag raised separately
+        reject    = True
+        note      = f"Block/bulk SELL ₹{total_sell:.1f}Cr > 3× PIT buy ₹{pit_buy_cr:.1f}Cr"
+    elif total_buy > 0 and pit_buy_cr > 0:
+        tape      = "BUY"
+        score_adj = 2
+        reject    = False
+        note      = f"LIT+DARK confirm: block/bulk buy ₹{total_buy:.1f}Cr + PIT ₹{pit_buy_cr:.1f}Cr"
+    else:
+        tape      = "NONE"
+        score_adj = 0
+        reject    = False
+        note      = "No block/bulk corroboration"
+
+    return {
+        "block_tape":     tape,
+        "block_tape_adj": score_adj,
+        "block_reject":   reject,
+        "block_note":     note,
+        "block_buy_cr":   round(total_buy, 2),
+        "block_sell_cr":  round(total_sell, 2),
+    }
+
+
+# ── 4. Own-history Z-score ────────────────────────────────────────────────────
+def _z_score_sync(sym: str, current_val_cr: float) -> dict:
+    """
+    Synchronous helper — called inside run_in_executor.
+    Computes z = current_val / median(last 12m buys for this sym) from MongoDB.
+    First run: z = 1.0 (neutral, no bonus/penalty).
+    """
+    import asyncio as _asyncio
+    import statistics
+
+    async def _fetch():
+        cutoff = datetime.now(timezone.utc) - timedelta(days=365)
+        rows   = await db[HISTORY_COLL].find(
+            {"symbol": sym, "stored_at": {"$gte": cutoff}},
+            {"value_cr": 1, "_id": 0},
+        ).to_list(500)
+        return rows
+
+    try:
+        loop   = _asyncio.new_event_loop()
+        rows   = loop.run_until_complete(_fetch())
+        loop.close()
+    except Exception:
+        return {"z": 1.0, "z_note": "History N/A (DB error)", "z_adj": 0}
+
+    if not rows:
+        return {"z": 1.0, "z_note": "First filing — no history (z=1)", "z_adj": 0}
+
+    values = [r["value_cr"] for r in rows if r.get("value_cr", 0) > 0]
+    if not values:
+        return {"z": 1.0, "z_note": "No prior values", "z_adj": 0}
+
+    median_val = statistics.median(values)
+    z          = round(current_val_cr / max(median_val, 0.01), 2)
+
+    if z >= 3.0:
+        adj  = 2
+        note = f"z={z} (≥3×, unusually large buy) +2"
+    elif z < 1.0 and z > 0:
+        adj  = -2
+        note = f"z={z} (<1×, smaller than usual) -2"
+    else:
+        adj  = 0
+        note = f"z={z} (within normal range)"
+
+    return {"z": z, "z_note": note, "z_adj": adj}
+
+
+async def _save_buy_history(detections: list) -> None:
+    """Store each WATCH+ alert for z-score history accumulation."""
+    docs = []
+    for d in detections:
+        if d["status"] in ("REJECT", "MONITOR"):
+            continue
+        docs.append({
+            "symbol":     d["symbol"],
+            "entity_id":  d.get("entity_id", d["symbol"]),
+            "value_cr":   d.get("total_value_cr", 0),
+            "score":      d["score"],
+            "status":     d["status"],
+            "stored_at":  datetime.now(timezone.utc),
+        })
+    if docs:
+        try:
+            await db[HISTORY_COLL].insert_many(docs, ordered=False)
+        except Exception as e:
+            logger.debug(f"History save: {e}")
+
+
+# ── 5. Outcome Model ──────────────────────────────────────────────────────────
+async def _save_alert_v3(det: dict) -> None:
+    """Upsert alert into insider_alerts_v3 for 20-day outcome tracking."""
+    if det["status"] in ("REJECT", "MONITOR"):
+        return
+    doc = {
+        "symbol":      det["symbol"],
+        "score":       det["score"],
+        "adj_score":   det.get("adj_score", det["score"]),
+        "status":      det["status"],
+        "cluster":     det["cluster"],
+        "z":           det.get("z", 1.0),
+        "filing_date": det.get("filing_date", ""),
+        "entry_price": det.get("price", 0),
+        "entry_date":  datetime.now(timezone.utc),
+        "label":       None,         # WIN / LOSS / FLAT — set 20 days later
+        "labeled_at":  None,
+    }
+    await db[ALERTS_COLL].update_one(
+        {"symbol": det["symbol"], "filing_date": det.get("filing_date", "")},
+        {"$setOnInsert": doc},
+        upsert=True,
+    )
+
+
+async def _label_outcomes_job() -> dict:
+    """
+    Label alerts that are 20+ trading days old.
+    WIN = price ≥ +8%, LOSS = price ≤ -8%, FLAT = rest.
+    Returns stats dict.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=28)
+    unlabeled = await db[ALERTS_COLL].find(
+        {"label": None, "entry_date": {"$lte": cutoff}, "entry_price": {"$gt": 0}},
+        {"_id": 1, "symbol": 1, "entry_price": 1}
+    ).to_list(50)
+
+    labeled = 0
+    for alert in unlabeled:
+        try:
+            t     = yf.Ticker(f"{alert['symbol']}.NS")
+            price = _safe_float(t.fast_info.last_price)
+            if price <= 0:
+                continue
+            ep  = _safe_float(alert["entry_price"])
+            pct = (price - ep) / ep if ep > 0 else 0
+            lbl = "WIN" if pct >= 0.08 else "LOSS" if pct <= -0.08 else "FLAT"
+            await db[ALERTS_COLL].update_one(
+                {"_id": alert["_id"]},
+                {"$set": {"label": lbl, "labeled_at": datetime.now(timezone.utc),
+                           "close_pct": round(pct * 100, 2)}},
+            )
+            labeled += 1
+        except Exception as e:
+            logger.debug(f"Label {alert['symbol']}: {e}")
+
+    # Recompute winrate from last 30 labeled alerts
+    recent = await db[ALERTS_COLL].find(
+        {"label": {"$ne": None}},
+        {"label": 1, "_id": 0}
+    ).sort("labeled_at", -1).limit(30).to_list(30)
+    wins = sum(1 for r in recent if r["label"] == "WIN")
+    winrate = round(wins / len(recent) * 100, 1) if recent else 0.0
+
+    # Adaptive threshold
+    threshold = 16  # default per spec (small sample)
+    if len(recent) >= 30:
+        threshold = 17 if winrate < 45 else 15 if winrate > 55 else 16
+
+    # Store module state
+    await db[MODULE_COLL].replace_one(
+        {"type": "module_state"},
+        {"type": "module_state", "winrate": winrate,
+         "threshold": threshold, "labeled_total": len(recent),
+         "updated_at": datetime.now(timezone.utc)},
+        upsert=True,
+    )
+    return {"labeled": labeled, "winrate": winrate, "threshold": threshold, "sample": len(recent)}
+
+
+async def _get_module_state() -> dict:
+    """Fetch current module state from DB (threshold, winrate)."""
+    try:
+        doc = await db[MODULE_COLL].find_one({"type": "module_state"}, {"_id": 0})
+        if doc:
+            return {"threshold": doc.get("threshold", 15),
+                    "winrate":   doc.get("winrate", 0),
+                    "sample":    doc.get("labeled_total", 0)}
+    except Exception:
+        pass
+    return {"threshold": 15, "winrate": 0.0, "sample": 0}
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -637,7 +1016,7 @@ async def _build_detections() -> tuple:
         loop.run_in_executor(None, _fetch_nse_archives_bulk_sync, 5),
         loop.run_in_executor(None, _fetch_nse_archives_block_sync, 5),
         loop.run_in_executor(None, _fetch_nse_bulk_live_sync),
-        loop.run_in_executor(None, _fetch_nse_pit_sync, 30),
+        loop.run_in_executor(None, _fetch_nse_pit_sync, 180),  # 180d: covers NSE data lag
         loop.run_in_executor(None, _yf_unusual_activity_sync),
         return_exceptions=True,
     )
@@ -714,6 +1093,39 @@ async def _build_detections() -> tuple:
 
     yf_data = await loop.run_in_executor(None, _yf_price_batch, list(sym_map.keys()))
 
+    # ── Module state from DB (adaptive threshold, winrate) ───────────────────
+    mod_state   = await _get_module_state()
+    dyn_thresh  = mod_state.get("threshold", 15)
+
+    # ── Module switch: use DOOM score if available ───────────────────────────
+    doom_score  = 0
+    is_expiry   = False
+    try:
+        doom_doc = await db["doom_scores"].find_one({}, {"score": 1, "expiry": 1, "_id": 0},
+                                                     sort=[("timestamp", -1)])
+        if doom_doc:
+            doom_score = int(doom_doc.get("score", 0))
+            is_expiry  = bool(doom_doc.get("expiry", False))
+    except Exception:
+        pass
+
+    # Compute promoter sell tape from PIT (sell rows we skipped earlier)
+    promo_sell_cr = 0.0
+    promo_buy_cr  = sum(r.get("value_lakh", 0) for r in all_rows
+                        if r.get("category") == "PROMOTER"
+                        and _is_market_mode(r.get("mode", ""))) / 100.0
+    # (sell rows not in all_rows — they were filtered; approximate from raw pit_raw)
+    for r in pit_raw:
+        mode_raw2 = (r.get("acqMode") or r.get("tdpTransactionType") or "").lower()
+        if any(k in mode_raw2 for k in ("sale", "sell", "disposal")):
+            try:
+                val_r = float(str(r.get("secVal") or 0).replace(",", ""))
+                promo_sell_cr += val_r / 1e7  # rupees → crores
+            except Exception:
+                pass
+
+    mod_switch = _module_switch(doom_score, is_expiry, promo_buy_cr, promo_sell_cr)
+
     results = []
     for sym, rows in sym_map.items():
         mkt   = yf_data.get(sym) or {}
@@ -723,50 +1135,100 @@ async def _build_detections() -> tuple:
         small = mkt.get("small_cap", True)
         sma20 = _safe_float(mkt.get("sma20", 0))
 
-        # Use pre-existing vol_ratio from yfinance activity rows if available
         if rows[0].get("source") == "YF_ACTIVITY":
             vr  = _safe_float(rows[0].get("vol_ratio", vr))
             brk = rows[0].get("breakout",  brk)
 
-        # Fill prices from yfinance if missing
         for r in rows:
             if r["price"] == 0 and price > 0:
                 r["price"]      = price
                 r["value_lakh"] = _safe_float(round(r["shares"] * price / 1e5, 2))
 
-        total_val = _safe_float(sum(r["value_lakh"] for r in rows))
+        total_val    = _safe_float(sum(r["value_lakh"] for r in rows))
+        total_val_cr = _safe_float(round(total_val / 100, 2))
 
-        # Detect source types for bulk/block confirmation
         sources_set = {r["source"] for r in rows}
         has_bulk  = bool(sources_set & {"NSE_ARCHIVE_BULK", "NSE_BULK_LIVE"})
         has_block = bool(sources_set & {"NSE_ARCHIVE_BLOCK"})
 
-        # ── God Score ─────────────────────────────────────────────────────────
+        # ── Entity graph merge ──────────────────────────────────────────────
+        entity_map = _merge_entities(rows)
+        # Best entity = highest value
+        best_entity = max(entity_map.values(), key=lambda e: e["value_cr"]) if entity_map else {}
+        merged_buyer   = best_entity.get("merged_name", "")
+        entity_count   = best_entity.get("entity_count", 1)
+        all_names_list = best_entity.get("all_names", [])
+
+        # ── Block tape check (pass raw NSE archive rows) ─────────────────────
+        pit_buy_cr = sum(r.get("value_lakh", 0) for r in rows
+                         if r["source"] == "NSE_PIT") / 100.0
+        block_info = _block_tape_check(sym, pit_buy_cr, arch_bulk, arch_block)
+
+        # ── Z-score ──────────────────────────────────────────────────────────
+        z_info = await loop.run_in_executor(None, _z_score_sync, sym, total_val_cr)
+
+        # ── Pledge (stub) ────────────────────────────────────────────────────
+        pledge = _pledge_check()
+
+        # ── God Score (base 0-20) ─────────────────────────────────────────────
         score, factors, rejected, rej_reason = _god_score(rows, vr, brk, has_bulk, has_block)
 
-        # ── Cluster analysis ──────────────────────────────────────────────────
+        # ── v3 score additions ────────────────────────────────────────────────
+        if not rejected:
+            # Block tape
+            if block_info["block_reject"]:
+                rejected    = True
+                rej_reason  = block_info["block_note"]
+                factors.append("BLOCK TAPE SELL → REJECT")
+            else:
+                if block_info["block_tape_adj"] > 0:
+                    score += block_info["block_tape_adj"]
+                    factors.append(f"LIT+DARK CONFIRM +{block_info['block_tape_adj']}")
+
+            # Z-score
+            if z_info["z_adj"] != 0:
+                score = max(0, score + z_info["z_adj"])
+                factors.append(z_info["z_note"])
+
+            # Float skin noise filter
+            # We can't compute exact float %, but filter very small transactions
+            adv_proxy = total_val_cr * vr  # rough proxy
+            if total_val_cr < 0.10 and vr < 1.3:
+                rejected   = True
+                rej_reason = f"Noise: too small (₹{total_val_cr:.2f}Cr, vol {vr}×)"
+                factors.append("NOISE FILTER → REJECT")
+
+            score = min(score, 20)
+
+        # ── Cluster ────────────────────────────────────────────────────────────
         cluster = _cluster_info(rows)
 
-        # ── Time window (use most recent filing date) ─────────────────────────
-        best_date = max(
-            (r.get("date", "") for r in rows),
-            key=lambda d: _days_since(d),
-            default="",
-        )
-        # Actually use MOST RECENT date (smallest days_since)
+        # ── Time window ────────────────────────────────────────────────────────
         best_date = min(
             (r.get("date", "") for r in rows if r.get("date")),
-            key=lambda d: _days_since(d),
-            default="",
+            key=lambda d: _days_since(d), default="",
         )
         window = _time_window(best_date)
 
-        # ── Status ────────────────────────────────────────────────────────────
-        status_info = _assign_status(score, window, cluster, rejected)
-        adj_score   = max(0, score + window["score_adj"])
+        # ── Status (v3) ────────────────────────────────────────────────────────
+        if not mod_switch["on"]:
+            # Module off → still compute score but mark NO_ENTRY
+            status_info = {"status": "NO ENTRY", "color": "#94a3b8", "priority": "MONITOR"}
+            adj_score   = max(0, score + window["score_adj"])
+        else:
+            status_info = _assign_status(score, window, cluster, rejected)
+            adj_score   = max(0, score + window["score_adj"])
 
-        # SL hint
-        sl_note = f"Filing-week low or 8-day swing low"
+        # Override threshold from outcome model
+        effective_thresh = dyn_thresh
+        if adj_score >= effective_thresh and not rejected and mod_switch["on"]:
+            if window["window"] == "T3-T8" and vr >= 1.8 and brk:
+                status_info = {"status": "SETUP", "color": "#4ade80", "priority": "HIGH"}
+            elif status_info["status"] in ("WATCH", "MONITOR"):
+                status_info = {"status": "WATCH", "color": "#fbbf24", "priority": "WATCHLIST"}
+
+        # ── Position size ────────────────────────────────────────────────────
+        pos_size = _position_size(adj_score, doom_score, mod_switch["on"])
 
         results.append({
             "symbol":           sym,
@@ -775,21 +1237,40 @@ async def _build_detections() -> tuple:
             "score":            score,
             "adj_score":        adj_score,
             "score_max":        20,
-            "score_threshold":  12,
-            # Status & priority
+            "score_threshold":  effective_thresh,
+            # Status
             "status":           status_info["status"],
             "status_color":     status_info["color"],
             "priority":         status_info["priority"],
             "rejected":         rejected,
             "reject_reason":    rej_reason,
-            # Cluster
+            # v3: entity graph
+            "merged_buyer":     merged_buyer,
+            "entity_count":     entity_count,
+            "all_buyer_names":  all_names_list,
+            # v3: cluster
             "cluster":          cluster["is_cluster"],
             "cluster_info":     cluster,
-            # Time window
+            # v3: time window
             "window":           window["window"],
             "window_label":     window["label"],
             "window_color":     window["color"],
             "days_since":       window["days"],
+            # v3: z-score
+            "z":                z_info["z"],
+            "z_note":           z_info["z_note"],
+            # v3: pledge stub
+            "pledge_7d":        pledge["pledge_status"],
+            "pledge_note":      pledge["pledge_note"],
+            # v3: block tape
+            "block_tape":       block_info["block_tape"],
+            "block_note":       block_info["block_note"],
+            # v3: module
+            "module_on":        mod_switch["on"],
+            "module_reason":    mod_switch["reason"],
+            # v3: position size
+            "position_size":    pos_size,
+            "index_score":      doom_score,
             # Market data
             "vol_ratio":        _safe_float(round(vr, 2)),
             "price":            _safe_float(price),
@@ -797,20 +1278,25 @@ async def _build_detections() -> tuple:
             "price_breakout":   brk,
             "is_small_cap":     small,
             "total_value_lakh": _safe_float(round(total_val, 2)),
-            "total_value_cr":   _safe_float(round(total_val / 100, 2)),
+            "total_value_cr":   _safe_float(total_val_cr),
             # Transactions
             "insiders":         rows,
             "factors":          factors,
             "sources":          list(sources_set),
             "has_bulk":         has_bulk,
             "has_block":        has_block,
-            # Position sizing rule (user-facing text)
-            "sl_note":          sl_note,
+            "sl_note":          "Filing-week low or 8-day swing low",
             "filing_date":      best_date,
         })
 
-    # Sort: non-rejected first, then by adj_score
     results.sort(key=lambda x: (0 if x["rejected"] else 1, x["adj_score"]), reverse=True)
+
+    # ── v3: save z-score history + alerts (non-blocking background) ──────────
+    asyncio.create_task(_save_buy_history(results))
+    for det in results:
+        if not det["rejected"] and det["adj_score"] >= 8:
+            asyncio.create_task(_save_alert_v3(det))
+
     return results, source_label
 
 
@@ -1276,6 +1762,54 @@ async def get_insider_detections(refresh: bool = False):
                 "updated_at":   hist.get("saved_at", now.isoformat()),
             }
         return {"detections": [], "count": 0, "error": str(e), "updated_at": now.isoformat()}
+
+
+@router.get("/module_status")
+async def get_module_status():
+    """Current Insider Module state: ON/OFF, threshold, winrate, recent alert stats."""
+    mod_state = await _get_module_state()
+    # Get latest doom for current module_on
+    doom_score = 0
+    is_expiry  = False
+    try:
+        doc = await db["doom_scores"].find_one({}, {"score": 1, "expiry": 1, "_id": 0},
+                                                sort=[("timestamp", -1)])
+        if doc:
+            doom_score = int(doc.get("score", 0))
+            is_expiry  = bool(doc.get("expiry", False))
+    except Exception:
+        pass
+    mod = _module_switch(doom_score, is_expiry)
+    # Recent alert counts
+    try:
+        total   = await db[ALERTS_COLL].count_documents({})
+        labeled = await db[ALERTS_COLL].count_documents({"label": {"$ne": None}})
+        wins    = await db[ALERTS_COLL].count_documents({"label": "WIN"})
+        losses  = await db[ALERTS_COLL].count_documents({"label": "LOSS"})
+    except Exception:
+        total = labeled = wins = losses = 0
+
+    return {
+        "module_on":        mod["on"],
+        "module_reason":    mod["reason"],
+        "threshold":        mod_state["threshold"],
+        "winrate":          mod_state["winrate"],
+        "sample_size":      mod_state["sample"],
+        "index_score":      doom_score,
+        "is_expiry":        is_expiry,
+        "alert_stats":      {"total": total, "labeled": labeled, "wins": wins, "losses": losses},
+        "size_cap":         mod["size_cap"],
+    }
+
+
+@router.get("/label_outcomes")
+async def trigger_label_outcomes():
+    """Trigger 20-day outcome labeling for pending alerts. Run daily at 15:40."""
+    try:
+        stats = await _label_outcomes_job()
+        return {"status": "ok", **stats}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @router.get("/pattern-scan")

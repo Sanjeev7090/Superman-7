@@ -191,16 +191,40 @@ function InsiderRow({ item, C }) {
 
           {/* Row 3: Company + Mode + Position hint */}
           <div style={{ display: 'flex', gap: 6, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 9, color: C.textSecond }} className="truncate">{item.company}</span>
+            <span style={{ fontSize: 9, color: C.textSecond }} className="truncate">
+              {item.merged_buyer && item.merged_buyer !== item.insiders?.[0]?.name
+                ? `${item.merged_buyer}${item.entity_count > 1 ? ` (+${item.entity_count - 1} entities)` : ''}`
+                : item.company}
+            </span>
             {item.insiders?.[0]?.mode && (
               <span style={{
                 fontSize: 8, color: '#06b6d4', fontWeight: 700,
                 background: 'rgba(6,182,212,0.10)', padding: '1px 5px', borderRadius: 3,
               }}>{item.insiders[0].mode}</span>
             )}
-            {!item.rejected && s >= 8 && (
+            {/* v3 badges */}
+            {item.z && item.z !== 1 && (
+              <span style={{
+                fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                color: item.z >= 3 ? '#4ade80' : item.z < 1 ? '#f87171' : '#94a3b8',
+                background: item.z >= 3 ? 'rgba(34,197,94,0.12)' : item.z < 1 ? 'rgba(239,68,68,0.10)' : 'transparent',
+              }}>z={item.z}</span>
+            )}
+            {item.block_tape && item.block_tape !== 'NONE' && (
+              <span style={{
+                fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+                color: item.block_tape === 'BUY' ? '#4ade80' : '#f87171',
+                background: item.block_tape === 'BUY' ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
+              }}>Block: {item.block_tape}</span>
+            )}
+            {!item.rejected && (item.adj_score ?? item.score) >= 8 && item.module_on !== false && (
               <span style={{ fontSize: 8, color: '#a78bfa', fontWeight: 700 }}>
-                Size: {posNote}
+                Size: {item.position_size || posNote}
+              </span>
+            )}
+            {item.module_on === false && (
+              <span style={{ fontSize: 8, color: '#f87171', fontWeight: 700 }}>
+                Module OFF
               </span>
             )}
           </div>
@@ -223,6 +247,38 @@ function InsiderRow({ item, C }) {
               fontSize: 10, color: '#f87171',
             }}>
               Auto-Rejected — {item.reject_reason}
+            </div>
+          )}
+
+          {/* v3 Output Card */}
+          {!item.rejected && (
+            <div style={{
+              padding: '7px 10px', borderRadius: 6, marginBottom: 8,
+              background: C.cardBg, border: `1px solid ${C.border}`,
+            }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: C.textSecond, letterSpacing: '0.06em', marginBottom: 5 }}>
+                v3 OUTPUT CARD
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '3px 10px' }}>
+                {[
+                  ['STOCK',         item.symbol],
+                  ['MERGED BUYER',  item.merged_buyer || '—'],
+                  ['SCORE',         `${item.adj_score ?? item.score}/${item.score_max ?? 20}`],
+                  ['z',             item.z != null ? item.z : '1.0'],
+                  ['CLUSTER',       item.cluster ? `Yes — ${item.cluster_info?.count}× / ₹${item.cluster_info?.value_cr}Cr` : 'No'],
+                  ['PLEDGE 7D',     item.pledge_7d || 'N/A'],
+                  ['BLOCK TAPE',    item.block_tape || 'NONE'],
+                  ['MODULE',        item.module_on !== false ? 'ON' : `OFF — ${item.module_reason}`],
+                  ['STATUS',        item.status],
+                  ['INDEX SCORE',   `${item.index_score >= 0 ? '+' : ''}${item.index_score ?? 0} DOOM`],
+                  ['SIZE',          item.position_size || '—'],
+                ].map(([lbl, val]) => (
+                  <React.Fragment key={lbl}>
+                    <span style={{ fontSize: 8, color: C.textSecond, fontWeight: 700, textTransform: 'uppercase' }}>{lbl}</span>
+                    <span style={{ fontSize: 8, fontWeight: 700, color: C.textPrimary }}>{String(val)}</span>
+                  </React.Fragment>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1500,7 +1556,126 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
                     {insiderData.count} · {sourceLabel}
                   </span>
                 )}
+                {insiderData?.count === undefined && insiders.length > 0 && (
+                  <span style={{ marginLeft: 'auto', fontSize: 9, color: C.textSecond }}>
+                    {insiders.length} stocks · {sourceLabel}
+                  </span>
+                )}
               </div>
+
+              {/* ── Module Status Banner ─────────────────────────────────── */}
+              {insiders.length > 0 && (() => {
+                const first = insiders[0];
+                const modOn = first?.module_on !== false;
+                const modReason = first?.module_reason || 'Active';
+                const indexScore = first?.index_score ?? 0;
+                const indexColor = indexScore >= 8 ? '#22c55e' : indexScore <= -4 ? '#ef4444' : '#fbbf24';
+                return (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                    padding: '7px 14px',
+                    borderBottom: `1px solid ${C.border}`,
+                    background: modOn ? 'rgba(34,197,94,0.04)' : 'rgba(239,68,68,0.06)',
+                  }} data-testid="module-status-banner">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <div style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: modOn ? '#22c55e' : '#ef4444',
+                        boxShadow: modOn ? '0 0 0 3px rgba(34,197,94,0.25)' : '0 0 0 3px rgba(239,68,68,0.25)',
+                      }} />
+                      <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '0.07em',
+                        color: modOn ? '#4ade80' : '#f87171' }}>
+                        MODULE {modOn ? 'ON' : 'OFF'}
+                      </span>
+                    </div>
+                    {!modOn && (
+                      <span style={{ fontSize: 8, color: '#f87171' }}>{modReason}</span>
+                    )}
+                    <span style={{ fontSize: 8, color: indexColor, fontWeight: 700 }}>
+                      Index: {indexScore >= 0 ? '+' : ''}{indexScore} DOOM
+                    </span>
+                    <span style={{ fontSize: 8, color: C.textSecond, marginLeft: 'auto' }}>
+                      Threshold: {first?.score_threshold ?? 15}+ · {insiders.length} stocks
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* ── Cluster Alert Banner ─────────────────────────────────── */}
+              {(() => {
+                const clusters = insiders.filter(i => i.cluster);
+                if (!clusters.length) return null;
+                const totalCr  = clusters.reduce((a, b) => a + (b.cluster_info?.value_cr || 0), 0);
+                const totalBuys= clusters.reduce((a, b) => a + (b.cluster_info?.count || 0), 0);
+                const buyers   = clusters.reduce((a, b) => a + (b.cluster_info?.buyers || 0), 0);
+                return (
+                  <div style={{
+                    margin: '8px 14px 0',
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    background: 'linear-gradient(135deg, rgba(245,158,11,0.18) 0%, rgba(234,88,12,0.10) 100%)',
+                    border: '1px solid rgba(245,158,11,0.50)',
+                  }} data-testid="cluster-alert-banner">
+                    {/* Title row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <div style={{
+                          width: 7, height: 7, borderRadius: '50%', background: '#f59e0b',
+                          boxShadow: '0 0 0 3px rgba(245,158,11,0.30)',
+                          animation: 'pulse 1.5s infinite',
+                        }} />
+                        <span style={{ fontSize: 11, fontWeight: 900, color: '#fbbf24', letterSpacing: '0.08em' }}>
+                          CLUSTER ALERT
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
+                        <span style={{
+                          fontSize: 9, fontWeight: 800,
+                          background: 'rgba(245,158,11,0.20)', color: '#fbbf24',
+                          border: '1px solid rgba(245,158,11,0.40)',
+                          padding: '2px 7px', borderRadius: 4,
+                        }}>{totalBuys} buys / 7d</span>
+                        <span style={{
+                          fontSize: 9, fontWeight: 800,
+                          background: 'rgba(34,197,94,0.12)', color: '#4ade80',
+                          border: '1px solid rgba(34,197,94,0.30)',
+                          padding: '2px 7px', borderRadius: 4,
+                        }}>₹{totalCr.toFixed(1)} Cr total</span>
+                        <span style={{
+                          fontSize: 9, fontWeight: 800,
+                          background: 'rgba(99,102,241,0.12)', color: '#818cf8',
+                          border: '1px solid rgba(99,102,241,0.25)',
+                          padding: '2px 7px', borderRadius: 4,
+                        }}>{buyers} buyers</span>
+                      </div>
+                    </div>
+                    {/* Cluster stocks */}
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {clusters.map((c, i) => (
+                        <div key={i} style={{
+                          padding: '5px 10px', borderRadius: 6,
+                          background: 'rgba(245,158,11,0.10)',
+                          border: '1px solid rgba(245,158,11,0.25)',
+                        }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: '#fbbf24' }}>{c.symbol}</div>
+                          <div style={{ fontSize: 8, color: '#94a3b8', marginTop: 1 }}>
+                            {c.cluster_info?.count}× · ₹{c.cluster_info?.value_cr?.toFixed(1)}Cr · {c.cluster_info?.buyers} buyer{c.cluster_info?.buyers > 1 ? 's' : ''}
+                          </div>
+                          <div style={{
+                            marginTop: 3, fontSize: 8, fontWeight: 800,
+                            color: c.status === 'GOD LEVEL' ? '#f59e0b' : '#4ade80',
+                          }}>
+                            {c.status} {c.adj_score}/{c.score_max}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 8, fontSize: 8, color: '#94a3b8', fontStyle: 'italic' }}>
+                      Cluster: 3+ promoter/director buys in 7d · ≥₹3Cr · ≥70% market mode. Verify confirm stack before sizing.
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* History banner */}
               {fromHistory && historyDate && (

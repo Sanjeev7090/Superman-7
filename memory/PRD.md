@@ -137,7 +137,17 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
 
 ---
 
-### Session (Feb 2026 — Part 8 — Insider Tracker God Score Rebuild)
+### Session (Feb 2026 — Part 9 — Insider Module v3 Full System)
+- **Module Switch** — `module_on` flag: OFF if DOOM ≤-4 / expiry / promoter sell tape > 3× buys
+- **Beneficial-Owner Entity Graph** — name-based merge (HUF/pvt/trust/holdings stripped), merged_buyer display
+- **Pledge + SAST** — stub (NSE SAST data not freely accessible, shows N/A with note)
+- **Dark vs Lit (Block/Bulk vs PIT)** — block_sell > 3× pit_buy → REJECT; block+PIT confirm → +2
+- **Own-History Z-Score** — MongoDB `insider_buy_history` accumulates over time; z<1 = -2, z≥3 = +2
+- **Outcome Model** — `insider_alerts_v3` collection; 20-day WIN/LOSS/FLAT labeling; adaptive threshold (30-alert sample)
+- **New Endpoints**: `GET /api/insider/module_status`, `GET /api/insider/label_outcomes`
+- **Frontend v3 Output Card**: merged_buyer, z, block_tape, pledge, module ON/OFF, index_score, size
+- **Module Status Banner**: top of insider tab, green/red dot, MODULE ON/OFF, DOOM score, threshold
+
 - **God Score 0-20** engine replacing old 0-10 scoring
   - 11 factors: Promoter market buy (+4), Group cluster (+2), Director/KMP (+2), value, mode, delivery/vol spike, 20DMA, bulk+block, pledge
   - Fake Signal Killers: inter-se, gift, ESOP, allotment, preferential, INSTITUTIONAL bulk
