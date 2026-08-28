@@ -506,53 +506,57 @@ const MarketIntelPanel = ({ onClose }) => {
               )}
 
               {/* ── DOOM mini card in data strip — right next to Geo Risk ── */}
-              {doomData && (
-                <button
-                  className="rounded-xl p-3 text-left transition-all hover:opacity-90 active:scale-95"
-                  style={{ background: C.cardBg, border: `1px solid ${doomData.color || '#fbbf24'}40`, cursor: 'pointer' }}
-                  data-testid="card-doom-mini"
-                  onClick={() => doomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
-                >
-                  <div className="flex items-center gap-1.5 text-[9px] mb-1.5" style={{ color: C.textMuted }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={doomData.color || '#fbbf24'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-                      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                    </svg>
-                    <span className="uppercase tracking-widest">DOOM</span>
-                    <span className="ml-auto text-[7px]" style={{ color: C.textMuted }}>↓ detail</span>
-                  </div>
-                  {/* Score + Bias combined band */}
-                  <div className="flex items-baseline gap-1 mb-0.5">
-                    <div className="text-sm font-bold font-mono" style={{ color: doomData.color || '#fbbf24' }}>
-                      {doomData.score >= 0 ? `+${doomData.score}` : `${doomData.score}`}
-                    </div>
-                    <div className="text-[9px] font-semibold" style={{ color: doomData.color || '#fbbf24' }}>
-                      {doomData.bias}
-                    </div>
-                  </div>
-                  <div className="flex h-1.5 rounded-full overflow-hidden my-1" style={{ background: C.panelBg }}>
-                    <div style={{
-                      width: `${Math.min(100, ((doomData.score + 12) / 24) * 100)}%`,
-                      background: doomData.color || '#fbbf24',
-                      transition: 'width 0.4s',
-                    }} />
-                  </div>
-                  {/* Action pill */}
-                  <div
-                    className="mt-1 text-[8px] font-bold px-1 py-0.5 rounded text-center"
-                    style={{
-                      color: doomData.action === 'LONG' ? '#22c55e'
-                           : doomData.action === 'SHORT' ? '#ef4444'
-                           : '#fbbf24',
-                      background: doomData.action === 'LONG' ? 'rgba(34,197,94,0.12)'
-                                : doomData.action === 'SHORT' ? 'rgba(239,68,68,0.12)'
-                                : 'rgba(251,191,36,0.12)',
-                    }}
+              {doomData && (() => {
+                const dc      = doomData.color || '#fbbf24';
+                const fuel    = doomData.expected_close_pts || [-80, 80];
+                const fuelLbl = `${fuel[0] >= 0 ? '+' : ''}${fuel[0]} to ${fuel[1] >= 0 ? '+' : ''}${fuel[1]}`;
+                const confirm = doomData.confirm_950;
+                const confirmLbl = confirm === true ? 'YES' : confirm === false ? 'NO' : 'WAIT';
+                const confirmColor = confirm === true ? '#22c55e' : confirm === false ? '#ef4444' : '#fbbf24';
+                const actionColor  = doomData.action === 'LONG' ? '#22c55e'
+                                   : doomData.action === 'SHORT' ? '#ef4444' : '#fbbf24';
+                const rows = [
+                  { lbl: 'Bias',   val: doomData.bias || 'Neutral',          color: dc },
+                  { lbl: 'Fuel',   val: `${fuelLbl} pts`,                    color: C.textSecond },
+                  { lbl: 'Expiry', val: doomData.expiry ? 'Yes' : 'No',      color: doomData.expiry ? '#a78bfa' : C.textMuted },
+                  { lbl: '9:50',   val: confirmLbl,                          color: confirmColor },
+                  { lbl: 'Action', val: (doomData.action || 'WAIT').split('/')[0].trim(), color: actionColor },
+                ];
+                return (
+                  <button
+                    className="rounded-xl p-3 text-left transition-all hover:opacity-90 active:scale-95"
+                    style={{ background: C.cardBg, border: `1px solid ${dc}40`, cursor: 'pointer' }}
+                    data-testid="card-doom-mini"
+                    onClick={() => doomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })}
                   >
-                    {(doomData.action || 'WAIT').split('/')[0].trim()}
-                  </div>
-                </button>
-              )}
+                    {/* Header row */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5 text-[9px]" style={{ color: C.textMuted }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={dc} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        <span className="uppercase tracking-widest font-bold" style={{ color: dc }}>DOOM</span>
+                      </div>
+                      <span className="text-[8px] font-black font-mono px-1.5 py-0.5 rounded-full"
+                        style={{ color: dc, background: `${dc}18`, border: `1px solid ${dc}35` }}>
+                        {doomData.score >= 0 ? `+${doomData.score}` : `${doomData.score}`}
+                      </span>
+                    </div>
+                    {/* Key-value rows */}
+                    <div className="space-y-1">
+                      {rows.map(({ lbl, val, color }) => (
+                        <div key={lbl} className="flex items-center justify-between gap-1">
+                          <span className="text-[8px] uppercase tracking-wide shrink-0" style={{ color: C.textMuted }}>{lbl}</span>
+                          <span className="text-[8px] font-bold font-mono text-right leading-tight" style={{ color }}>{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Tap hint */}
+                    <div className="mt-2 text-center text-[7px]" style={{ color: C.textMuted }}>tap for detail ↓</div>
+                  </button>
+                );
+              })()}
             </div>
 
             {(() => {
