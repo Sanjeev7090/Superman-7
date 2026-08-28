@@ -7,6 +7,22 @@ import {
 import { toast } from 'sonner';
 import OptionsPaperTradeModal from './OptionsPaperTradeModal';
 import BrokerSettingsModal from './BrokerSettingsModal';
+import { ExpiryWorkflowSection } from './market-intel/ExpiryWorkflowSection';
+
+// Dark-mode C tokens for ExpiryWorkflowSection (PaperTradingPanel is always dark)
+const DARK_C = {
+  panelBg:      '#0d0f17',
+  headerBg:     '#0d0f17',
+  cardBg:       '#181c27',
+  tableBg:      '#12151f',
+  border:       'rgba(255,255,255,0.08)',
+  borderSubtle: 'rgba(255,255,255,0.05)',
+  textPrimary:  '#ffffff',
+  textSecond:   '#94a3b8',
+  textMuted:    '#52525b',
+  textCell:     '#e4e4e7',
+  scoreTrack:   '#27272a',
+};
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -533,6 +549,7 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
             { id: 'positions', label: `Positions (${positions.length})` },
             { id: 'history', label: `History (${history.length})` },
             { id: 'order', label: '+ Stock' },
+            { id: 'expiry', label: '⚡ Expiry' },
           ].map(t => (
             <button
               key={t.id}
@@ -752,6 +769,14 @@ const PaperTradingPanel = ({ selectedStock, pendingTrade, onPendingTradeConsumed
               </button>
             </div>
           )}
+
+          {/* ── Expiry Day Workflow Tab ─────────────────────────── */}
+          {tab === 'expiry' && (
+            <div className="p-2">
+              <ExpiryWorkflowSection C={DARK_C} isDark={true} />
+            </div>
+          )}
+
         </div>
       </div>
     </>

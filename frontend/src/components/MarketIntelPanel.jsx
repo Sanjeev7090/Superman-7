@@ -13,7 +13,6 @@ import { GapPredictionSection } from './market-intel/GapPredictionSection';
 import { ClosingPredictionSection } from './market-intel/ClosingPredictionSection';
 import { GexWorkflowSection } from './market-intel/GexWorkflowSection';
 import { PostMarketFeedback } from './market-intel/PostMarketFeedback';
-import { ExpiryWorkflowSection } from './market-intel/ExpiryWorkflowSection';
 
 const API    = `${process.env.REACT_APP_BACKEND_URL || ''}/api`;
 const fmt    = (v, d = 2)   => v == null || isNaN(v) ? '—' : Number(v).toFixed(d);
@@ -1011,10 +1010,7 @@ const MarketIntelPanel = ({ onClose }) => {
               )}
             </div>
 
-            {/* ── Expiry Day Workflow (1 day before + expiry day) ──────── */}
-            <ExpiryWorkflowSection C={C} isDark={isDark} />
-
-            {/* Decision Matrix Table */}
+            {/* ── Decision Matrix Table ──────────────────────────────────── */}
             <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
               <div className="px-4 py-2.5" style={{ background: C.cardBg, borderBottom: `1px solid ${C.border}` }}>
                 <span className="text-[9px] uppercase tracking-widest" style={{ color: C.textMuted }}>Decision Matrix</span>
