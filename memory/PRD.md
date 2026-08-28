@@ -137,7 +137,17 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
 
 ---
 
-## Refactoring Backlog (P2)
+### Session (Feb 2026 — Part 6 — Expiry Workflow)
+- **Expiry Day Workflow Section** (COMPLETED)
+  - Frontend: `ExpiryWorkflowSection.jsx` — Market Intel panel mein Decision Matrix ke upar embedded
+  - LIVE mode (days <= 1): Full 6-step workflow, live data from GEX, OI, FII, market-intel
+  - ARCHIVE mode (days > 1): Last cached expiry data shown (localStorage cache)
+  - Morning Context: Gap, FII, VIX, GEX, Call/Put Wall, Max Pain, PCR, Gamma Flip (all live)
+  - Expiry Mode auto-calc: PIN/FADE / WAIT+9:50 / FOLLOW
+  - 9:50 Direction Checklist: 4 interactive checkboxes
+  - GEX Points Target, Time Table, Trade Rules, Quick Card, 5Aug Lesson, Gamma Blast (Sensex)
+
+---
 - `server.py` (~15k lines) → PARTIALLY DONE — `_vibe_router` still embedded; could extract to `/routes/vibe.py`
 
 ## Extracted Route Modules (Backend)

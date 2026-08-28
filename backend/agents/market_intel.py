@@ -2417,6 +2417,41 @@ def _fetch_closing_pred_sync() -> Dict:
                 f"H: {round(day_high,1)} L: {round(day_low,1)}"
             )
 
+            # ── Why did it happen? (core logic explanation) ──────────────
+            why_points = []
+            bearish_fx = [f for f in factors if f.get("score", 0) < 0]
+            bullish_fx = [f for f in factors if f.get("score", 0) > 0]
+
+            if accuracy == "WRONG" and predicted_up and actual_dn:
+                # Model was bullish but market fell
+                why_points.append(f"🔴 Model score: +{total_score} tha (mildly bullish), lekin close ke waqt selling pressure dominant rahi")
+                for bf in bearish_fx:
+                    why_points.append(f"⚠️ {bf['name']}: {bf['label']} — yeh warning signal tha (score {bf['score']})")
+                if actual_range > 150:
+                    why_points.append(f"📏 Intraday range {actual_range:.0f} pts tha — strong directional move, consolidation expected nahi tha")
+                why_points.append(f"📌 Bullish factors (VIX, GIFT premium) model ko upar le gaye, lekin actual selling ne sabko override kiya")
+
+            elif accuracy == "WRONG" and predicted_dn and actual_up:
+                # Model was bearish but market rallied
+                why_points.append(f"🟢 Model score: {total_score} tha (slightly bearish), lekin demand side ne surprise diya")
+                for bf in bullish_fx:
+                    why_points.append(f"💡 {bf['name']}: {bf['label']} — bullish factor (score +{bf['score']})")
+                why_points.append(f"📌 Bearish factors overridden — late-session buying ya global cue ne rally drive kiya")
+
+            elif accuracy == "PARTIAL":
+                why_points.append(f"〰️ Mixed session — direction partially correct lekin magnitude different raha")
+                why_points.append(f"📊 Score {total_score} tha, actual {actual_move:+.0f} pts — expected range se bahar gaya")
+
+            elif accuracy == "CORRECT" and predicted_up and actual_up:
+                why_points.append(f"✅ Model ke bullish factors sahi sabit hue (score +{total_score})")
+                for bf in bullish_fx:
+                    why_points.append(f"💚 {bf['name']}: {bf['label']} — correctly predicted")
+
+            elif accuracy == "CORRECT" and predicted_dn and actual_dn:
+                why_points.append(f"✅ Model ke bearish signals sahi the (score {total_score})")
+                for bf in bearish_fx:
+                    why_points.append(f"🔻 {bf['name']}: {bf['label']} — correctly predicted")
+
             market_feedback = {
                 "actual_close":      round(actual_close, 1),
                 "actual_open":       round(actual_open_p, 1),
@@ -2434,6 +2469,8 @@ def _fetch_closing_pred_sync() -> Dict:
                 "verdict_color":     verdict_color,
                 "practical_note":    practical_note,
                 "score_at_close":    total_score,
+                "why_points":        why_points,
+                "factors_used":      factors,
             }
         except Exception as _fe:
             logger.debug(f"Market feedback error: {_fe}")

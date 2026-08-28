@@ -12,6 +12,8 @@ import { FiiSection } from './market-intel/FiiSection';
 import { GapPredictionSection } from './market-intel/GapPredictionSection';
 import { ClosingPredictionSection } from './market-intel/ClosingPredictionSection';
 import { GexWorkflowSection } from './market-intel/GexWorkflowSection';
+import { PostMarketFeedback } from './market-intel/PostMarketFeedback';
+import { ExpiryWorkflowSection } from './market-intel/ExpiryWorkflowSection';
 
 const API    = `${process.env.REACT_APP_BACKEND_URL || ''}/api`;
 const fmt    = (v, d = 2)   => v == null || isNaN(v) ? '—' : Number(v).toFixed(d);
@@ -670,6 +672,9 @@ const MarketIntelPanel = ({ onClose }) => {
               ); // end return
             })()} {/* end IIFE */}
 
+            {/* ── Post-Market Feedback (after market close, below Bias Card) ── */}
+            <PostMarketFeedback C={C} isDark={isDark} />
+
             {/* ── Nifty 50 Market Breadth (right after Bias) ──────────── */}
             <BreadthCard breadth={data.breadth} C={C} isDark={isDark} />
 
@@ -1005,6 +1010,9 @@ const MarketIntelPanel = ({ onClose }) => {
                 </div>
               )}
             </div>
+
+            {/* ── Expiry Day Workflow (1 day before + expiry day) ──────── */}
+            <ExpiryWorkflowSection C={C} isDark={isDark} />
 
             {/* Decision Matrix Table */}
             <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
