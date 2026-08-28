@@ -18,6 +18,7 @@ export function GexWorkflowSection({ C, isDark }) {
   const [gexData, setGexData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [ts, setTs]           = useState(null);
+  const [open,    setOpen]    = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,8 +51,9 @@ export function GexWorkflowSection({ C, isDark }) {
     >
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div
-        className="px-4 py-2.5 flex items-center justify-between"
-        style={{ background: C.cardBg, borderBottom: `1px solid ${C.border}` }}
+        className="px-4 py-2.5 flex items-center justify-between cursor-pointer"
+        style={{ background: C.cardBg, borderBottom: open ? `1px solid ${C.border}` : 'none' }}
+        onClick={() => setOpen(v => !v)}
       >
         <div className="flex items-center gap-2">
           {/* Gamma icon (Γ) */}
@@ -79,22 +81,26 @@ export function GexWorkflowSection({ C, isDark }) {
         <div className="flex items-center gap-2">
           {ts && (
             <span className="text-[9px] font-mono" style={{ color: C.textMuted }}>
-              {ts.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}{' '}
               {ts.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
-          <button
-            onClick={load}
-            disabled={loading}
-            className="p-1 rounded transition-all"
-            style={{ color: C.textMuted }}
-            data-testid="gex-refresh-btn"
-          >
+          {/* Regime pill in header (visible even when collapsed) */}
+          {gexData && (
+            <span className="text-[7.5px] font-bold px-1.5 py-0.5 rounded-full"
+              style={{ color: regimeColor, background: `${regimeColor}15`, border: `1px solid ${regimeColor}35` }}>
+              {activeRegime.replace(/_/g,' ')}
+            </span>
+          )}
+          <button onClick={(e) => { e.stopPropagation(); load(); }} disabled={loading}
+            className="p-1 rounded transition-all" style={{ color: C.textMuted }}
+            data-testid="gex-refresh-btn">
             <ArrowClockwise size={11} className={loading ? 'animate-spin' : ''} />
           </button>
+          <span className="text-[9px]" style={{ color: C.textMuted }}>{open ? '▲' : '▼'}</span>
         </div>
       </div>
 
+      {open && (
       <div className="p-4 space-y-4">
 
         {/* ── Top Data Cards: Net GEX, Gamma Flip, Call Wall, Put Wall ── */}
@@ -266,6 +272,7 @@ export function GexWorkflowSection({ C, isDark }) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
