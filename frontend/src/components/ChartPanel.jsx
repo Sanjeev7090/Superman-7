@@ -5,6 +5,7 @@ import { ChartLine, TrendUp, TrendDown, PencilLine, Trash, Lightning, ArrowsOut,
 import GrowwTradeModal from './GrowwTradeModal';
 import StrategyOverlay from './StrategyOverlay';
 import TimeframeLevels from './TimeframeLevels';
+import VWAPFlipMini from './VWAPFlipMini';
 import { useTheme } from '../context/ThemeContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -3970,6 +3971,9 @@ const ChartPanel = ({
           bars={stockData?.bars}
         />
       </div>
+
+      {/* VWAP Flip Mini Chart — below the main chart */}
+      <VWAPFlipMini bars={stockData?.bars} isDark={isDark} />
 
       {/* Status bar */}
       {selectMode && (
