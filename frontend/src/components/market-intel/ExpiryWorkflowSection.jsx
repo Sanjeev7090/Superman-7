@@ -85,14 +85,19 @@ export function ExpiryWorkflowSection({ C, isDark }) {
 
   const isLive = !!activeEx;
 
-  // Use live data if in window, else last cache
-  const md = isLive ? mktData : lastCache?.md;
-  const gd = isLive ? gexData : lastCache?.gd;
-  const od = isLive ? oiData  : lastCache?.od;
-  const fd = isLive ? fiiData : lastCache?.fd;
+  // Always use live data; fallback to cache only when live unavailable
+  const md = mktData || lastCache?.md;
+  const gd = gexData || lastCache?.gd;
+  const od = oiData  || lastCache?.od;
+  const fd = fiiData || lastCache?.fd;
 
-  // Always render (archive mode shows last data)
-  if (!md && !lastCache) return null;
+  // Show loading skeleton on very first load
+  if (loading && !md) return (
+    <div className="rounded-xl px-4 py-5 text-center text-[10px]"
+      style={{ border: `1px solid ${C.border}`, color: C.textMuted, background: C.cardBg }}>
+      ⟳ Expiry Workflow data load ho raha hai…
+    </div>
+  );
 
   const vix       = md?.vix ?? 0;
   const isGexPos  = gd?.is_positive ?? true;
