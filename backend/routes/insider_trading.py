@@ -1125,7 +1125,15 @@ async def _build_detections() -> tuple:
             except Exception:
                 pass
 
-    mod_switch = _module_switch(doom_score, is_expiry, promo_buy_cr, promo_sell_cr)
+    manual_override = mod_state.get("manual_override")  # True / False / None
+    if manual_override is not None:
+        mod_switch = {
+            "on":       bool(manual_override),
+            "reason":   "Manual override",
+            "size_cap": "2%" if manual_override else "0%",
+        }
+    else:
+        mod_switch = _module_switch(doom_score, is_expiry, promo_buy_cr, promo_sell_cr)
 
     results = []
     for sym, rows in sym_map.items():

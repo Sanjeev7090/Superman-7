@@ -1511,12 +1511,23 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
   const [fMomentum,   setFMomentum]   = useState(false);
   const [fVolume,     setFVolume]     = useState(false);
 
-  const fetchInsider = useCallback(async (forceRefresh = false) => {    setLoading(true);
+  const fetchInsider = useCallback(async (forceRefresh = false) => {
+    setLoading(true);
     try {
-      const res  = await fetch(`${API}/insider/detections${forceRefresh ? '?refresh=true' : ''}`);
-      const json = await res.json();
-      setInsiderData(json);
-      setUpdatedAt(json.updated_at);
+      const [detRes, modRes] = await Promise.allSettled([
+        fetch(`${API}/insider/detections${forceRefresh ? '?refresh=true' : ''}`),
+        fetch(`${API}/insider/module_status`),
+      ]);
+      if (detRes.status === 'fulfilled' && detRes.value.ok) {
+        const json = await detRes.value.json();
+        setInsiderData(json);
+        setUpdatedAt(json.updated_at);
+      } else {
+        setInsiderData({ detections: [], error: 'Fetch failed' });
+      }
+      if (modRes.status === 'fulfilled' && modRes.value.ok) {
+        setModuleStatus(await modRes.value.json());
+      }
     } catch (e) {
       setInsiderData({ detections: [], error: e.message });
     } finally {
@@ -1558,7 +1569,7 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
   useEffect(() => {
     if (tab === 'insider'  && !insiderData)   fetchInsider();
     if (tab === 'patterns' && !patternData)   fetchPatterns();
-    if (tab === 'stats'    && !moduleStatus)  fetchStats();
+    if (tab === 'stats'    && !outcomesData)  fetchStats();
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchStats = useCallback(async () => {
@@ -1587,16 +1598,20 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
         body: JSON.stringify({ override: value }),
       });
       if (res.ok) {
-        // Re-fetch module status
-        const modRes = await fetch(`${API}/insider/module_status`);
+        // Re-fetch both module status and insider data (cache-bust)
+        const [modRes] = await Promise.all([
+          fetch(`${API}/insider/module_status`),
+        ]);
         if (modRes.ok) setModuleStatus(await modRes.json());
+        // Re-fetch insider detections so module_on reflects in list
+        await fetchInsider(true);
       }
     } catch (e) {
       console.error('Toggle error:', e);
     } finally {
       setTogglingModule(false);
     }
-  }, []);
+  }, [fetchInsider]);
 
   const handleRefresh = () => {
     if (tab === 'insider')  fetchInsider(true);
@@ -1858,12 +1873,17 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
                 )}
               </div>
 
-              {/* ── Module Status Banner ─────────────────────────────────── */}
-              {insiders.length > 0 && (() => {
-                const first = insiders[0];
-                const modOn = first?.module_on !== false;
-                const modReason = first?.module_reason || 'Active';
-                const indexScore = first?.index_score ?? 0;
+              {/* ── Module Status Banner (with inline toggle) ──────────── */}
+              {(() => {
+                // Prefer moduleStatus (direct endpoint) over item-level flag
+                const modOn     = moduleStatus != null
+                  ? moduleStatus.module_on
+                  : (insiders[0]?.module_on !== false);
+                const isManual  = moduleStatus?.manual_override != null;
+                const modReason = modOn
+                  ? (moduleStatus?.module_reason || 'Active')
+                  : (moduleStatus?.module_reason || insiders[0]?.module_reason || 'Auto-disabled');
+                const indexScore = moduleStatus?.index_score ?? insiders[0]?.index_score ?? 0;
                 const indexColor = indexScore >= 8 ? '#22c55e' : indexScore <= -4 ? '#ef4444' : '#fbbf24';
                 return (
                   <div style={{
@@ -1872,9 +1892,10 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
                     borderBottom: `1px solid ${C.border}`,
                     background: modOn ? 'rgba(34,197,94,0.04)' : 'rgba(239,68,68,0.06)',
                   }} data-testid="module-status-banner">
+                    {/* Status dot + label */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                       <div style={{
-                        width: 6, height: 6, borderRadius: '50%',
+                        width: 7, height: 7, borderRadius: '50%',
                         background: modOn ? '#22c55e' : '#ef4444',
                         boxShadow: modOn ? '0 0 0 3px rgba(34,197,94,0.25)' : '0 0 0 3px rgba(239,68,68,0.25)',
                       }} />
@@ -1882,19 +1903,100 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
                         color: modOn ? '#4ade80' : '#f87171' }}>
                         MODULE {modOn ? 'ON' : 'OFF'}
                       </span>
+                      {isManual && (
+                        <span style={{
+                          fontSize: 7, fontWeight: 800, padding: '1px 5px', borderRadius: 3,
+                          background: 'rgba(167,139,250,0.15)', color: '#c4b5fd',
+                          border: '1px solid rgba(167,139,250,0.35)',
+                        }}>MANUAL</span>
+                      )}
                     </div>
                     {!modOn && (
                       <span style={{ fontSize: 8, color: '#f87171' }}>{modReason}</span>
                     )}
                     <span style={{ fontSize: 8, color: indexColor, fontWeight: 700 }}>
-                      Index: {indexScore >= 0 ? '+' : ''}{indexScore} DOOM
+                      DOOM: {indexScore >= 0 ? '+' : ''}{indexScore}
                     </span>
-                    <span style={{ fontSize: 8, color: C.textSecond, marginLeft: 'auto' }}>
-                      Threshold: {first?.score_threshold ?? 15}+ · {insiders.length} stocks
-                    </span>
+
+                    {/* ── Inline Toggle ── */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 'auto' }}>
+                      {isManual && (
+                        <button
+                          onClick={() => toggleModule(null)}
+                          disabled={togglingModule}
+                          style={{
+                            fontSize: 7, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                            background: 'rgba(148,163,184,0.15)', color: '#94a3b8',
+                            border: '1px solid rgba(148,163,184,0.25)', cursor: 'pointer',
+                          }}
+                          data-testid="module-reset-auto-btn"
+                        >
+                          Auto
+                        </button>
+                      )}
+                      <button
+                        onClick={() => toggleModule(modOn ? false : true)}
+                        disabled={togglingModule}
+                        style={{
+                          fontSize: 8, fontWeight: 800, padding: '3px 10px', borderRadius: 5,
+                          cursor: togglingModule ? 'wait' : 'pointer',
+                          background: modOn
+                            ? 'rgba(239,68,68,0.18)' : 'rgba(34,197,94,0.18)',
+                          color: modOn ? '#f87171' : '#4ade80',
+                          border: `1px solid ${modOn ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'}`,
+                          display: 'flex', alignItems: 'center', gap: 4,
+                          transition: 'all 0.15s',
+                        }}
+                        data-testid="module-toggle-btn"
+                      >
+                        {togglingModule
+                          ? '...'
+                          : modOn
+                            ? <><ToggleRight size={12} weight="fill" /> Turn OFF</>
+                            : <><ToggleLeft  size={12} weight="fill" /> Turn ON</>
+                        }
+                      </button>
+                    </div>
                   </div>
                 );
               })()}
+
+              {/* ── MODULE OFF full-state card ───────────────────────────── */}
+              {moduleStatus != null && !moduleStatus.module_on && (
+                <div style={{
+                  margin: '12px 14px',
+                  padding: '16px',
+                  borderRadius: 10,
+                  background: 'rgba(239,68,68,0.06)',
+                  border: '1px solid rgba(239,68,68,0.25)',
+                  textAlign: 'center',
+                }} data-testid="module-off-card">
+                  <div style={{ fontSize: 22, marginBottom: 6 }}>🔴</div>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: '#f87171', letterSpacing: '0.08em', marginBottom: 4 }}>
+                    INSIDER MODULE OFF
+                  </div>
+                  <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 12 }}>
+                    {moduleStatus.module_reason || 'Module disabled'}
+                  </div>
+                  <button
+                    onClick={() => toggleModule(true)}
+                    disabled={togglingModule}
+                    style={{
+                      fontSize: 11, fontWeight: 800, padding: '7px 20px', borderRadius: 7,
+                      background: 'rgba(34,197,94,0.20)', color: '#4ade80',
+                      border: '1px solid rgba(34,197,94,0.45)', cursor: 'pointer',
+                    }}
+                    data-testid="module-off-turn-on-btn"
+                  >
+                    {togglingModule ? 'Turning ON...' : <><ToggleLeft size={14} weight="fill" /> Turn ON Module</>}
+                  </button>
+                  {moduleStatus.manual_override == null && (
+                    <div style={{ fontSize: 8, color: '#64748b', marginTop: 8 }}>
+                      Auto-disabled by market conditions. Manual override karne pe MANUAL badge aayega.
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Cluster Alert Banner ─────────────────────────────────── */}
               {(() => {

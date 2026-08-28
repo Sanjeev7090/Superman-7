@@ -10,7 +10,7 @@ import math
 from datetime import datetime
 
 # Base URL from frontend/.env
-BASE_URL = "https://eco-calendar-app.preview.emergentagent.com/api"
+BASE_URL = "https://insider-alerts-3.preview.emergentagent.com/api"
 
 def check_nan_inf_in_value(value, path=""):
     """Recursively check for NaN/Inf in nested structures"""
