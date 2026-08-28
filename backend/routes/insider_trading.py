@@ -431,45 +431,198 @@ def _normalise_yf_activity(rows: list) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  SCORING
+#  GOD SCORE ENGINE (0–20)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _score_entry(cat: str, count: int, vr: float, brk: bool, small: bool,
-                 val: float, source: str) -> int:
-    score = 0
-    if   cat == "PROMOTER":               score += 3
-    elif cat in ("DIRECTOR", "KMP"):      score += 3
-    elif cat == "INSIDER":                score += 2
-    else:                                 score += 1
-
-    if source in ("NSE_ARCHIVE_BULK", "NSE_BULK_LIVE", "NSE_ARCHIVE_BLOCK"): score += 1
-    if count >= 2:   score += 2
-    if vr >= 2.0:    score += 2
-    elif vr >= 1.5:  score += 1
-    if brk:          score += 2
-    if small:        score += 1
-    if val >= 500:   score += 1
-    elif val >= 50:  score += 0
-    return min(score, 10)
+_FAKE_MODES = frozenset([
+    "inter-se", "inter se", "gift", "esop", "allotment",
+    "preferential", "warrant", "conversion", "pledge invoke",
+    "pledge release", "transmission", "off market",
+])
 
 
-def _build_factors(cat: str, count: int, vr: float, brk: bool, small: bool,
-                   val: float, source: str) -> list:
-    tags = []
-    if   cat == "PROMOTER":              tags.append("PROMOTER BUY")
-    elif cat in ("DIRECTOR", "KMP"):     tags.append("DIRECTOR/KMP BUY")
-    elif cat == "INSTITUTIONAL":         tags.append("INSTITUTIONAL")
-    else:                                tags.append("INSIDER BUY")
-    if source in ("NSE_ARCHIVE_BULK", "NSE_BULK_LIVE"):  tags.append("NSE BULK")
-    if source in ("NSE_ARCHIVE_BLOCK",):                 tags.append("NSE BLOCK")
-    if source == "YF_ACTIVITY":          tags.append("VOL SIGNAL")
-    if count >= 2:                       tags.append(f"CLUSTER ({count})")
-    if vr >= 1.5:                        tags.append(f"VOL {vr:.1f}x")
-    if brk:                              tags.append("BREAKOUT")
-    if small:                            tags.append("SMALL CAP")
-    if val >= 500:                       tags.append("₹5Cr+")
-    elif val >= 50:                      tags.append("₹50L+")
-    return tags
+def _days_since(date_str: str) -> int:
+    """Parse DD-MM-YYYY → days since filing (int). Returns 999 on failure."""
+    try:
+        d = datetime.strptime(date_str.strip(), "%d-%m-%Y")
+        return max(0, (datetime.now() - d).days)
+    except Exception:
+        return 999
+
+
+def _is_market_mode(mode: str) -> bool:
+    m = mode.lower()
+    return ("market" in m and ("purchase" in m or "buy" in m)) or m.strip() == "buy"
+
+
+def _is_fake(rows: list) -> tuple:
+    """Returns (True, reason) if transactions should be auto-rejected."""
+    # yfinance volume signals are not insider filings — different module
+    if all(r.get("source") == "YF_ACTIVITY" for r in rows):
+        return False, ""
+    for r in rows:
+        mode = r.get("mode", "").lower()
+        if any(k in mode for k in _FAKE_MODES):
+            return True, f"Mode: {r.get('mode', 'unknown')}"
+        cat = r.get("category", "")
+        if cat == "INSTITUTIONAL":   # FII/MF bulk deals = not insider module
+            return True, "Institutional (not insider)"
+    return False, ""
+
+
+def _time_window(best_date: str) -> dict:
+    days = _days_since(best_date)
+    if days <= 2:
+        return {"window": "T0-T2", "label": "Fresh",      "color": "#06b6d4", "days": days, "score_adj": 0}
+    if days <= 8:
+        return {"window": "T3-T8", "label": "Absorption", "color": "#22c55e", "days": days, "score_adj": 0}
+    return     {"window": "T9+",   "label": "Stale",      "color": "#ef4444", "days": days, "score_adj": -3}
+
+
+def _god_score(rows: list, vr: float, brk: bool,
+               has_bulk: bool, has_block: bool) -> tuple:
+    """
+    God Score 0–20. Returns (raw_score, factors_list, rejected, reject_reason).
+    Scoring per spec:
+      Promoter open market buy  +4 | inter-se/gift = 0
+      Promoter group cluster    +2
+      Director/KMP buy          +2 | +1 extra if alongside promoter
+      Value ≥ ₹2Cr             +2 | ₹50L–2Cr = +1
+      Mode = Market Purchase    +2
+      Delivery spike >1.8×      +2 | 1.3–1.8× = +1
+      Volume ≥ 2× 20D           +2
+      Close > 20DMA             +2
+      Bulk/block same side      +1
+      No pledge data            +1 (we can't check; default safe)
+    Penalties: T9+ stale -3 (applied in status, not score)
+    """
+    rejected, rej_reason = _is_fake(rows)
+    if rejected:
+        return 0, ["AUTO-REJECT"], True, rej_reason
+
+    # ── YF Activity fallback: simplified scoring ───────────────────────────
+    if all(r.get("source") == "YF_ACTIVITY" for r in rows):
+        s = 0; factors = ["YF VOLUME SIGNAL"]
+        if vr >= 2.0:  s += 4; factors.append(f"VOL ≥2× ({vr:.1f}×) +4")
+        elif vr >= 1.5:  s += 2; factors.append(f"VOL {vr:.1f}× +2")
+        if brk:   s += 2; factors.append("ABOVE 20DMA +2")
+        if has_bulk: s += 1; factors.append("BULK DEAL +1")
+        factors.append("L1 FILING: NOT AVAILABLE")
+        return min(s, 12), factors, False, ""  # cap at 12 since no L1
+
+    cat_priority = {"PROMOTER": 4, "DIRECTOR": 3, "KMP": 3,
+                    "INSIDER": 2, "INSTITUTIONAL": 1, "OTHER": 0}
+    best_row  = max(rows, key=lambda r: cat_priority.get(r["category"], 0))
+    best_cat  = best_row["category"]
+    mode_raw  = best_row.get("mode", "")
+    total_val_cr = sum(r.get("value_lakh", 0) for r in rows) / 100.0
+
+    score   = 0
+    factors = []
+
+    # ── 1. Buyer type ─────────────────────────────────────────────────────────
+    if best_cat == "PROMOTER":
+        if _is_market_mode(mode_raw):
+            score += 4;  factors.append("PROMOTER MARKET BUY +4")
+        else:
+            score += 0;  factors.append("PROMOTER (non-market) +0")
+    elif best_cat in ("DIRECTOR", "KMP"):
+        score += 2;      factors.append("DIRECTOR/KMP BUY +2")
+    elif best_cat == "INSIDER":
+        score += 1;      factors.append("INSIDER BUY +1")
+
+    # ── 2. Promoter group multiple buyers same week ───────────────────────────
+    promo_rows = [r for r in rows if r["category"] == "PROMOTER"]
+    promo_buyers = {r.get("name", "") for r in promo_rows}
+    if len(promo_buyers) >= 2:
+        score += 2;  factors.append(f"PROMOTER GROUP ({len(promo_buyers)} people) +2")
+
+    # ── 3. Director alongside promoter ───────────────────────────────────────
+    dir_rows = [r for r in rows if r["category"] in ("DIRECTOR", "KMP")]
+    if dir_rows and promo_rows:
+        score += 1;  factors.append("PROMOTER+DIRECTOR COMBO +1")
+    elif dir_rows and best_cat not in ("PROMOTER",):
+        pass  # already scored above
+
+    # ── 4. Transaction value ──────────────────────────────────────────────────
+    if total_val_cr >= 2.0:
+        score += 2;  factors.append(f"VALUE ₹{total_val_cr:.1f}Cr +2")
+    elif total_val_cr >= 0.5:
+        score += 1;  factors.append(f"VALUE ₹{total_val_cr:.1f}Cr +1")
+
+    # ── 5. Mode = Market Purchase ─────────────────────────────────────────────
+    if _is_market_mode(mode_raw):
+        score += 2;  factors.append("MARKET PURCHASE MODE +2")
+
+    # ── 6. Delivery/Volume spike ──────────────────────────────────────────────
+    if vr >= 1.8:
+        score += 2;  factors.append(f"DELIVERY SPIKE {vr:.1f}× +2")
+    elif vr >= 1.3:
+        score += 1;  factors.append(f"VOL {vr:.1f}× +1")
+
+    if vr >= 2.0:    # Volume ≥ 2× separately per spec
+        score += 2;  factors.append(f"VOL ≥2× ({vr:.1f}×) +2")
+
+    # ── 7. Breakout: close > 20DMA ────────────────────────────────────────────
+    if brk:
+        score += 2;  factors.append("ABOVE 20DMA BREAKOUT +2")
+
+    # ── 8. Bulk + Block same side ─────────────────────────────────────────────
+    if has_bulk and has_block:
+        score += 1;  factors.append("BULK+BLOCK SAME SIDE +1")
+
+    # ── 9. No pledge data (safe default +1) ──────────────────────────────────
+    score += 1;  factors.append("PLEDGE: N/A +1")
+
+    return min(score, 20), factors, False, ""
+
+
+def _cluster_info(rows: list) -> dict:
+    """Cluster: 3+ promoter/director/kmp buys in 7 days, ≥₹3Cr, ≥70% market mode."""
+    recent = [r for r in rows if _days_since(r.get("date", "")) <= 7
+              and r["category"] in ("PROMOTER", "DIRECTOR", "KMP")]
+    if not recent:
+        return {"is_cluster": False, "count": 0, "value_cr": 0, "market_pct": 0}
+
+    val_cr    = sum(r.get("value_lakh", 0) for r in recent) / 100.0
+    mkt_buys  = [r for r in recent if _is_market_mode(r.get("mode", ""))]
+    mkt_ratio = len(mkt_buys) / len(recent)
+
+    is_cluster = len(recent) >= 3 and val_cr >= 3 and mkt_ratio >= 0.7
+    return {
+        "is_cluster":  is_cluster,
+        "count":       len(recent),
+        "value_cr":    round(val_cr, 2),
+        "market_pct":  round(mkt_ratio * 100),
+        "buyers":      len({r.get("name", "") for r in recent}),
+    }
+
+
+def _assign_status(score: int, window: dict, cluster: dict, rejected: bool) -> dict:
+    if rejected:
+        return {"status": "REJECT",    "color": "#475569", "priority": "REJECT"}
+
+    adj = score + window["score_adj"]
+
+    if adj < 8:
+        return {"status": "MONITOR",   "color": "#64748b", "priority": "MONITOR"}
+
+    if cluster["is_cluster"] and adj >= 15:
+        return {"status": "GOD LEVEL", "color": "#f59e0b", "priority": "HIGH"}
+    if adj >= 18:
+        return {"status": "RARE",      "color": "#a78bfa", "priority": "HIGH"}
+    if adj >= 15:
+        return {"status": "POSITIONAL","color": "#22c55e", "priority": "HIGH"}
+    if adj >= 12:
+        if window["window"] == "T3-T8":
+            return {"status": "SETUP", "color": "#4ade80", "priority": "HIGH"}
+        return {"status": "WATCH",     "color": "#fbbf24", "priority": "WATCHLIST"}
+    if adj >= 8:
+        return {"status": "WATCH",     "color": "#fbbf24", "priority": "WATCHLIST"}
+
+    return {"status": "MONITOR",       "color": "#64748b", "priority": "MONITOR"}
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -553,6 +706,7 @@ async def _build_detections() -> tuple:
                     "vol_ratio": round(vr, 2),
                     "breakout":  bool(price > sma20),
                     "small_cap": mc < 5e10 or mc == 0,
+                    "sma20":     round(sma20, 2),
                 }
             except Exception:
                 out[s] = {"price": 0, "vol_ratio": 1.0, "breakout": False, "small_cap": True}
@@ -567,16 +721,12 @@ async def _build_detections() -> tuple:
         vr    = _safe_float(mkt.get("vol_ratio", 1.0))
         brk   = mkt.get("breakout", False)
         small = mkt.get("small_cap", True)
+        sma20 = _safe_float(mkt.get("sma20", 0))
 
         # Use pre-existing vol_ratio from yfinance activity rows if available
         if rows[0].get("source") == "YF_ACTIVITY":
             vr  = _safe_float(rows[0].get("vol_ratio", vr))
             brk = rows[0].get("breakout",  brk)
-
-        cat_priority = {"PROMOTER": 4, "DIRECTOR": 3, "KMP": 3,
-                        "INSIDER": 2, "INSTITUTIONAL": 1, "OTHER": 0}
-        best_cat   = max(rows, key=lambda r: cat_priority.get(r["category"], 0))["category"]
-        dom_source = rows[0]["source"]
 
         # Fill prices from yfinance if missing
         for r in rows:
@@ -585,25 +735,82 @@ async def _build_detections() -> tuple:
                 r["value_lakh"] = _safe_float(round(r["shares"] * price / 1e5, 2))
 
         total_val = _safe_float(sum(r["value_lakh"] for r in rows))
-        score     = _score_entry(best_cat, len(rows), vr, brk, small, total_val, dom_source)
+
+        # Detect source types for bulk/block confirmation
+        sources_set = {r["source"] for r in rows}
+        has_bulk  = bool(sources_set & {"NSE_ARCHIVE_BULK", "NSE_BULK_LIVE"})
+        has_block = bool(sources_set & {"NSE_ARCHIVE_BLOCK"})
+
+        # ── God Score ─────────────────────────────────────────────────────────
+        score, factors, rejected, rej_reason = _god_score(rows, vr, brk, has_bulk, has_block)
+
+        # ── Cluster analysis ──────────────────────────────────────────────────
+        cluster = _cluster_info(rows)
+
+        # ── Time window (use most recent filing date) ─────────────────────────
+        best_date = max(
+            (r.get("date", "") for r in rows),
+            key=lambda d: _days_since(d),
+            default="",
+        )
+        # Actually use MOST RECENT date (smallest days_since)
+        best_date = min(
+            (r.get("date", "") for r in rows if r.get("date")),
+            key=lambda d: _days_since(d),
+            default="",
+        )
+        window = _time_window(best_date)
+
+        # ── Status ────────────────────────────────────────────────────────────
+        status_info = _assign_status(score, window, cluster, rejected)
+        adj_score   = max(0, score + window["score_adj"])
+
+        # SL hint
+        sl_note = f"Filing-week low or 8-day swing low"
 
         results.append({
             "symbol":           sym,
             "company":          rows[0].get("company") or sym,
+            # God Score
             "score":            score,
-            "priority":         "HIGH" if score >= 8 else "WATCHLIST" if score >= 5 else "MONITOR",
-            "insiders":         rows,
-            "cluster":          len(rows) >= 2,
+            "adj_score":        adj_score,
+            "score_max":        20,
+            "score_threshold":  12,
+            # Status & priority
+            "status":           status_info["status"],
+            "status_color":     status_info["color"],
+            "priority":         status_info["priority"],
+            "rejected":         rejected,
+            "reject_reason":    rej_reason,
+            # Cluster
+            "cluster":          cluster["is_cluster"],
+            "cluster_info":     cluster,
+            # Time window
+            "window":           window["window"],
+            "window_label":     window["label"],
+            "window_color":     window["color"],
+            "days_since":       window["days"],
+            # Market data
             "vol_ratio":        _safe_float(round(vr, 2)),
             "price":            _safe_float(price),
+            "sma20":            _safe_float(sma20),
             "price_breakout":   brk,
             "is_small_cap":     small,
             "total_value_lakh": _safe_float(round(total_val, 2)),
-            "factors":          _build_factors(best_cat, len(rows), vr, brk, small, total_val, dom_source),
-            "sources":          list({r["source"] for r in rows}),
+            "total_value_cr":   _safe_float(round(total_val / 100, 2)),
+            # Transactions
+            "insiders":         rows,
+            "factors":          factors,
+            "sources":          list(sources_set),
+            "has_bulk":         has_bulk,
+            "has_block":        has_block,
+            # Position sizing rule (user-facing text)
+            "sl_note":          sl_note,
+            "filing_date":      best_date,
         })
 
-    results.sort(key=lambda x: x["score"], reverse=True)
+    # Sort: non-rejected first, then by adj_score
+    results.sort(key=lambda x: (0 if x["rejected"] else 1, x["adj_score"]), reverse=True)
     return results, source_label
 
 

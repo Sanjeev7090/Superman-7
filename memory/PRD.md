@@ -137,7 +137,17 @@ Live Trading toggle with multi-broker API integration (Groww, Zerodha, Upstox, A
 
 ---
 
-### Session (Feb 2026 — Part 7 — DOOM Card + VWAP + Sector Breadth)
+### Session (Feb 2026 — Part 8 — Insider Tracker God Score Rebuild)
+- **God Score 0-20** engine replacing old 0-10 scoring
+  - 11 factors: Promoter market buy (+4), Group cluster (+2), Director/KMP (+2), value, mode, delivery/vol spike, 20DMA, bulk+block, pledge
+  - Fake Signal Killers: inter-se, gift, ESOP, allotment, preferential, INSTITUTIONAL bulk
+  - YF Activity fallback: capped at 12 (no L1 data)
+- **Cluster Engine**: 3+ buys in 7 days, ≥₹3Cr, ≥70% market mode
+- **Time Window**: T0-T2 (Fresh), T3-T8 (Absorption), T9+ (Stale, score -3)
+- **Status tiers**: GOD LEVEL / RARE / POSITIONAL / SETUP / WATCH / MONITOR / REJECT
+- **Alert Card UI**: Score ring 0-20 with 12 threshold, Confirm Stack, Position Rules table, L1 filing data
+- **Legend updated**: 18-20 Rare, 15-17 Positional, 12-14 Setup, 8-11 Watch
+
 - **DOOM Card** (COMPLETED)
   - Backend: `GET /api/doom/score` — 6-factor scoring (Brent, VIX, GIFT%, Breadth, FII, GEX). Score -12 to +12. Expiry/Clash overrides. 9:50 gate. MongoDB `doom_scores` storage.
   - Frontend: `DoomCard.jsx` — expandable card at bottom of Market Intel panel (full details)

@@ -37,129 +37,289 @@ const fmtTime = (iso) => {
 //  SUB-COMPONENTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-function ScoreDot({ score }) {
-  const color = score >= 8 ? '#ef4444' : score >= 5 ? '#f59e0b' : '#64748b';
+// ── Score Ring 0-20 with 12 threshold ──────────────────────────────────────
+
+function ScoreDot({ score, adjScore, maxScore = 20, threshold = 12 }) {
+  const s       = adjScore ?? score;
+  const pct     = Math.min(s / maxScore, 1);
+  const tPct    = threshold / maxScore;
+  const r       = 14;
+  const circ    = 2 * Math.PI * r;
+  const color   = s >= 18 ? '#a78bfa'
+                : s >= 15 ? '#22c55e'
+                : s >= 12 ? '#4ade80'
+                : s >= 8  ? '#fbbf24'
+                :            '#64748b';
   return (
-    <svg width="32" height="32" viewBox="0 0 32 32">
-      <circle cx="16" cy="16" r="14" fill="none" stroke="#27272a" strokeWidth="3" />
-      <circle
-        cx="16" cy="16" r="14"
-        fill="none" stroke={color} strokeWidth="3"
-        strokeDasharray={`${(score / 10) * 88} 88`}
-        strokeLinecap="round"
-        transform="rotate(-90 16 16)"
+    <svg width="36" height="36" viewBox="0 0 36 36" style={{ flexShrink: 0 }}>
+      {/* Track */}
+      <circle cx="18" cy="18" r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="3" />
+      {/* Threshold marker */}
+      <circle cx="18" cy="18" r={r} fill="none"
+        stroke="rgba(251,191,36,0.30)" strokeWidth="3"
+        strokeDasharray={`1 ${circ - 1}`}
+        strokeDashoffset={-(tPct * circ - circ / 4)}
+        strokeLinecap="round" transform="rotate(-90 18 18)"
+      />
+      {/* Score arc */}
+      <circle cx="18" cy="18" r={r} fill="none"
+        stroke={color} strokeWidth="3"
+        strokeDasharray={`${pct * circ} ${circ}`}
+        strokeLinecap="round" transform="rotate(-90 18 18)"
         style={{ transition: 'stroke-dasharray 0.5s ease' }}
       />
-      <text x="16" y="20" textAnchor="middle" fill={color} fontSize="9" fontWeight="700">{score}</text>
+      <text x="18" y="21" textAnchor="middle" fill={color} fontSize="8.5" fontWeight="800"
+        fontFamily="monospace">{s}</text>
     </svg>
   );
 }
 
-function FactorTag({ tag }) {
-  const isPositive = ['PROMOTER BUY', 'INSIDER BUY', 'BREAKOUT', 'CLUSTER'].some(k => tag.startsWith(k));
-  const isVol = tag.startsWith('VOL');
+// ── Insider Alert Card ─────────────────────────────────────────────────────
+
+const STATUS_META = {
+  'GOD LEVEL':   { bg: 'rgba(245,158,11,0.15)',  border: '#f59e0b', text: '#fbbf24'  },
+  'RARE':        { bg: 'rgba(167,139,250,0.15)', border: '#a78bfa', text: '#c4b5fd'  },
+  'POSITIONAL':  { bg: 'rgba(34,197,94,0.15)',   border: '#22c55e', text: '#4ade80'  },
+  'SETUP':       { bg: 'rgba(74,222,128,0.12)',   border: '#4ade80', text: '#86efac'  },
+  'WATCH':       { bg: 'rgba(251,191,36,0.12)',   border: '#fbbf24', text: '#fde68a'  },
+  'MONITOR':     { bg: 'rgba(148,163,184,0.08)', border: '#64748b', text: '#94a3b8'  },
+  'REJECT':      { bg: 'rgba(71,85,105,0.08)',   border: '#334155', text: '#64748b'  },
+};
+
+function GodFactor({ tag, C }) {
+  const isPos = tag.includes('+') && !tag.includes('+0');
+  const isNeg = tag.includes('-') || tag.includes('AUTO-REJECT') || tag.includes('non-market');
+  const isNeu = tag.includes('+0') || tag.includes('N/A');
   return (
     <span style={{
-      fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
+      fontSize: 8, fontWeight: 700, letterSpacing: '0.04em',
       padding: '2px 6px', borderRadius: 3,
-      background: isPositive ? 'rgba(34,197,94,0.15)' : isVol ? 'rgba(99,102,241,0.15)' : 'rgba(148,163,184,0.12)',
-      color: isPositive ? '#4ade80' : isVol ? '#818cf8' : '#94a3b8',
-      border: `1px solid ${isPositive ? 'rgba(34,197,94,0.3)' : isVol ? 'rgba(99,102,241,0.3)' : 'rgba(148,163,184,0.2)'}`,
+      background: isPos ? 'rgba(34,197,94,0.12)'
+                : isNeg ? 'rgba(239,68,68,0.12)'
+                :         'rgba(148,163,184,0.08)',
+      color: isPos ? '#4ade80' : isNeg ? '#f87171' : C.textSecond,
+      border: `1px solid ${isPos ? 'rgba(34,197,94,0.25)' : isNeg ? 'rgba(239,68,68,0.25)' : 'rgba(148,163,184,0.15)'}`,
     }}>{tag}</span>
   );
 }
 
-// ── Insider Detection Row ──────────────────────────────────────────────────
-
 function InsiderRow({ item, C }) {
   const [expanded, setExpanded] = useState(false);
-  const pm  = priorityMeta[item.priority] || priorityMeta.MONITOR;
+  const sm = STATUS_META[item.status] || STATUS_META['MONITOR'];
+  const s  = item.adj_score ?? item.score;
+
+  const scoreColor = s >= 18 ? '#a78bfa'
+                   : s >= 15 ? '#22c55e'
+                   : s >= 12 ? '#4ade80'
+                   : s >= 8  ? '#fbbf24'
+                   :            '#64748b';
+
+  // Position size label
+  const posNote = s >= 15 ? '2%' : s >= 12 ? '1–2%' : s >= 8 ? '1%' : '—';
 
   return (
     <div style={{ borderBottom: `1px solid ${C.border}` }}>
+      {/* ── Collapsed row ── */}
       <div
         onClick={() => setExpanded(!expanded)}
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', cursor: 'pointer' }}
+        style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', gap: 10, alignItems: 'flex-start' }}
         className="hover:bg-white/5 transition-colors"
         data-testid={`insider-row-${item.symbol}`}
       >
-        {/* Score circle */}
-        <ScoreDot score={item.score} />
+        <ScoreDot score={item.score} adjScore={s} />
 
-        {/* Symbol + company */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontWeight: 700, fontSize: 13, color: C.textPrimary }}>{item.symbol}</span>
+          {/* Row 1: Symbol + Status + Window */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+            <span style={{ fontWeight: 800, fontSize: 13, color: C.textPrimary }}>{item.symbol}</span>
+            {/* Status badge */}
+            <span style={{
+              fontSize: 8, fontWeight: 800, letterSpacing: '0.07em',
+              padding: '2px 7px', borderRadius: 4,
+              background: sm.bg, border: `1px solid ${sm.border}`, color: sm.text,
+            }}>{item.status}</span>
+            {/* Window badge */}
+            {item.window && (
+              <span style={{
+                fontSize: 8, fontWeight: 700, padding: '2px 6px', borderRadius: 4,
+                background: `${item.window_color || '#94a3b8'}15`,
+                color: item.window_color || '#94a3b8',
+                border: `1px solid ${item.window_color || '#94a3b8'}30`,
+              }}>{item.window} · {item.window_label}</span>
+            )}
+            {/* Cluster badge */}
             {item.cluster && (
-              <span style={{ fontSize: 8, background: 'rgba(99,102,241,0.2)', color: '#818cf8', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
-                CLUSTER
+              <span style={{
+                fontSize: 8, fontWeight: 800, padding: '2px 6px', borderRadius: 4,
+                background: 'rgba(245,158,11,0.15)', color: '#fbbf24',
+                border: '1px solid rgba(245,158,11,0.35)',
+              }}>
+                CLUSTER {item.cluster_info?.count}x / {item.cluster_info?.value_cr}Cr
               </span>
             )}
           </div>
-          <div style={{ fontSize: 10, color: C.textSecond, marginTop: 1 }} className="truncate">
-            {item.company}
+
+          {/* Row 2: Key metrics inline */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Score */}
+            <span style={{ fontSize: 10, fontWeight: 800, color: scoreColor, fontFamily: 'monospace' }}>
+              {s}/{item.score_max ?? 20}
+            </span>
+            {/* Vol ratio */}
+            {item.vol_ratio > 0 && (
+              <span style={{ fontSize: 9, color: item.vol_ratio >= 1.8 ? '#4ade80' : C.textSecond }}>
+                Del {item.vol_ratio}×
+              </span>
+            )}
+            {/* Breakout */}
+            {item.price_breakout && (
+              <span style={{ fontSize: 8, color: '#22c55e', fontWeight: 700 }}>▲20DMA</span>
+            )}
+            {/* Value */}
+            {item.total_value_cr > 0 && (
+              <span style={{ fontSize: 9, color: C.textSecond }}>
+                ₹{item.total_value_cr >= 1 ? `${item.total_value_cr.toFixed(1)}Cr` : `${item.total_value_lakh?.toFixed(0)}L`}
+              </span>
+            )}
+            {/* Price */}
+            {item.price > 0 && (
+              <span style={{ fontSize: 9, fontWeight: 700, color: C.textPrimary, fontFamily: 'monospace' }}>
+                ₹{item.price.toLocaleString('en-IN')}
+              </span>
+            )}
+          </div>
+
+          {/* Row 3: Company + Mode + Position hint */}
+          <div style={{ display: 'flex', gap: 6, marginTop: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 9, color: C.textSecond }} className="truncate">{item.company}</span>
+            {item.insiders?.[0]?.mode && (
+              <span style={{
+                fontSize: 8, color: '#06b6d4', fontWeight: 700,
+                background: 'rgba(6,182,212,0.10)', padding: '1px 5px', borderRadius: 3,
+              }}>{item.insiders[0].mode}</span>
+            )}
+            {!item.rejected && s >= 8 && (
+              <span style={{ fontSize: 8, color: '#a78bfa', fontWeight: 700 }}>
+                Size: {posNote}
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Priority badge */}
-        <span style={{
-          fontSize: 8, fontWeight: 800, letterSpacing: '0.08em',
-          padding: '3px 7px', borderRadius: 4,
-          background: pm.bg, border: `1px solid ${pm.border}`, color: pm.text,
-        }}>{pm.label}</span>
-
-        {/* Price */}
-        <div style={{ textAlign: 'right', minWidth: 60 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary }}>
-            ₹{item.price > 0 ? item.price.toLocaleString('en-IN') : '—'}
-          </div>
-          <div style={{ fontSize: 9, color: item.vol_ratio >= 2 ? '#818cf8' : C.textSecond }}>
-            Vol {item.vol_ratio}x
-          </div>
+        <div style={{ flexShrink: 0, marginTop: 2 }}>
+          {expanded ? <CaretDown size={12} color={C.textSecond} /> : <CaretRight size={12} color={C.textSecond} />}
         </div>
-
-        {/* Expand chevron */}
-        {expanded ? <CaretDown size={12} color={C.textSecond} /> : <CaretRight size={12} color={C.textSecond} />}
       </div>
 
-      {/* Expanded: factors + insider list */}
+      {/* ── Expanded section ── */}
       {expanded && (
-        <div style={{ padding: '0 14px 12px 54px', background: C.rowBg }}>
-          {/* Factor tags */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-            {item.factors?.map((f, i) => <FactorTag key={i} tag={f} />)}
-            {item.price_breakout && <FactorTag tag="BREAKOUT" />}
+        <div style={{ padding: '4px 14px 14px 14px', background: C.rowBg }}>
+
+          {/* Reject reason */}
+          {item.rejected && item.reject_reason && (
+            <div style={{
+              padding: '7px 10px', borderRadius: 6, marginBottom: 8,
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+              fontSize: 10, color: '#f87171',
+            }}>
+              Auto-Rejected — {item.reject_reason}
+            </div>
+          )}
+
+          {/* God Score breakdown */}
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 9, fontWeight: 800, color: C.textSecond, letterSpacing: '0.07em', marginBottom: 4 }}>
+              GOD SCORE FACTORS
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+              {item.factors?.map((f, i) => <GodFactor key={i} tag={f} C={C} />)}
+            </div>
           </div>
 
-          {/* Insider list table */}
-          <div style={{ fontSize: 10, color: C.textSecond, marginBottom: 4, fontWeight: 700, letterSpacing: '0.06em' }}>
-            INSIDER TRANSACTIONS
+          {/* Confirm stack */}
+          {!item.rejected && (
+            <div style={{
+              padding: '7px 10px', borderRadius: 6, marginBottom: 8,
+              background: C.cardBg, border: `1px solid ${C.border}`,
+            }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: C.textSecond, letterSpacing: '0.06em', marginBottom: 5 }}>
+                CONFIRM STACK (2 of 3 needed to trade)
+              </div>
+              {[
+                { label: '2-day delivery > 1.5×', ok: item.vol_ratio >= 1.5, val: `${item.vol_ratio}×` },
+                { label: 'Higher low + 20DMA hold', ok: item.price_breakout,  val: item.price_breakout ? 'YES' : 'WATCH' },
+                { label: 'OI ↑ + Price ↑ (F&O stocks)', ok: null, val: 'N/A' },
+              ].map(({ label, ok, val }) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                  <span style={{ fontSize: 9, color: C.textSecond }}>{label}</span>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700,
+                    color: ok === true ? '#4ade80' : ok === false ? '#f87171' : '#94a3b8',
+                  }}>{val}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Position rules */}
+          {!item.rejected && s >= 8 && (
+            <div style={{
+              padding: '7px 10px', borderRadius: 6, marginBottom: 8,
+              background: C.cardBg, border: `1px solid ${C.border}`,
+            }}>
+              <div style={{ fontSize: 9, fontWeight: 800, color: C.textSecond, letterSpacing: '0.06em', marginBottom: 5 }}>
+                POSITION RULES
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 10px' }}>
+                {[
+                  ['Capital limit', '5% total (module)'],
+                  ['Per stock',     posNote + ' of book'],
+                  ['SL',            item.sl_note || 'Filing-week low'],
+                  ['T1 target',     '+8–12%'],
+                  ['T2 target',     '+18–25% trail'],
+                  ['Time stop',     '20 sessions'],
+                ].map(([lbl, val]) => (
+                  <React.Fragment key={lbl}>
+                    <span style={{ fontSize: 8, color: C.textSecond }}>{lbl}</span>
+                    <span style={{ fontSize: 8, fontWeight: 700, color: C.textPrimary }}>{val}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Insider transactions */}
+          <div style={{ fontSize: 9, fontWeight: 800, color: C.textSecond, letterSpacing: '0.06em', marginBottom: 4 }}>
+            L1 FILING DATA
           </div>
           <div style={{ borderRadius: 6, overflow: 'hidden', border: `1px solid ${C.border}` }}>
             {item.insiders?.map((ins, i) => (
               <div key={i} style={{
-                display: 'grid', gridTemplateColumns: '1fr 90px 80px 70px',
-                padding: '6px 10px', gap: 8, alignItems: 'center',
+                display: 'grid', gridTemplateColumns: '1fr 80px 80px 65px',
+                padding: '6px 10px', gap: 6, alignItems: 'center',
                 background: i % 2 === 0 ? C.cardBg : 'transparent',
                 borderBottom: i < item.insiders.length - 1 ? `1px solid ${C.border}` : 'none',
               }}>
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: C.textPrimary }}>{ins.name}</div>
-                  <div style={{ fontSize: 9, color: C.textSecond }}>{ins.category}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: C.textPrimary }}>{ins.name}</div>
+                  <div style={{ fontSize: 8, color: ins.category === 'PROMOTER' ? '#f59e0b' : '#94a3b8' }}>
+                    {ins.category} · {ins.date || ''}
+                  </div>
                 </div>
-                <div style={{ fontSize: 10, color: C.textSecond }}>{ins.mode}</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: C.textPrimary, textAlign: 'right' }}>
-                  {ins.shares ? ins.shares.toLocaleString('en-IN') : '—'} shs
+                <div style={{ fontSize: 9, color: C.textSecond, textAlign: 'center' }}>{ins.mode}</div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: C.textPrimary, textAlign: 'right' }}>
+                  {ins.shares ? ins.shares.toLocaleString('en-IN') : '—'}
                 </div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#4ade80', textAlign: 'right' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#4ade80', textAlign: 'right' }}>
                   {ins.value_lakh > 0 ? `₹${ins.value_lakh.toFixed(1)}L` : '—'}
                 </div>
               </div>
             ))}
           </div>
-          {item.total_value_lakh > 0 && (
-            <div style={{ marginTop: 6, fontSize: 10, color: '#4ade80', fontWeight: 700, textAlign: 'right' }}>
-              Total Transaction Value: ₹{item.total_value_lakh.toFixed(1)} Lakh
+
+          {item.total_value_cr > 0 && (
+            <div style={{ marginTop: 5, fontSize: 10, color: '#4ade80', fontWeight: 700, textAlign: 'right' }}>
+              Total: ₹{item.total_value_cr.toFixed(2)} Cr · {item.days_since}d ago
             </div>
           )}
         </div>
@@ -1320,20 +1480,24 @@ export default function InsiderTracker({ onClose, onPatternLoad }) {
               <div style={{
                 display: 'flex', gap: 8, padding: '8px 14px',
                 borderBottom: `1px solid ${C.border}`, flexShrink: 0, flexWrap: 'wrap',
+                alignItems: 'center',
               }}>
                 {[
-                  { label: '8+  HIGH',      color: '#ef4444' },
-                  { label: '5-7 WATCHLIST', color: '#f59e0b' },
-                  { label: '<5  MONITOR',   color: '#64748b' },
+                  { label: '18–20 Rare',         color: '#a78bfa' },
+                  { label: '15–17 Positional',   color: '#22c55e' },
+                  { label: '12–14 Setup',        color: '#4ade80' },
+                  { label: '8–11 Watch',         color: '#fbbf24' },
+                  { label: '<8  Monitor',        color: '#64748b' },
                 ].map(s => (
                   <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
-                    <span style={{ fontSize: 9, color: C.textSecond, fontWeight: 700 }}>{s.label}</span>
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: s.color }} />
+                    <span style={{ fontSize: 8, color: C.textSecond, fontWeight: 700 }}>{s.label}</span>
                   </div>
                 ))}
+                <span style={{ fontSize: 8, color: '#fbbf24', fontWeight: 700 }}>│ Threshold: 12</span>
                 {insiderData?.count !== undefined && (
                   <span style={{ marginLeft: 'auto', fontSize: 9, color: C.textSecond }}>
-                    {insiderData.count} detections · {sourceLabel}
+                    {insiderData.count} · {sourceLabel}
                   </span>
                 )}
               </div>
