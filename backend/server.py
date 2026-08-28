@@ -16781,3 +16781,6 @@ app.include_router(insider_router)
 
 from routes.institutional import router as institutional_router
 app.include_router(institutional_router)
+
+from routes.trade_setup import router as trade_setup_router
+app.include_router(trade_setup_router)

@@ -52,10 +52,11 @@ import CryptoList from './CryptoList';
 import {
   ChartLineUp, List, Newspaper, Sun, Moon, X,
   MagnifyingGlass, UsersThree, Notebook, GearSix, CurrencyBtc, Globe, ChatCircleText,
-  Eye,
+  Eye, Lightning,
 } from '@phosphor-icons/react';
 import VibeResearchPanel from './VibeResearchPanel';
 import InsiderTracker from './InsiderTracker';
+import TradeSetupPanel from './TradeSetupPanel';
 import { useTheme } from '../context/ThemeContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -105,6 +106,7 @@ const TradingDashboard = () => {
   const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
   const [strategyMarkers, setStrategyMarkers] = useState([]); // Strategy overlay markers from Vibe Research
   const [showInsider, setShowInsider] = useState(false); // Insider Tracker
+  const [showTradeSetup, setShowTradeSetup] = useState(false);
   const [patternCount, setPatternCount] = useState(0);  // Pattern alert badge
   const { theme, toggleTheme } = useTheme();
 
@@ -704,6 +706,17 @@ const TradingDashboard = () => {
             )}
           </button>
 
+          {/* Trade Setup Suggester button */}
+          <button
+            onClick={() => setShowTradeSetup(true)}
+            className="p-1.5 rounded-md border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10 transition-all"
+            title="Trade Setup — Entry / SL / Target / Best Strike"
+            data-testid="trade-setup-btn"
+            style={{ position: 'relative' }}
+          >
+            <Lightning size={15} weight="fill" />
+          </button>
+
           {/* RL AGENT BACKGROUND TRAINING INDICATOR — jumps into Settings drawer */}
           {rlStatus?.status === 'training' && (
             <button
@@ -1043,6 +1056,11 @@ const TradingDashboard = () => {
           onClose={() => setShowInsider(false)}
           onPatternLoad={(count) => setPatternCount(count)}
         />
+      )}
+
+      {/* Trade Setup Panel */}
+      {showTradeSetup && (
+        <TradeSetupPanel onClose={() => setShowTradeSetup(false)} />
       )}
 
       {/* Voice Command System */}
