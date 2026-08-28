@@ -102,6 +102,84 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
+user_problem_statement: "Fix Insider Tracker backend endpoints returning 500 Internal Server Error due to NaN/Inf float values from yfinance breaking JSON serialization"
+
+backend:
+  - task: "Insider Detections API - NaN/Inf float fix"
+    implemented: true
+    working: true
+    file: "backend/routes/insider_trading.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Fixed NaN/Inf float serialization bug. Root cause: yfinance returns NaN/Inf values that caused ValueError in FastAPI JSON serializer. Added _deep_sanitize() recursive function to replace NaN/Inf in nested dict/list. Fixed _compute_technicals() to use _safe_float() for all ema/rsi/vol_ratio calculations. Fixed _yf_price_batch() to use _safe_float() for price/vol_ratio/sma20. Applied _deep_sanitize() to all return paths including cache paths. Smoke test: /api/insider/detections returns count=13."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: GET /api/insider/detections returns HTTP 200 with valid JSON. Response has all required fields: detections (13 items), count (13), source (yfinance Activity), updated_at. No NaN/Inf values found in response. Sample detection has valid float fields: score=6, vol_ratio=2.87, price=424.2. All float values are finite and JSON-serializable. Response time: 0.36s. Fix is working correctly."
+
+  - task: "Pattern Scan API (full universe) - NaN/Inf float fix"
+    implemented: true
+    working: true
+    file: "backend/routes/insider_trading.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Fixed NaN/Inf float serialization in pattern-scan endpoint. Applied _deep_sanitize() to all scan results. Fixed _scan_ticker_patterns() to return _deep_sanitize(result). Smoke test: /api/insider/pattern-scan?symbols=RELIANCE,TCS returns count=2."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: GET /api/insider/pattern-scan (full universe scan) returns HTTP 200 with valid JSON. Scanned 35 stocks, returned 32 results. Response has all required fields: results, count (32), scanned_stocks (35), updated_at. No NaN/Inf values found in response. Sample result has valid float fields: price=14711.0, vol_ratio=0.68, rsi=60.1, pct_from_52w=6.28. All critical float fields (price, vol_ratio, rsi, pct_from_52w, ema20, ema50, ema200) are finite and JSON-serializable. Response time: 3.24s. Fix is working correctly for full universe scan."
+
+  - task: "Pattern Scan API (targeted symbols) - NaN/Inf float fix"
+    implemented: true
+    working: true
+    file: "backend/routes/insider_trading.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Fixed NaN/Inf float serialization in pattern-scan endpoint with targeted symbols parameter. Applied _deep_sanitize() to filtered results."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: GET /api/insider/pattern-scan?symbols=RELIANCE,TCS returns HTTP 200 with valid JSON. Response has all required fields: results (2 items), count (2), updated_at. No NaN/Inf values found in response. Sample result (RELIANCE) has valid float fields: price=2248.4, vol_ratio=0.59, rsi=42.8, pct_from_52w=29.83. All float values are finite and JSON-serializable. Response time: 0.70s. Targeted scan working correctly."
+
+  - task: "Stock News API"
+    implemented: true
+    working: true
+    file: "backend/routes/insider_trading.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Stock news endpoint already working. No float serialization issues as news data contains mostly strings and timestamps."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: GET /api/insider/stock-news returns HTTP 200 with valid JSON. Response has all required fields: news (42 items), updated_at, total (42). No NaN/Inf values found. Sample news item has all expected fields: symbol, name, sector, title, publisher, link, published_at, time_ago, impact, impact_color, impact_bg. Response time: 4.67s. Endpoint working correctly."
+
+  - task: "Economic Calendar API"
+    implemented: true
+    working: true
+    file: "backend/routes/insider_trading.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Economic calendar endpoint already working. Returns static event data with no float calculations."
+      - working: true
+        agent: "testing"
+        comment: "VERIFIED: GET /api/insider/economic-calendar returns HTTP 200 with valid JSON. Response has all required fields: events (13 items for August 2026), month (8), year (2026), month_name (August), today (2026-08-28). No NaN/Inf values found. Sample event has all expected fields: date, event, category, impact, prev, forecast, actual, note. Response time: 0.21s. Endpoint working correctly."
+
 user_problem_statement: "ECO Calendar section mein 'Overall Best & Worst Months (Nifty 50)' section add karo - collapsible table with Month / Generally / Average Behaviour columns. Then add 'Sector-wise Best / Worst Month' table below it with 10 sectors."
 
 frontend:
@@ -138,7 +216,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 3
+  test_sequence: 4
   run_ui: false
 
 test_plan:
@@ -149,7 +227,9 @@ test_plan:
 
 agent_communication:
   - agent: "main"
-    message: "Added 'Overall Best & Worst Months (Nifty 50)' collapsible section in EconomicCalendar component (InsiderTracker.jsx). Added SEASONAL_MONTHS constant with 7 months data. Added showSeasonal state (default open). Section renders between events list and footer. Grid layout: Month (72px) | Generally badge (88px) | Average Behaviour text. Color-coded left border: Strongest=green, Very Strong=light-green, Strong=cyan, Mildly Strong=yellow, Weakest=red, Weak=orange. Toggle arrow collapses/expands. Frontend compiled successfully."
+    message: "Fixed Insider & Pattern Scan 500 errors. Root cause: NaN/Inf floats from yfinance caused ValueError in FastAPI JSON serializer outside try/except. Fixes applied in insider_trading.py: (1) Added _deep_sanitize() recursive function that replaces NaN/Inf in any nested dict/list. (2) Fixed _compute_technicals() to use _safe_float() for all ema/rsi/vol_ratio calculations. (3) Fixed _yf_price_batch() to use _safe_float() for price/vol_ratio/sma20. (4) Fixed results loop in _build_detections() to sanitize all float fields. (5) Fixed _scan_ticker_patterns() to return _deep_sanitize(result). (6) Applied _deep_sanitize() to all return paths in both endpoints including cache paths. Smoke test: /api/insider/detections returns count=13, /api/insider/pattern-scan?symbols=RELIANCE,TCS returns count=2."
+  - agent: "testing"
+    message: "Insider Tracker NaN/Inf Float Fix FULLY VERIFIED (2026-08-28). ✅ ALL 5 TESTS PASSED (100% success rate). Created comprehensive test suite (backend_test.py) covering all requirements: (1) GET /api/insider/detections - HTTP 200, valid JSON, 13 detections, all float fields (score, vol_ratio, price) are finite, no NaN/Inf values, response time 0.36s ✓ (2) GET /api/insider/pattern-scan (full universe) - HTTP 200, valid JSON, scanned 35 stocks, 32 results, all critical float fields (price, vol_ratio, rsi, pct_from_52w, ema20/50/200) are finite, no NaN/Inf values, response time 3.24s ✓ (3) GET /api/insider/pattern-scan?symbols=RELIANCE,TCS (targeted scan) - HTTP 200, valid JSON, 2 results, all float fields finite, no NaN/Inf values, response time 0.70s ✓ (4) GET /api/insider/stock-news - HTTP 200, valid JSON, 42 news items, no NaN/Inf values, response time 4.67s ✓ (5) GET /api/insider/economic-calendar - HTTP 200, valid JSON, 13 events for August 2026, no NaN/Inf values, response time 0.21s ✓ The _deep_sanitize() and _safe_float() fixes are working correctly across all endpoints. All previously failing endpoints now return valid JSON with finite float values. Bug fix is production-ready."
   - agent: "testing"
     message: "Testing complete for 'Overall Best & Worst Months (Nifty 50)' section. Comprehensive UI testing performed via Playwright. All 7 requirements verified: (1) Section header with NIFTY 50 badge ✓ (2) Expanded by default ✓ (3) Column headers ✓ (4) All 7 months with correct data ✓ (5) Color-coded borders ✓ (6) Toggle collapse/expand ✓ (7) Correct placement ✓ Feature is fully functional and ready for production use."
   - agent: "testing"

@@ -539,10 +539,11 @@ async def _build_detections() -> tuple:
                 if hist.empty:
                     out[s] = {"price": 0, "vol_ratio": 1.0, "breakout": False, "small_cap": True}
                     continue
-                price   = float(hist["Close"].iloc[-1])
-                avg_v   = float(hist["Volume"].iloc[:-1].mean()) if len(hist) > 1 else float(hist["Volume"].mean())
-                today_v = float(hist["Volume"].iloc[-1])
-                vr      = today_v / avg_v if avg_v > 0 else 1.0
+                price   = _safe_float(float(hist["Close"].iloc[-1]))
+                avg_v   = _safe_float(float(hist["Volume"].iloc[:-1].mean()) if len(hist) > 1 else float(hist["Volume"].mean()), 1.0)
+                today_v = _safe_float(float(hist["Volume"].iloc[-1]))
+                vr      = _safe_float(today_v / avg_v if avg_v > 0 else 1.0)
+                sma20   = _safe_float(float(hist["Close"].tail(20).mean()))
                 try:
                     mc = getattr(t.fast_info, "market_cap", 0) or 0
                 except Exception:
@@ -550,7 +551,7 @@ async def _build_detections() -> tuple:
                 out[s] = {
                     "price":     round(price, 2),
                     "vol_ratio": round(vr, 2),
-                    "breakout":  price > float(hist["Close"].tail(20).mean()),
+                    "breakout":  bool(price > sma20),
                     "small_cap": mc < 5e10 or mc == 0,
                 }
             except Exception:
@@ -562,14 +563,14 @@ async def _build_detections() -> tuple:
     results = []
     for sym, rows in sym_map.items():
         mkt   = yf_data.get(sym) or {}
-        price = mkt.get("price", 0)
-        vr    = mkt.get("vol_ratio", 1.0)
+        price = _safe_float(mkt.get("price", 0))
+        vr    = _safe_float(mkt.get("vol_ratio", 1.0))
         brk   = mkt.get("breakout", False)
         small = mkt.get("small_cap", True)
 
         # Use pre-existing vol_ratio from yfinance activity rows if available
         if rows[0].get("source") == "YF_ACTIVITY":
-            vr  = rows[0].get("vol_ratio", vr)
+            vr  = _safe_float(rows[0].get("vol_ratio", vr))
             brk = rows[0].get("breakout",  brk)
 
         cat_priority = {"PROMOTER": 4, "DIRECTOR": 3, "KMP": 3,
@@ -581,9 +582,9 @@ async def _build_detections() -> tuple:
         for r in rows:
             if r["price"] == 0 and price > 0:
                 r["price"]      = price
-                r["value_lakh"] = round(r["shares"] * price / 1e5, 2)
+                r["value_lakh"] = _safe_float(round(r["shares"] * price / 1e5, 2))
 
-        total_val = sum(r["value_lakh"] for r in rows)
+        total_val = _safe_float(sum(r["value_lakh"] for r in rows))
         score     = _score_entry(best_cat, len(rows), vr, brk, small, total_val, dom_source)
 
         results.append({
@@ -593,11 +594,11 @@ async def _build_detections() -> tuple:
             "priority":         "HIGH" if score >= 8 else "WATCHLIST" if score >= 5 else "MONITOR",
             "insiders":         rows,
             "cluster":          len(rows) >= 2,
-            "vol_ratio":        round(vr, 2),
-            "price":            price,
+            "vol_ratio":        _safe_float(round(vr, 2)),
+            "price":            _safe_float(price),
             "price_breakout":   brk,
             "is_small_cap":     small,
-            "total_value_lakh": round(total_val, 2),
+            "total_value_lakh": _safe_float(round(total_val, 2)),
             "factors":          _build_factors(best_cat, len(rows), vr, brk, small, total_val, dom_source),
             "sources":          list({r["source"] for r in rows}),
         })
@@ -791,6 +792,29 @@ def _sanitize_pattern(p: dict) -> dict:
     }
 
 
+def _deep_sanitize(obj):
+    """
+    Recursively walk any dict/list and replace NaN/Inf floats with 0.0.
+    This ensures FastAPI's json.dumps() never raises ValueError on float serialization.
+    """
+    import math
+    if isinstance(obj, dict):
+        return {k: _deep_sanitize(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_deep_sanitize(v) for v in obj]
+    elif isinstance(obj, float):
+        return 0.0 if (math.isnan(obj) or math.isinf(obj)) else obj
+    elif isinstance(obj, np.floating):
+        f = float(obj)
+        return 0.0 if (math.isnan(f) or math.isinf(f)) else f
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.ndarray):
+        return _deep_sanitize(obj.tolist())
+    else:
+        return obj
+
+
 def _compute_technicals(df) -> dict:
     """Compute EMA 20/50/200, RSI 14, volume ratio, 52w-high from daily OHLCV."""
     if df is None or len(df) < 20:
@@ -805,9 +829,9 @@ def _compute_technicals(df) -> dict:
             e.append(float(v) * k + e[-1] * (1 - k))
         return np.array(e)
 
-    ema20_val  = float(_ema_arr(closes, 20)[-1])  if len(closes) >= 20  else None
-    ema50_val  = float(_ema_arr(closes, 50)[-1])  if len(closes) >= 50  else None
-    ema200_val = float(_ema_arr(closes, 200)[-1]) if len(closes) >= 200 else None
+    ema20_val  = _safe_float(_ema_arr(closes, 20)[-1])  if len(closes) >= 20  else None
+    ema50_val  = _safe_float(_ema_arr(closes, 50)[-1])  if len(closes) >= 50  else None
+    ema200_val = _safe_float(_ema_arr(closes, 200)[-1]) if len(closes) >= 200 else None
 
     above_ema20  = bool(curr > ema20_val)  if ema20_val  is not None else None
     above_ema50  = bool(curr > ema50_val)  if ema50_val  is not None else None
@@ -826,29 +850,30 @@ def _compute_technicals(df) -> dict:
             ag = (ag * 13 + gains[i]) / 14
             al = (al * 13 + losses[i]) / 14
         rsi = round(100 - 100 / (1 + ag / al), 1) if al > 0 else 100.0
+        rsi = _safe_float(rsi, 50.0)
 
     momentum_ok = bool(rsi is not None and 50 <= rsi <= 75)
 
     # 52-week high proximity (within 5% of max in last ~200 days)
-    high_200      = float(np.max(closes))
-    pct_from_52w  = round(float((high_200 - curr) / high_200 * 100), 2) if high_200 > 0 else 100.0
+    high_200      = _safe_float(np.max(closes), 1.0)
+    pct_from_52w  = _safe_float(round(float((high_200 - curr) / high_200 * 100), 2) if high_200 > 0 else 100.0)
     near_52w_high = bool(pct_from_52w <= 5.0)
 
     # Volume: last bar vs 20-day avg (excluding last)
     if len(volumes) >= 21:
-        vol_avg20 = float(np.mean(volumes[-21:-1]))
+        vol_avg20 = _safe_float(np.mean(volumes[-21:-1]), 1.0)
     else:
-        vol_avg20 = float(np.mean(volumes[:-1])) if len(volumes) > 1 else 1.0
-    vol_ratio = round(float(volumes[-1]) / vol_avg20, 2) if vol_avg20 > 0 else 0.0
+        vol_avg20 = _safe_float(np.mean(volumes[:-1]) if len(volumes) > 1 else 1.0, 1.0)
+    vol_ratio = _safe_float(round(float(volumes[-1]) / vol_avg20, 2) if vol_avg20 > 0 else 0.0)
     volume_ok = bool(vol_ratio >= 1.2)
 
     return {
         "above_ema20":   above_ema20,
         "above_ema50":   above_ema50,
         "above_ema200":  above_ema200,
-        "ema20":         round(ema20_val, 2)  if ema20_val  is not None else None,
-        "ema50":         round(ema50_val, 2)  if ema50_val  is not None else None,
-        "ema200":        round(ema200_val, 2) if ema200_val is not None else None,
+        "ema20":         _safe_float(round(ema20_val, 2))  if ema20_val  is not None else None,
+        "ema50":         _safe_float(round(ema50_val, 2))  if ema50_val  is not None else None,
+        "ema200":        _safe_float(round(ema200_val, 2)) if ema200_val is not None else None,
         "ema_score":     ema_score,
         "rsi":           rsi,
         "momentum_ok":   momentum_ok,
@@ -912,11 +937,11 @@ def _scan_ticker_patterns(meta: dict):
     try:
         price = _safe_float(yf.Ticker(ticker_sym).fast_info.last_price)
     except Exception:
-        price = float(daily_df["Close"].iloc[-1]) if daily_df is not None and len(daily_df) else 0.0
+        price = _safe_float(float(daily_df["Close"].iloc[-1]) if daily_df is not None and len(daily_df) else 0.0)
 
     tech = _compute_technicals(daily_df)
 
-    return {
+    result = {
         "symbol":        meta["ticker"].replace(".NS", ""),
         "ticker":        meta["ticker"],
         "name":          meta["name"],
@@ -929,6 +954,7 @@ def _scan_ticker_patterns(meta: dict):
         "top_tf":        detections[0]["timeframe"],
         **tech,
     }
+    return _deep_sanitize(result)
 
 
 async def _build_pattern_scan(symbols=None) -> list:
@@ -990,7 +1016,7 @@ async def get_insider_detections(refresh: bool = False):
 
     if not refresh and _insider_cache["data"] is not None and _insider_cache["ts"]:
         if (now - _insider_cache["ts"]).total_seconds() < INSIDER_TTL:
-            return {**_insider_cache["data"], "cached": True}
+            return _deep_sanitize({**_insider_cache["data"], "cached": True})
 
     try:
         detections, source_label = await _build_detections()
@@ -1028,7 +1054,7 @@ async def get_insider_detections(refresh: bool = False):
                 }
 
         _insider_cache = {"data": result, "ts": now}
-        return result
+        return _deep_sanitize(result)
 
     except Exception as e:
         logger.error(f"Detections error: {e}")
@@ -1069,11 +1095,12 @@ async def get_pattern_scan(
         if (now - _pattern_cache["ts"]).total_seconds() < PATTERN_TTL:
             filtered = _apply_filters(_pattern_cache["data"], timeframe, pattern, bias,
                                       near_52w, above_ema, momentum, vol_ok)
-            return {"results": filtered, "count": len(filtered), "cached": True,
-                    "updated_at": _pattern_cache["ts"].isoformat(), "scanned_stocks": len(SCAN_UNIVERSE)}
+            return _deep_sanitize({"results": filtered, "count": len(filtered), "cached": True,
+                    "updated_at": _pattern_cache["ts"].isoformat(), "scanned_stocks": len(SCAN_UNIVERSE)})
 
     try:
         raw = await _build_pattern_scan(sym_list)
+        raw = _deep_sanitize(raw)
         if not sym_list:
             _pattern_cache = {"data": raw, "ts": now}
         filtered = _apply_filters(raw, timeframe, pattern, bias, near_52w, above_ema, momentum, vol_ok)
