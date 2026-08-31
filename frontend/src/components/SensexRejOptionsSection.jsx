@@ -330,11 +330,11 @@ export default function SensexRejOptionsSection({ onStrikeSelect }) {
             <button
               onClick={() => handleManual('BUY')}
               className={`px-2 py-0.5 text-[8px] font-bold rounded transition-all border ${manualSig === 'BUY' ? 'bg-green-500/20 text-green-400 border-green-500/40' : 'text-zinc-500 border-zinc-700 hover:border-green-500/30'}`}
-            >▲ BUY</button>
+            >▲ CALL</button>
             <button
               onClick={() => handleManual('SELL')}
               className={`px-2 py-0.5 text-[8px] font-bold rounded transition-all border ${manualSig === 'SELL' ? 'bg-red-500/20 text-red-400 border-red-500/40' : 'text-zinc-500 border-zinc-700 hover:border-red-500/30'}`}
-            >▼ SELL</button>
+            >▼ PUT</button>
             <button
               onClick={() => fetchSignalAndPick(manualSig)}
               disabled={loading}
