@@ -425,6 +425,62 @@ def _determine_bias(score: float) -> Dict:
     return BIAS_LEVELS[2]  # default neutral
 
 
+def _bias_from_move(today_move: dict) -> dict:
+    """
+    Derive CURRENT MARKET BIAS label, color, and action directly from
+    today_move points prediction (direction + pts magnitude).
+    This ensures the displayed bias matches the point predictions.
+    """
+    import re as _re
+    direction = today_move.get("direction", "SIDEWAYS")
+    label_txt = today_move.get("label", "")
+
+    # Parse max pts from label
+    pts_max = 0
+    if direction == "BULLISH":
+        m = _re.search(r'\+(\d+)\s*to\s*\+(\d+)', label_txt)
+        pts_max = int(m.group(2)) if m else 0
+    elif direction == "BEARISH":
+        m = _re.search(r'-(\d+)\s*to\s*-(\d+)', label_txt)
+        pts_max = int(m.group(2)) if m else 0
+    else:  # SIDEWAYS / ± range
+        m = _re.search(r'±(\d+)\s*to\s*±(\d+)', label_txt)
+        pts_max = int(m.group(2)) if m else 0
+
+    if direction == "BULLISH":
+        if pts_max >= 250:
+            return {"label": "Strong Bullish", "color": "#22c55e",
+                    "action": "Aggressive Long — Banking + Energy"}
+        elif pts_max >= 80:
+            return {"label": "Mild Bullish",   "color": "#86efac",
+                    "action": "Selective Long"}
+        else:
+            return {"label": "Cautious Bullish", "color": "#bbf7d0",
+                    "action": "Light Long — Confirm at 9:30 AM"}
+
+    elif direction == "BEARISH":
+        if pts_max >= 300:
+            return {"label": "Strong Bearish", "color": "#ef4444",
+                    "action": "Hedging / Increase Cash"}
+        elif pts_max >= 80:
+            return {"label": "Mild Bearish",   "color": "#fca5a5",
+                    "action": "Selective Short + Profit Booking"}
+        else:
+            return {"label": "Cautious Bearish", "color": "#fecaca",
+                    "action": "Reduce positions — watch for recovery"}
+
+    else:  # SIDEWAYS
+        if pts_max >= 200:
+            return {"label": "Volatile Range", "color": "#f59e0b",
+                    "action": "Wait for breakout — no fresh positions"}
+        elif pts_max >= 100:
+            return {"label": "Neutral",        "color": "#94a3b8",
+                    "action": "Range trading / Small intraday positions only"}
+        else:
+            return {"label": "Tight Range",    "color": "#64748b",
+                    "action": "Scalp only — wait till 9:50 AM for direction"}
+
+
 # ── Nifty 50 Breadth ───────────────────────────────────────────────────────────
 
 def _breadth_signal(advances: int, declines: int, total: int) -> Dict:
@@ -3055,12 +3111,18 @@ async def _build_intel() -> Dict:
     reg_score   = _score_regulatory(regulatory)
     gift_score  = _score_gift(gift_premium)
     total_score = round(brent_score + vix_score + reg_score + gift_score, 2)
-    bias        = _determine_bias(total_score)
+    bias        = _determine_bias(total_score)   # macro bias (used for table only)
 
     # Today / Tomorrow move predictions
     moves = _compute_today_tomorrow_moves(
         nifty, vix, gift_premium, total_score, nasdaq_chg, hang_seng_chg
     )
+
+    # ── Derive CURRENT MARKET BIAS from today's point prediction ──────────
+    move_bias   = _bias_from_move(moves["today_move"])
+    bias_label  = move_bias["label"]
+    bias_color  = move_bias["color"]
+    bias_action = move_bias["action"]
 
     # PCR data — read from background cache (never blocks market-intel)
     _PCR_UNAVAILABLE = {
@@ -3122,10 +3184,10 @@ async def _build_intel() -> Dict:
         "vix_52w_high": vix_52w_high, "vix_52w_low": vix_52w_low,
         "vix_percentile": vix_percentile, "vix_zone": vix_zone,
         "vix_zone_color": vix_zone_color, "expiry": expiry_info,
-        "bias": bias["label"], "bias_color": bias["color"],
+        "bias": bias_label, "bias_color": bias_color,
         "move_label": bias["move_label"], "move_min": bias["move_min"],
         "move_max": bias["move_max"], "probability": bias["probability"],
-        "action": bias["action"], "gift_color_label": bias["gift_color"],
+        "action": bias_action, "gift_color_label": bias["gift_color"],
         "today_move":    moves["today_move"],
         "tomorrow_move": moves["tomorrow_move"],
         "pcr":           pcr_data,
